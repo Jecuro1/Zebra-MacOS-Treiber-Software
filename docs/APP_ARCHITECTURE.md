@@ -44,7 +44,13 @@ SwiftUI-App für macOS 14+ (Swift-5-Sprachmodus, Observation-Framework). Quellte
 | `Design/Theme.swift` | `Theme`, `Motion`, `PrinterState.displayName/systemImage/color`, `AlertSeverity.color` |
 | `Features/Root/*` | `RootView`, `DetailRouter`, `SidebarView`, `PrinterSidebarRow`, `PrinterDetailView`, `PrinterHeaderView` |
 
-## Design-System (`Design/Components/`) – verbindliche Signaturen
+## Design-System (`Design/Components/`) – implementiert, verbindliche Signaturen
+
+Die Komponenten sind fertig implementiert (`Cards.swift`, `Status.swift`, `Background.swift`,
+`PrinterIllustration.swift`, `NavigationComponents.swift`, `Metrics.swift`, `Feedback.swift`,
+`Inputs.swift`, `Buttons.swift`, `LabelViews.swift`, `CodeEditor.swift`). Vor der Verwendung den
+Quelltext lesen. Zusätzlich vorhanden: `LabelElementPainter`, `SyntaxHighlighter`, `CodeTextView`,
+`Comparable.clamped(to:)`.
 
 ```swift
 struct GlassCard<Content: View>: View {
@@ -120,6 +126,9 @@ extension ButtonStyle where Self == LabelWerkButtonStyle {
 ```
 
 ## Feature-Bereiche (je eine Root-View mit exakt dieser Signatur)
+
+Bereits fertig: `DashboardView`, `HistoryView`, `MenuBarView`, `AppSettingsView` (als Stil- und
+Qualitätsreferenz lesen).
 
 | Datei/Ordner | Root-View | Inhalt |
 |---|---|---|
