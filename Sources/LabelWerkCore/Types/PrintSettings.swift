@@ -1,0 +1,243 @@
+import Foundation
+
+/// Druckeinstellungen eines Auftrags bzw. Standardwerte einer Warteschlange.
+///
+/// Optionale Werte (`nil`) bedeuten „Druckereinstellung beibehalten“ – es wird dann kein
+/// entsprechender Befehl gesendet. Das entspricht dem Verhalten „Druckereinstellungen verwenden“
+/// des Windows-Treibers.
+///
+/// Die Abbildung auf CUPS-Optionen (`lw*`) ist der Vertrag zwischen App, PPD-Dateien und dem
+/// CUPS-Filter `rastertolabelwerk` (siehe ARCHITECTURE.md, Abschnitt „CUPS-Optionen“).
+public struct PrintSettings: Codable, Hashable, Sendable {
+    /// Schwärzung 0…30 (`~SD`).
+    public var darkness: Int?
+    /// Druckgeschwindigkeit in Zoll pro Sekunde 1…14 (`^PR`).
+    public var speed: Int?
+    public var mediaType: MediaType?
+    public var tracking: MediaTracking?
+    public var printMode: PrintMode?
+    /// Vertikaler Versatz in Punkten −120…120 (`^LT`).
+    public var labelTop: Int?
+    /// Horizontaler Versatz in Punkten −9999…9999 (`^LS`).
+    public var labelLeft: Int?
+    /// Abreißposition in Punkten −120…120 (`~TA`).
+    public var tearOffAdjust: Int?
+    public var backfeed: BackfeedMode?
+
+    /// Spiegeln (`^PMY`).
+    public var mirror: Bool
+    /// Negativdruck (Bitmap invertieren).
+    public var negative: Bool
+    /// Um 180° drehen (`^POI`).
+    public var rotate180: Bool
+
+    public var dither: DitherAlgorithm
+    /// Schwelle 1…254 für `threshold` sowie Helligkeitsbezug der anderen Verfahren.
+    public var threshold: Int
+    public var compression: GraphicCompression
+
+    /// Nach jeweils N Etiketten schneiden (0 = nur am Auftragsende).
+    public var cutEvery: Int
+    /// Vor dem Auftrag kalibrieren (`~JC`).
+    public var calibrateBeforeJob: Bool
+    /// Einstellungen dauerhaft im Drucker speichern (`^JUS`).
+    public var saveToPrinter: Bool
+    /// Leere Etiketten nicht drucken.
+    public var skipBlankLabels: Bool
+
+    /// Rohbefehle, die vor dem ersten Etikett gesendet werden.
+    public var startCommands: String
+    /// Rohbefehle, die nach dem letzten Etikett gesendet werden.
+    public var endCommands: String
+
+    public init(
+        darkness: Int? = nil,
+        speed: Int? = nil,
+        mediaType: MediaType? = nil,
+        tracking: MediaTracking? = nil,
+        printMode: PrintMode? = nil,
+        labelTop: Int? = nil,
+        labelLeft: Int? = nil,
+        tearOffAdjust: Int? = nil,
+        backfeed: BackfeedMode? = nil,
+        mirror: Bool = false,
+        negative: Bool = false,
+        rotate180: Bool = false,
+        dither: DitherAlgorithm = .threshold,
+        threshold: Int = 128,
+        compression: GraphicCompression = .z64,
+        cutEvery: Int = 0,
+        calibrateBeforeJob: Bool = false,
+        saveToPrinter: Bool = false,
+        skipBlankLabels: Bool = false,
+        startCommands: String = "",
+        endCommands: String = ""
+    ) {
+        self.darkness = darkness
+        self.speed = speed
+        self.mediaType = mediaType
+        self.tracking = tracking
+        self.printMode = printMode
+        self.labelTop = labelTop
+        self.labelLeft = labelLeft
+        self.tearOffAdjust = tearOffAdjust
+        self.backfeed = backfeed
+        self.mirror = mirror
+        self.negative = negative
+        self.rotate180 = rotate180
+        self.dither = dither
+        self.threshold = threshold
+        self.compression = compression
+        self.cutEvery = cutEvery
+        self.calibrateBeforeJob = calibrateBeforeJob
+        self.saveToPrinter = saveToPrinter
+        self.skipBlankLabels = skipBlankLabels
+        self.startCommands = startCommands
+        self.endCommands = endCommands
+    }
+
+    /// Standard: Alle Druckerwerte beibehalten, Schwellenwert-Rasterung, Z64.
+    public static let `default` = PrintSettings()
+
+    /// Begrenzt alle Werte auf gültige Bereiche.
+    public func clamped() -> PrintSettings {
+        var s = self
+        s.darkness = darkness.map { min(max($0, 0), 30) }
+        s.speed = speed.map { min(max($0, 1), 14) }
+        s.labelTop = labelTop.map { min(max($0, -120), 120) }
+        s.labelLeft = labelLeft.map { min(max($0, -9999), 9999) }
+        s.tearOffAdjust = tearOffAdjust.map { min(max($0, -120), 120) }
+        s.threshold = min(max(threshold, 1), 254)
+        s.cutEvery = min(max(cutEvery, 0), 9999)
+        return s
+    }
+}
+
+// MARK: - CUPS-Optionen
+
+/// Namen der CUPS-Optionen. Identisch in PPD-Generator und C-Filter.
+public enum CUPSOptionName {
+    public static let language = "lwLanguage"
+    public static let darkness = "lwDarkness"
+    public static let speed = "lwSpeed"
+    public static let mediaType = "lwMediaType"
+    public static let tracking = "lwMediaTracking"
+    public static let printMode = "lwPrintMode"
+    public static let labelTop = "lwLabelTop"
+    public static let labelLeft = "lwLabelLeft"
+    public static let tearOff = "lwTearOff"
+    public static let backfeed = "lwBackfeed"
+    public static let mirror = "lwMirror"
+    public static let negative = "lwNegative"
+    public static let rotate180 = "lwRotate180"
+    public static let dither = "lwDither"
+    public static let threshold = "lwThreshold"
+    public static let compression = "lwCompression"
+    public static let cutEvery = "lwCutEvery"
+    public static let calibrate = "lwCalibrate"
+    public static let saveSettings = "lwSaveSettings"
+    public static let skipBlank = "lwSkipBlank"
+    public static let startCommands = "lwStartCmd"
+    public static let endCommands = "lwEndCmd"
+
+    /// Wert für „Druckereinstellung beibehalten“.
+    public static let defaultValue = "Default"
+
+    public static let all: [String] = [
+        language, darkness, speed, mediaType, tracking, printMode, labelTop, labelLeft, tearOff,
+        backfeed, mirror, negative, rotate180, dither, threshold, compression, cutEvery, calibrate,
+        saveSettings, skipBlank, startCommands, endCommands,
+    ]
+}
+
+extension PrintSettings {
+    /// Wandelt die Einstellungen in CUPS-Optionen um (`lpoptions`/`lpadmin -o name=value`).
+    ///
+    /// Leere Start-/Endbefehle werden weggelassen.
+    public func cupsOptions() -> [String: String] {
+        let s = clamped()
+        var o: [String: String] = [:]
+        let d = CUPSOptionName.defaultValue
+        o[CUPSOptionName.darkness] = s.darkness.map(String.init) ?? d
+        o[CUPSOptionName.speed] = s.speed.map(String.init) ?? d
+        o[CUPSOptionName.mediaType] = s.mediaType?.cupsValue ?? d
+        o[CUPSOptionName.tracking] = s.tracking?.cupsValue ?? d
+        o[CUPSOptionName.printMode] = s.printMode?.cupsValue ?? d
+        o[CUPSOptionName.labelTop] = s.labelTop.map(String.init) ?? d
+        o[CUPSOptionName.labelLeft] = s.labelLeft.map(String.init) ?? d
+        o[CUPSOptionName.tearOff] = s.tearOffAdjust.map(String.init) ?? d
+        o[CUPSOptionName.backfeed] = s.backfeed?.cupsValue ?? d
+        o[CUPSOptionName.mirror] = s.mirror ? "True" : "False"
+        o[CUPSOptionName.negative] = s.negative ? "True" : "False"
+        o[CUPSOptionName.rotate180] = s.rotate180 ? "True" : "False"
+        o[CUPSOptionName.dither] = s.dither.cupsValue
+        o[CUPSOptionName.threshold] = String(s.threshold)
+        o[CUPSOptionName.compression] = s.compression.cupsValue
+        o[CUPSOptionName.cutEvery] = String(s.cutEvery)
+        o[CUPSOptionName.calibrate] = s.calibrateBeforeJob ? "True" : "False"
+        o[CUPSOptionName.saveSettings] = s.saveToPrinter ? "True" : "False"
+        o[CUPSOptionName.skipBlank] = s.skipBlankLabels ? "True" : "False"
+        if !s.startCommands.isEmpty {
+            o[CUPSOptionName.startCommands] = CUPSCommandEncoding.encode(s.startCommands)
+        }
+        if !s.endCommands.isEmpty {
+            o[CUPSOptionName.endCommands] = CUPSCommandEncoding.encode(s.endCommands)
+        }
+        return o
+    }
+
+    /// Liest Einstellungen aus CUPS-Optionen. Unbekannte oder ungültige Werte werden ignoriert.
+    public init(cupsOptions o: [String: String]) {
+        self.init()
+        func int(_ key: String) -> Int? {
+            guard let v = o[key], v != CUPSOptionName.defaultValue else { return nil }
+            return Int(v.trimmingCharacters(in: .whitespaces))
+        }
+        func bool(_ key: String) -> Bool {
+            guard let v = o[key]?.lowercased() else { return false }
+            return ["true", "yes", "on", "1"].contains(v)
+        }
+        darkness = int(CUPSOptionName.darkness)
+        speed = int(CUPSOptionName.speed)
+        mediaType = o[CUPSOptionName.mediaType].flatMap(MediaType.init(cupsValue:))
+        tracking = o[CUPSOptionName.tracking].flatMap(MediaTracking.init(cupsValue:))
+        printMode = o[CUPSOptionName.printMode].flatMap(PrintMode.init(cupsValue:))
+        labelTop = int(CUPSOptionName.labelTop)
+        labelLeft = int(CUPSOptionName.labelLeft)
+        tearOffAdjust = int(CUPSOptionName.tearOff)
+        backfeed = o[CUPSOptionName.backfeed].flatMap(BackfeedMode.init(cupsValue:))
+        mirror = bool(CUPSOptionName.mirror)
+        negative = bool(CUPSOptionName.negative)
+        rotate180 = bool(CUPSOptionName.rotate180)
+        dither = o[CUPSOptionName.dither].flatMap(DitherAlgorithm.init(cupsValue:)) ?? .threshold
+        threshold = int(CUPSOptionName.threshold) ?? 128
+        compression = o[CUPSOptionName.compression].flatMap(GraphicCompression.init(cupsValue:)) ?? .z64
+        cutEvery = int(CUPSOptionName.cutEvery) ?? 0
+        calibrateBeforeJob = bool(CUPSOptionName.calibrate)
+        saveToPrinter = bool(CUPSOptionName.saveSettings)
+        skipBlankLabels = bool(CUPSOptionName.skipBlank)
+        startCommands = o[CUPSOptionName.startCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
+        endCommands = o[CUPSOptionName.endCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
+        self = clamped()
+    }
+}
+
+/// Kodiert beliebige Rohbefehle (mit Leer- und Sonderzeichen) sicher als CUPS-Optionswert:
+/// UTF-8 → Base64url ohne Padding (`A–Z a–z 0–9 - _`).
+public enum CUPSCommandEncoding {
+    public static func encode(_ string: String) -> String {
+        Data(string.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    public static func decode(_ value: String) -> String? {
+        var b64 = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64.append("=") }
+        guard let data = Data(base64Encoded: b64) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+}

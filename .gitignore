@@ -1,0 +1,17 @@
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+build/
+dist/
+*.o
+*.a
+*.dSYM
+.DS_Store
+__pycache__/
+*.pyc
+Driver/filter/rastertolabelwerk
+Driver/filter/commandtolabelwerk
+Driver/filter/tests/run_tests
+Driver/ppd/out/

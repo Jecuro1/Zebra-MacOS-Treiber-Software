@@ -1,0 +1,3538 @@
+// AUTOMATISCH ERZEUGT von Scripts/generate_catalog_swift.py – nicht von Hand bearbeiten.
+// Quelle: Catalog/models.json
+
+enum ModelCatalogData {
+    static let json = #"""
+{
+ "schemaVersion": 1,
+ "models": [
+  {
+   "id": "zd421d",
+   "name": "ZD421d",
+   "family": "ZD400",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD421d",
+    "ZTC ZD421-203dpi ZPL",
+    "ZTC ZD421-300dpi ZPL",
+    "ZTC ZD421d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd421t",
+   "name": "ZD421t",
+   "family": "ZD400",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD421t",
+    "ZTC ZD421-203dpi ZPL",
+    "ZTC ZD421-300dpi ZPL",
+    "ZTC ZD421t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd421c",
+   "name": "ZD421c",
+   "family": "ZD400",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD421c",
+    "ZTC ZD421-203dpi ZPL",
+    "ZTC ZD421-300dpi ZPL",
+    "ZTC ZD421c"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd420d",
+   "name": "ZD420d",
+   "family": "ZD400",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD420d",
+    "ZTC ZD420-203dpi ZPL",
+    "ZTC ZD420-300dpi ZPL",
+    "ZTC ZD420d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd420t",
+   "name": "ZD420t",
+   "family": "ZD400",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD420t",
+    "ZTC ZD420-203dpi ZPL",
+    "ZTC ZD420-300dpi ZPL",
+    "ZTC ZD420t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd411d",
+   "name": "ZD411d",
+   "family": "ZD400",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 56,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 8,
+    "300": 6
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD411d",
+    "ZTC ZD411-203dpi ZPL",
+    "ZTC ZD411-300dpi ZPL",
+    "ZTC ZD411d"
+   ],
+   "defaultStock": "w2h1in"
+  },
+  {
+   "id": "zd411t",
+   "name": "ZD411t",
+   "family": "ZD400",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 56,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD411t",
+    "ZTC ZD411-203dpi ZPL",
+    "ZTC ZD411-300dpi ZPL",
+    "ZTC ZD411t"
+   ],
+   "defaultStock": "w2h1in"
+  },
+  {
+   "id": "zd410",
+   "name": "ZD410",
+   "family": "ZD400",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 56,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD410",
+    "ZTC ZD410",
+    "ZTC ZD410-203dpi ZPL",
+    "ZTC ZD410-300dpi ZPL"
+   ],
+   "defaultStock": "w2h1in"
+  },
+  {
+   "id": "zd621d",
+   "name": "ZD621d",
+   "family": "ZD600",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 8,
+    "300": 6
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble",
+    "serial"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD621d",
+    "ZTC ZD621-203dpi ZPL",
+    "ZTC ZD621-300dpi ZPL",
+    "ZTC ZD621d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd621t",
+   "name": "ZD621t",
+   "family": "ZD600",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 8,
+    "300": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble",
+    "serial"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD621t",
+    "ZTC ZD621-203dpi ZPL",
+    "ZTC ZD621-300dpi ZPL",
+    "ZTC ZD621t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd620d",
+   "name": "ZD620d",
+   "family": "ZD600",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 8,
+    "300": 6
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble",
+    "serial"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD620d",
+    "ZTC ZD620-203dpi ZPL",
+    "ZTC ZD620-300dpi ZPL",
+    "ZTC ZD620d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd620t",
+   "name": "ZD620t",
+   "family": "ZD600",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 8,
+    "300": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble",
+    "serial"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD620t",
+    "ZTC ZD620-203dpi ZPL",
+    "ZTC ZD620-300dpi ZPL",
+    "ZTC ZD620t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd611d",
+   "name": "ZD611d",
+   "family": "ZD600",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 56,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 8,
+    "300": 6
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble",
+    "serial"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD611d",
+    "ZTC ZD611-203dpi ZPL",
+    "ZTC ZD611-300dpi ZPL",
+    "ZTC ZD611d"
+   ],
+   "defaultStock": "w2h1in"
+  },
+  {
+   "id": "zd611t",
+   "name": "ZD611t",
+   "family": "ZD600",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 56,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 8,
+    "300": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble",
+    "serial"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD611t",
+    "ZTC ZD611-203dpi ZPL",
+    "ZTC ZD611-300dpi ZPL",
+    "ZTC ZD611t"
+   ],
+   "defaultStock": "w2h1in"
+  },
+  {
+   "id": "zd610d",
+   "name": "ZD610d",
+   "family": "ZD600",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 8,
+    "300": 6
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD610d",
+    "ZTC ZD610-203dpi ZPL",
+    "ZTC ZD610-300dpi ZPL",
+    "ZTC ZD610d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd230d",
+   "name": "ZD230d",
+   "family": "ZD200",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner ZD230d",
+    "ZTC ZD230-203dpi ZPL",
+    "ZTC ZD230d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd230t",
+   "name": "ZD230t",
+   "family": "ZD200",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner ZD230t",
+    "ZTC ZD230-203dpi ZPL",
+    "ZTC ZD230t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd220d",
+   "name": "ZD220d",
+   "family": "ZD200",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff"
+   ],
+   "connectivity": [
+    "usb"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner ZD220d",
+    "ZTC ZD220-203dpi ZPL",
+    "ZTC ZD220d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd220t",
+   "name": "ZD220t",
+   "family": "ZD200",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff"
+   ],
+   "connectivity": [
+    "usb"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner ZD220t",
+    "ZTC ZD220-203dpi ZPL",
+    "ZTC ZD220t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd888t",
+   "name": "ZD888t",
+   "family": "ZD800",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "bluetooth"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner ZD888t",
+    "ZTC ZD888-203dpi ZPL",
+    "ZTC ZD888t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zd510hc",
+   "name": "ZD510-HC",
+   "family": "ZD500",
+   "category": "healthcare",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    300
+   ],
+   "printWidthMM": 51,
+   "maxLabelLengthMM": 559,
+   "maxSpeedIPS": {
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD510-HC",
+    "ZTC ZD510-HC",
+    "ZTC ZD510-HC-300dpi ZPL"
+   ],
+   "defaultStock": "wb1x11in"
+  },
+  {
+   "id": "zd421hc",
+   "name": "ZD421d-HC",
+   "family": "ZD400",
+   "category": "healthcare",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "ble"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZD421d-HC",
+    "ZTC ZD421-HC-203dpi ZPL",
+    "ZTC ZD421-HC-300dpi ZPL",
+    "ZTC ZD421d-HC"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "gk420d",
+   "name": "GK420d",
+   "family": "GK",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner GK420d",
+    "ZTC GK420-203dpi ZPL",
+    "ZTC GK420d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "gk420t",
+   "name": "GK420t",
+   "family": "GK",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner GK420t",
+    "ZTC GK420-203dpi ZPL",
+    "ZTC GK420t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "gx420d",
+   "name": "GX420d",
+   "family": "GX",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "serial"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner GX420d",
+    "ZTC GX420-203dpi ZPL",
+    "ZTC GX420d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "gx420t",
+   "name": "GX420t",
+   "family": "GX",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "serial"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner GX420t",
+    "ZTC GX420-203dpi ZPL",
+    "ZTC GX420t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "gx430t",
+   "name": "GX430t",
+   "family": "GX",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "wifi",
+    "bluetooth",
+    "serial"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner GX430t",
+    "ZTC GX430-300dpi ZPL",
+    "ZTC GX430t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "gc420d",
+   "name": "GC420d",
+   "family": "GC",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner GC420d",
+    "ZTC GC420-203dpi ZPL",
+    "ZTC GC420d"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "gc420t",
+   "name": "GC420t",
+   "family": "GC",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner GC420t",
+    "ZTC GC420-203dpi ZPL",
+    "ZTC GC420t"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "lp2824plus",
+   "name": "LP 2824 Plus",
+   "family": "LP",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 56,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial"
+   ],
+   "features": [],
+   "ieee1284": [
+    "LP 2824 Plus",
+    "LP2824 Plus",
+    "ZTC LP 2824 Plus"
+   ],
+   "defaultStock": "w2h1in"
+  },
+  {
+   "id": "tlp2824plus",
+   "name": "TLP 2824 Plus",
+   "family": "LP",
+   "category": "desktop",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 56,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial"
+   ],
+   "features": [],
+   "ieee1284": [
+    "TLP 2824 Plus",
+    "TLP2824 Plus",
+    "ZTC TLP 2824 Plus"
+   ],
+   "defaultStock": "w2h1in"
+  },
+  {
+   "id": "lp2844",
+   "name": "LP 2844",
+   "family": "LP",
+   "category": "desktop",
+   "languages": [
+    "epl"
+   ],
+   "defaultLanguage": "epl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "LP 2844",
+    "LP2844",
+    "Zebra LP2844"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "tlp2844",
+   "name": "TLP 2844",
+   "family": "LP",
+   "category": "desktop",
+   "languages": [
+    "epl"
+   ],
+   "defaultLanguage": "epl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "TLP 2844",
+    "TLP2844",
+    "Zebra TLP2844"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "lp2844z",
+   "name": "LP 2844-Z",
+   "family": "LP",
+   "category": "desktop",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "LP 2844-Z",
+    "LP2844-Z",
+    "ZTC LP 2844-Z"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "tlp3842",
+   "name": "TLP 3842",
+   "family": "LP",
+   "category": "desktop",
+   "languages": [
+    "epl"
+   ],
+   "defaultLanguage": "epl",
+   "resolutions": [
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "300": 3
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "TLP 3842",
+    "TLP3842"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zt111",
+   "name": "ZT111",
+   "family": "ZT100",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT111",
+    "ZTC ZT111",
+    "ZTC ZT111-203dpi ZPL",
+    "ZTC ZT111-300dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zt211",
+   "name": "ZT211",
+   "family": "ZT200",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT211",
+    "ZTC ZT211",
+    "ZTC ZT211-203dpi ZPL",
+    "ZTC ZT211-300dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zt231",
+   "name": "ZT231",
+   "family": "ZT200",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 12,
+    "300": 8
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "rewind"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "wifi",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT231",
+    "ZTC ZT231",
+    "ZTC ZT231-203dpi ZPL",
+    "ZTC ZT231-300dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zt230",
+   "name": "ZT230",
+   "family": "ZT200",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 991,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT230",
+    "ZTC ZT230",
+    "ZTC ZT230-203dpi ZPL",
+    "ZTC ZT230-300dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zt410",
+   "name": "ZT410",
+   "family": "ZT400",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300,
+    600
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 14,
+    "300": 12,
+    "600": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "wifi",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT410",
+    "ZTC ZT410",
+    "ZTC ZT410-203dpi ZPL",
+    "ZTC ZT410-300dpi ZPL",
+    "ZTC ZT410-600dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zt411",
+   "name": "ZT411",
+   "family": "ZT400",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300,
+    600
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 14,
+    "300": 12,
+    "600": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "wifi",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT411",
+    "ZTC ZT411",
+    "ZTC ZT411-203dpi ZPL",
+    "ZTC ZT411-300dpi ZPL",
+    "ZTC ZT411-600dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zt420",
+   "name": "ZT420",
+   "family": "ZT400",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 168,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 12,
+    "300": 10
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "wifi",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT420",
+    "ZTC ZT420",
+    "ZTC ZT420-203dpi ZPL",
+    "ZTC ZT420-300dpi ZPL"
+   ],
+   "defaultStock": "w6h4in"
+  },
+  {
+   "id": "zt421",
+   "name": "ZT421",
+   "family": "ZT400",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 168,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 12,
+    "300": 10
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "wifi",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT421",
+    "ZTC ZT421",
+    "ZTC ZT421-203dpi ZPL",
+    "ZTC ZT421-300dpi ZPL"
+   ],
+   "defaultStock": "w6h4in"
+  },
+  {
+   "id": "zt510",
+   "name": "ZT510",
+   "family": "ZT500",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 12,
+    "300": 12
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial"
+   ],
+   "features": [
+    "linkOS",
+    "sgd"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT510",
+    "ZTC ZT510",
+    "ZTC ZT510-203dpi ZPL",
+    "ZTC ZT510-300dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zt610",
+   "name": "ZT610",
+   "family": "ZT600",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300,
+    600
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 14,
+    "300": 12,
+    "600": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "wifi",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT610",
+    "ZTC ZT610",
+    "ZTC ZT610-203dpi ZPL",
+    "ZTC ZT610-300dpi ZPL",
+    "ZTC ZT610-600dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zt620",
+   "name": "ZT620",
+   "family": "ZT600",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 168,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 12,
+    "300": 10
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "wifi",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "display",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZT620",
+    "ZTC ZT620",
+    "ZTC ZT620-203dpi ZPL",
+    "ZTC ZT620-300dpi ZPL"
+   ],
+   "defaultStock": "w6h4in"
+  },
+  {
+   "id": "105slplus",
+   "name": "105SLPlus",
+   "family": "SL",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 12,
+    "300": 8
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "105SL Plus",
+    "105SLPlus",
+    "ZTC 105SLPlus-203dpi ZPL",
+    "ZTC 105SLPlus-300dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "110xi4",
+   "name": "110Xi4",
+   "family": "Xi4",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300,
+    600
+   ],
+   "printWidthMM": 102,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 14,
+    "300": 12,
+    "600": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner 110Xi4",
+    "ZTC 110Xi4",
+    "ZTC 110Xi4-203dpi ZPL",
+    "ZTC 110Xi4-300dpi ZPL",
+    "ZTC 110Xi4-600dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "140xi4",
+   "name": "140Xi4",
+   "family": "Xi4",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 128,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 14
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner 140Xi4",
+    "ZTC 140Xi4",
+    "ZTC 140Xi4-203dpi ZPL"
+   ],
+   "defaultStock": "w5h3in"
+  },
+  {
+   "id": "170xi4",
+   "name": "170Xi4",
+   "family": "Xi4",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 168,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 12,
+    "300": 8
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner 170Xi4",
+    "ZTC 170Xi4",
+    "ZTC 170Xi4-203dpi ZPL",
+    "ZTC 170Xi4-300dpi ZPL"
+   ],
+   "defaultStock": "w6h4in"
+  },
+  {
+   "id": "220xi4",
+   "name": "220Xi4",
+   "family": "Xi4",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 216,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 10,
+    "300": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner 220Xi4",
+    "ZTC 220Xi4",
+    "ZTC 220Xi4-203dpi ZPL",
+    "ZTC 220Xi4-300dpi ZPL"
+   ],
+   "defaultStock": "w8h6in"
+  },
+  {
+   "id": "zm400",
+   "name": "ZM400",
+   "family": "ZM",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300,
+    600
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 10,
+    "300": 8,
+    "600": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner ZM400",
+    "ZTC ZM400",
+    "ZTC ZM400-203dpi ZPL",
+    "ZTC ZM400-300dpi ZPL",
+    "ZTC ZM400-600dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zm600",
+   "name": "ZM600",
+   "family": "ZM",
+   "category": "industrial",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 168,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 10,
+    "300": 8
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter",
+    "delayedCut",
+    "rewind",
+    "applicator"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "parallel"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner ZM600",
+    "ZTC ZM600",
+    "ZTC ZM600-203dpi ZPL",
+    "ZTC ZM600-300dpi ZPL"
+   ],
+   "defaultStock": "w6h4in"
+  },
+  {
+   "id": "s4m",
+   "name": "S4M",
+   "family": "S4M",
+   "category": "industrial",
+   "languages": [
+    "zpl",
+    "epl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 6,
+    "300": 4
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff",
+    "cutter"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial"
+   ],
+   "features": [],
+   "ieee1284": [
+    "ZDesigner S4M",
+    "ZTC S4M",
+    "ZTC S4M-203dpi ZPL",
+    "ZTC S4M-300dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "ze511",
+   "name": "ZE511",
+   "family": "ZE500",
+   "category": "printEngine",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300,
+    600
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 18,
+    "300": 12,
+    "600": 6
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "applicator",
+    "rewind"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZE511",
+    "ZTC ZE511",
+    "ZTC ZE511-203dpi ZPL",
+    "ZTC ZE511-300dpi ZPL",
+    "ZTC ZE511-600dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "ze521",
+   "name": "ZE521",
+   "family": "ZE500",
+   "category": "printEngine",
+   "languages": [
+    "zpl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203,
+    300
+   ],
+   "printWidthMM": 168,
+   "maxLabelLengthMM": 3988,
+   "maxSpeedIPS": {
+    "203": 12,
+    "300": 12
+   },
+   "mediaTypes": [
+    "directThermal",
+    "thermalTransfer"
+   ],
+   "printModes": [
+    "tearOff",
+    "applicator",
+    "rewind"
+   ],
+   "connectivity": [
+    "usb",
+    "ethernet",
+    "serial",
+    "bluetooth"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "rfid"
+   ],
+   "ieee1284": [
+    "ZDesigner ZE521",
+    "ZTC ZE521",
+    "ZTC ZE521-203dpi ZPL",
+    "ZTC ZE521-300dpi ZPL"
+   ],
+   "defaultStock": "w6h4in"
+  },
+  {
+   "id": "zq630",
+   "name": "ZQ630",
+   "family": "ZQ600",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "ble",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery",
+    "display",
+    "linerless"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ630",
+    "ZTC ZQ630",
+    "ZTC ZQ630-203dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zq620",
+   "name": "ZQ620",
+   "family": "ZQ600",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 72,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "ble",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery",
+    "display",
+    "linerless"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ620",
+    "ZTC ZQ620",
+    "ZTC ZQ620-203dpi ZPL"
+   ],
+   "defaultStock": "w3h2in"
+  },
+  {
+   "id": "zq610",
+   "name": "ZQ610",
+   "family": "ZQ600",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 48,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "ble",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery",
+    "display",
+    "linerless"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ610",
+    "ZTC ZQ610",
+    "ZTC ZQ610-203dpi ZPL"
+   ],
+   "defaultStock": "w2h1in"
+  },
+  {
+   "id": "zq521",
+   "name": "ZQ521",
+   "family": "ZQ500",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "ble",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ521",
+    "ZTC ZQ521",
+    "ZTC ZQ521-203dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zq511",
+   "name": "ZQ511",
+   "family": "ZQ500",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 72,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "ble",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ511",
+    "ZTC ZQ511",
+    "ZTC ZQ511-203dpi ZPL"
+   ],
+   "defaultStock": "w3h2in"
+  },
+  {
+   "id": "zq520",
+   "name": "ZQ520",
+   "family": "ZQ500",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ520",
+    "ZTC ZQ520",
+    "ZTC ZQ520-203dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "zq510",
+   "name": "ZQ510",
+   "family": "ZQ500",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 72,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ510",
+    "ZTC ZQ510",
+    "ZTC ZQ510-203dpi ZPL"
+   ],
+   "defaultStock": "w3h2in"
+  },
+  {
+   "id": "zq320",
+   "name": "ZQ320",
+   "family": "ZQ300",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "cpcl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 72,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "ble",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ320",
+    "ZTC ZQ320",
+    "ZTC ZQ320-203dpi ZPL"
+   ],
+   "defaultStock": "w3h2in"
+  },
+  {
+   "id": "zq310",
+   "name": "ZQ310",
+   "family": "ZQ300",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "cpcl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 48,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "ble",
+    "wifi"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ310",
+    "ZTC ZQ310",
+    "ZTC ZQ310-203dpi ZPL"
+   ],
+   "defaultStock": "w2h1in"
+  },
+  {
+   "id": "zq220",
+   "name": "ZQ220",
+   "family": "ZQ200",
+   "category": "mobile",
+   "languages": [
+    "cpcl",
+    "zpl"
+   ],
+   "defaultLanguage": "cpcl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 72,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 3
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth"
+   ],
+   "features": [
+    "battery"
+   ],
+   "ieee1284": [
+    "ZDesigner ZQ220",
+    "ZTC ZQ220",
+    "ZTC ZQ220-203dpi ZPL"
+   ],
+   "defaultStock": "w3h2in"
+  },
+  {
+   "id": "qln420",
+   "name": "QLn420",
+   "family": "QLn",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 104,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 5
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "wifi",
+    "ethernet"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery",
+    "display"
+   ],
+   "ieee1284": [
+    "ZDesigner QLn420",
+    "ZTC QLn420",
+    "ZTC QLn420-203dpi ZPL"
+   ],
+   "defaultStock": "w4h6in"
+  },
+  {
+   "id": "qln320",
+   "name": "QLn320",
+   "family": "QLn",
+   "category": "mobile",
+   "languages": [
+    "zpl",
+    "cpcl"
+   ],
+   "defaultLanguage": "zpl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 72,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 4
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff",
+    "peelOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth",
+    "wifi",
+    "ethernet"
+   ],
+   "features": [
+    "linkOS",
+    "sgd",
+    "battery",
+    "display"
+   ],
+   "ieee1284": [
+    "ZDesigner QLn320",
+    "ZTC QLn320",
+    "ZTC QLn320-203dpi ZPL"
+   ],
+   "defaultStock": "w3h2in"
+  },
+  {
+   "id": "imz320",
+   "name": "iMZ320",
+   "family": "iMZ",
+   "category": "mobile",
+   "languages": [
+    "cpcl",
+    "zpl"
+   ],
+   "defaultLanguage": "cpcl",
+   "resolutions": [
+    203
+   ],
+   "printWidthMM": 72,
+   "maxLabelLengthMM": 1016,
+   "maxSpeedIPS": {
+    "203": 3
+   },
+   "mediaTypes": [
+    "directThermal"
+   ],
+   "printModes": [
+    "tearOff"
+   ],
+   "connectivity": [
+    "usb",
+    "bluetooth"
+   ],
+   "features": [
+    "battery"
+   ],
+   "ieee1284": [
+    "ZDesigner iMZ320",
+    "ZTC iMZ320",
+    "ZTC iMZ320-203dpi ZPL"
+   ],
+   "defaultStock": "w3h2in"
+  }
+ ],
+ "stocks": [
+  {
+   "id": "w4h6in",
+   "name": "4 × 6 Zoll (Versand)",
+   "widthMM": 101.6,
+   "heightMM": 152.4,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "w4h4in",
+   "name": "4 × 4 Zoll",
+   "widthMM": 101.6,
+   "heightMM": 101.6,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "w4h3in",
+   "name": "4 × 3 Zoll",
+   "widthMM": 101.6,
+   "heightMM": 76.2,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "w4h2in",
+   "name": "4 × 2 Zoll",
+   "widthMM": 101.6,
+   "heightMM": 50.8,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "product",
+   "isCustom": false
+  },
+  {
+   "id": "w4h1in",
+   "name": "4 × 1 Zoll",
+   "widthMM": 101.6,
+   "heightMM": 25.4,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "w4h8in",
+   "name": "4 × 8 Zoll",
+   "widthMM": 101.6,
+   "heightMM": 203.2,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "w3h2in",
+   "name": "3 × 2 Zoll",
+   "widthMM": 76.2,
+   "heightMM": 50.8,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "product",
+   "isCustom": false
+  },
+  {
+   "id": "w3h1in",
+   "name": "3 × 1 Zoll",
+   "widthMM": 76.2,
+   "heightMM": 25.4,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "w2h1in",
+   "name": "2 × 1 Zoll",
+   "widthMM": 50.8,
+   "heightMM": 25.4,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "w2h0_5in",
+   "name": "2 × 0,5 Zoll",
+   "widthMM": 50.8,
+   "heightMM": 12.7,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "w2_25h1_25in",
+   "name": "2,25 × 1,25 Zoll",
+   "widthMM": 57.15,
+   "heightMM": 31.75,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "w2_25h0_75in",
+   "name": "2,25 × 0,75 Zoll",
+   "widthMM": 57.15,
+   "heightMM": 19.05,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "w1_5h1in",
+   "name": "1,5 × 1 Zoll",
+   "widthMM": 38.1,
+   "heightMM": 25.4,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "w1h1in",
+   "name": "1 × 1 Zoll",
+   "widthMM": 25.4,
+   "heightMM": 25.4,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "w5h3in",
+   "name": "5 × 3 Zoll",
+   "widthMM": 127.0,
+   "heightMM": 76.2,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "product",
+   "isCustom": false
+  },
+  {
+   "id": "w6h4in",
+   "name": "6 × 4 Zoll",
+   "widthMM": 152.4,
+   "heightMM": 101.6,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "w8h6in",
+   "name": "8 × 6 Zoll",
+   "widthMM": 203.2,
+   "heightMM": 152.4,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "m100x150",
+   "name": "100 × 150 mm (DHL/DPD/GLS)",
+   "widthMM": 100,
+   "heightMM": 150,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "m103x199",
+   "name": "103 × 199 mm (DHL Warenpost)",
+   "widthMM": 103,
+   "heightMM": 199,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "m100x100",
+   "name": "100 × 100 mm",
+   "widthMM": 100,
+   "heightMM": 100,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "m100x50",
+   "name": "100 × 50 mm",
+   "widthMM": 100,
+   "heightMM": 50,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "product",
+   "isCustom": false
+  },
+  {
+   "id": "m100x70",
+   "name": "100 × 70 mm",
+   "widthMM": 100,
+   "heightMM": 70,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "m102x76",
+   "name": "102 × 76 mm",
+   "widthMM": 102,
+   "heightMM": 76,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "m102x152",
+   "name": "102 × 152 mm",
+   "widthMM": 102,
+   "heightMM": 152,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "m57x32",
+   "name": "57 × 32 mm",
+   "widthMM": 57,
+   "heightMM": 32,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "product",
+   "isCustom": false
+  },
+  {
+   "id": "m57x19",
+   "name": "57 × 19 mm",
+   "widthMM": 57,
+   "heightMM": 19,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "m60x40",
+   "name": "60 × 40 mm",
+   "widthMM": 60,
+   "heightMM": 40,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "product",
+   "isCustom": false
+  },
+  {
+   "id": "m70x32",
+   "name": "70 × 32 mm",
+   "widthMM": 70,
+   "heightMM": 32,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "product",
+   "isCustom": false
+  },
+  {
+   "id": "m76x51",
+   "name": "76 × 51 mm",
+   "widthMM": 76,
+   "heightMM": 51,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "product",
+   "isCustom": false
+  },
+  {
+   "id": "m50x25",
+   "name": "50 × 25 mm",
+   "widthMM": 50,
+   "heightMM": 25,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "m40x30",
+   "name": "40 × 30 mm",
+   "widthMM": 40,
+   "heightMM": 30,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "m38x25",
+   "name": "38 × 25 mm",
+   "widthMM": 38,
+   "heightMM": 25,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "m32x25",
+   "name": "32 × 25 mm",
+   "widthMM": 32,
+   "heightMM": 25,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "m25x25",
+   "name": "25 × 25 mm",
+   "widthMM": 25,
+   "heightMM": 25,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "barcode",
+   "isCustom": false
+  },
+  {
+   "id": "m89x36",
+   "name": "89 × 36 mm (Adresse)",
+   "widthMM": 89,
+   "heightMM": 36,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "address",
+   "isCustom": false
+  },
+  {
+   "id": "m89x28",
+   "name": "89 × 28 mm (Adresse klein)",
+   "widthMM": 89,
+   "heightMM": 28,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "address",
+   "isCustom": false
+  },
+  {
+   "id": "m54x101",
+   "name": "54 × 101 mm (Versand)",
+   "widthMM": 54,
+   "heightMM": 101,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "shipping",
+   "isCustom": false
+  },
+  {
+   "id": "jewelry",
+   "name": "Schmucketikett 56 × 13 mm",
+   "widthMM": 56,
+   "heightMM": 13,
+   "gapMM": 3.0,
+   "tracking": "gap",
+   "category": "jewelry",
+   "isCustom": false
+  },
+  {
+   "id": "wb1x11in",
+   "name": "Patientenarmband 1 × 11 Zoll",
+   "widthMM": 25.4,
+   "heightMM": 279.4,
+   "gapMM": 3.0,
+   "tracking": "blackMark",
+   "category": "wristband",
+   "isCustom": false
+  },
+  {
+   "id": "c80",
+   "name": "Endlos 80 mm (Beleg)",
+   "widthMM": 72,
+   "heightMM": 200,
+   "gapMM": 0,
+   "tracking": "continuous",
+   "category": "receipt",
+   "isCustom": false
+  },
+  {
+   "id": "c58",
+   "name": "Endlos 58 mm (Beleg)",
+   "widthMM": 48,
+   "heightMM": 150,
+   "gapMM": 0,
+   "tracking": "continuous",
+   "category": "receipt",
+   "isCustom": false
+  },
+  {
+   "id": "c4in",
+   "name": "Endlos 4 Zoll",
+   "widthMM": 101.6,
+   "heightMM": 152.4,
+   "gapMM": 0,
+   "tracking": "continuous",
+   "category": "receipt",
+   "isCustom": false
+  }
+ ]
+}
+"""#
+}
