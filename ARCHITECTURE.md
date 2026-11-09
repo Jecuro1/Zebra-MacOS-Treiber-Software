@@ -144,7 +144,8 @@ public enum ZPL {
     // Dateien
     static func downloadTrueTypeFont(name: String, drive: String = "E:", data: Data) -> Data // ~DY{drive}{NAME},B,T,{len},,<bin>
     static func deleteObject(_ path: String) -> ZPLCommand   // ^ID
-    static func directoryListing(_ pattern: String = "E:*.*") -> String // ^XA^WD…^XZ
+    static func hostDirectory(_ pattern: String = "E:*.*") -> String   // ^XA^HW{pattern}^XZ (Antwort an Host)
+    static func printDirectory(_ pattern: String = "E:*.*") -> String  // ^XA^WD{pattern}^XZ (druckt Liste)
 }
 
 public enum EPL { … }   // N, q, Q, S, D, ZT/ZB, O…, GW, A, B, LO, X, P, U (Konfig), xa (Autosense), ^@ (Reset)
@@ -460,7 +461,7 @@ public enum SGDResponseParser {
 public struct ConfigurationEntry: Hashable, Sendable, Codable { public var name: String; public var value: String }
 public enum ConfigurationLabelParser { static func parse(_ text: String) -> [ConfigurationEntry] }   // ^HH-Ausgabe
 public struct PrinterFile: Hashable, Sendable, Codable, Identifiable { drive: String, name: String, size: Int, var id: String { drive+name }, kind: FileKind (font, graphic, format, firmware, other) }
-public enum FileDirectoryParser { static func parse(_ text: String) -> [PrinterFile] }   // ^WD-Ausgabe
+public enum FileDirectoryParser { static func parse(_ text: String) -> [PrinterFile] }   // ^HW-Antwort (und SGD file.dir)
 ```
 
 
@@ -691,7 +692,7 @@ P{n}\n                                bzw. P1 bei Sortierung (wie ZPL)
 
 ```
 — je Etikett —
-! 0 {dpi} {dpi} {höhe} {n}\r\n
+! 0 {res} {res} {höhe} {n}\r\n          {res} = 200 bei 203 dpi, sonst dpi
 PAGE-WIDTH {breite}\r\n
 CONTRAST {0…3}\r\n                    falls darkness (darkness*3/30 gerundet)
 SPEED {0…5}\r\n                       falls speed (min(speed,5))
