@@ -105,6 +105,11 @@ struct JobRecord: Codable, Identifiable, Hashable {
     var message: String?
     /// Kleine PNG-Vorschau (optional, max. ~40 KB).
     var previewPNG: Data?
+    /// Gesendete Druckdaten für „Erneut drucken“ (nur bis 512 KB gespeichert).
+    var payload: Data?
+
+    /// Höchstgröße gespeicherter Druckdaten.
+    static let maxStoredPayload = 512 * 1024
 }
 
 // MARK: - App-Einstellungen

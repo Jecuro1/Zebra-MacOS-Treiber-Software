@@ -277,10 +277,11 @@ final class PrinterSession: Identifiable {
     }
 
     private func recordJob(_ kind: JobRecord.Kind, title: String, labels: Int, bytes: Int,
-                           success: Bool, message: String? = nil, preview: Data? = nil) {
+                           success: Bool, message: String? = nil, preview: Data? = nil, payload: Data? = nil) {
+        let stored = payload.flatMap { $0.count <= JobRecord.maxStoredPayload ? $0 : nil }
         app?.record(JobRecord(printerID: id, printerName: displayName, title: title, kind: kind,
                               labels: labels, bytes: bytes, success: success, message: message,
-                              previewPNG: preview))
+                              previewPNG: preview, payload: stored))
         if success && labels > 0 {
             labelsPrintedThisSession += labels
             if app?.preferences.playSounds == true { SoundService.play(.printed) }
@@ -323,7 +324,7 @@ final class PrinterSession: Identifiable {
         } != nil
         let preview = ok ? await Self.previewPNG(zpl: zpl, dotsPerMM: resolution.dotsPerMM) : nil
         recordJob(.zpl, title: title, labels: labelCount, bytes: data.count, success: ok,
-                  message: ok ? nil : lastError, preview: preview)
+                  message: ok ? nil : lastError, preview: preview, payload: data)
         if ok { app?.toast(tr("Gedruckt"), message: title, style: .success) }
         return ok
     }
@@ -348,7 +349,7 @@ final class PrinterSession: Identifiable {
         let ok = await run(tr("Bild wird gedruckt …")) { client in try await client.send(data) } != nil
         let preview = ok ? await Self.previewPNG(image: images[0]) : nil
         recordJob(.image, title: title, labels: images.count * max(1, copies), bytes: data.count,
-                  success: ok, message: ok ? nil : lastError, preview: preview)
+                  success: ok, message: ok ? nil : lastError, preview: preview, payload: data)
         if ok { app?.toast(tr("Gedruckt"), message: title, style: .success) }
         return ok
     }
@@ -357,7 +358,22 @@ final class PrinterSession: Identifiable {
     func sendRaw(_ text: String, title: String = tr("Rohdaten")) async -> Bool {
         let data = Data(text.utf8)
         let ok = await run(tr("Daten werden gesendet …")) { client in try await client.send(data) } != nil
-        recordJob(.raw, title: title, labels: 0, bytes: data.count, success: ok, message: ok ? nil : lastError)
+        recordJob(.raw, title: title, labels: 0, bytes: data.count, success: ok, message: ok ? nil : lastError,
+                  payload: data)
+        return ok
+    }
+
+    /// Sendet gespeicherte Druckdaten aus dem Verlauf erneut.
+    @discardableResult
+    func reprint(_ job: JobRecord) async -> Bool {
+        guard let payload = job.payload else {
+            app?.toast(tr("Erneut drucken nicht möglich"), message: tr("Für diesen Auftrag wurden keine Druckdaten gespeichert."), style: .warning)
+            return false
+        }
+        let ok = await run(tr("Auftrag wird erneut gesendet …")) { client in try await client.send(payload) } != nil
+        recordJob(job.kind, title: job.title, labels: job.labels, bytes: payload.count, success: ok,
+                  message: ok ? nil : lastError, preview: job.previewPNG, payload: payload)
+        if ok { app?.toast(tr("Erneut gedruckt"), message: job.title, style: .success) }
         return ok
     }
 
