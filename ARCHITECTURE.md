@@ -264,6 +264,36 @@ public struct JobEncoder: Sendable {
 }
 ```
 
+
+### 4.1 Rasterung – exakte Spezifikation (identisch in Swift **und** C)
+
+Eingabe: Luminanz `L(x,y)` ∈ 0…255 (0 = schwarz), Schwelle `T` ∈ 1…254. Ausgabe schwarz = Punkt.
+Alle Divisionen sind Ganzzahldivisionen mit Abschneiden Richtung 0 (C/Swift `/`).
+
+* **threshold**: schwarz ⇔ `L < T`.
+* **ordered**: `t = B[y%8][x%8]*4 + 2 + (T − 128)`; schwarz ⇔ `L < t`. `B` = Bayer 8×8:
+  ```
+   0 32  8 40  2 34 10 42 / 48 16 56 24 50 18 58 26 / 12 44  4 36 14 46  6 38 / 60 28 52 20 62 30 54 22
+   3 35 11 43  1 33  9 41 / 51 19 59 27 49 17 57 25 / 15 47  7 39 13 45  5 37 / 63 31 55 23 61 29 53 21
+  ```
+* **halftone**: wie `ordered`, aber mit Clustered-Dot-Matrix `H`:
+  ```
+  24 10 12 26 35 47 49 37 /  8  0  2 14 45 59 61 51 / 22  6  4 16 43 57 63 53 / 30 20 18 28 33 41 55 39
+  34 46 48 36 25 11 13 27 / 44 58 60 50  9  1  3 15 / 42 56 62 52 23  7  5 17 / 32 40 54 38 31 21 19 29
+  ```
+* **Fehlerdiffusion** (floydSteinberg, atkinson, stucki): Zeilen von oben nach unten, Pixel stets von
+  links nach rechts (keine Serpentine). Fehlerpuffer `Int32`. `v = L + err(x,y)`;
+  `out = v < T ? 0 : 255`; schwarz ⇔ `out == 0`; `e = v − out`. Jeder Anteil wird einzeln als
+  `e * w / D` berechnet und zu dem Nachbarn addiert; Anteile außerhalb des Bildes entfallen.
+  * floydSteinberg (D = 16): (x+1,y)=7, (x−1,y+1)=3, (x,y+1)=5, (x+1,y+1)=1
+  * atkinson (D = 8): (x+1,y)=1, (x+2,y)=1, (x−1,y+1)=1, (x,y+1)=1, (x+1,y+1)=1, (x,y+2)=1
+  * stucki (D = 42): (x+1,y)=8, (x+2,y)=4; (x−2,y+1)=2, (x−1,y+1)=4, (x,y+1)=8, (x+1,y+1)=4, (x+2,y+1)=2;
+    (x−2,y+2)=1, (x−1,y+2)=2, (x,y+2)=4, (x+1,y+2)=2, (x+2,y+2)=1
+
+Umrechnung beliebiger Rasterdaten in `L` (Filter): 8-Bit W/SW: `L = v`; 8-Bit K: `L = 255 − v`;
+1-Bit K: Bit 1 → 0 sonst 255; 1-Bit W/SW: Bit 0 → 0 sonst 255; RGB/sRGB: `L = (299R + 587G + 114B) / 1000`;
+CMYK: `L = 255 − min(255, K + (C + M + Y) / 3)`; 16-Bit: höherwertiges Byte (Big Endian) verwenden.
+
 ## 5. LabelWerkBarcode (unabhängig, nur Foundation)
 
 ```swift
@@ -432,6 +462,168 @@ public enum ConfigurationLabelParser { static func parse(_ text: String) -> [Con
 public struct PrinterFile: Hashable, Sendable, Codable, Identifiable { drive: String, name: String, size: Int, var id: String { drive+name }, kind: FileKind (font, graphic, format, firmware, other) }
 public enum FileDirectoryParser { static func parse(_ text: String) -> [PrinterFile] }   // ^WD-Ausgabe
 ```
+
+
+## 7a. LabelWerkTransport
+
+```swift
+public struct USBDeviceIdentifier: Codable, Hashable, Sendable {
+    public var vendorID: Int, productID: Int, serialNumber: String?, locationID: UInt32?, productName: String?
+}
+public enum ConnectionKind: String, Codable, Sendable, CaseIterable { case tcp, usb, bluetooth, ble, cupsQueue, virtual }
+public enum ConnectionDescriptor: Codable, Hashable, Sendable {
+    case tcp(host: String, port: Int)
+    case usb(USBDeviceIdentifier)
+    case bluetooth(address: String, name: String?)   // klassisch, RFCOMM/SPP
+    case ble(identifier: String, name: String?)      // CoreBluetooth-Peripheral-UUID
+    case cupsQueue(name: String)                     // nur Senden (lp -o raw)
+    case virtual(id: String)                         // Virtueller Drucker (LabelWerkKit)
+    public var kind: ConnectionKind
+    public var displayString: String                 // z. B. "192.168.1.20:9100", "USB · ZD421"
+    public var systemImage: String                   // SF Symbol
+    public var supportsBidirectional: Bool           // cupsQueue → false
+}
+public protocol PrinterConnection: AnyObject, Sendable {
+    var descriptor: ConnectionDescriptor { get }
+    var isOpen: Bool { get async }
+    func open() async throws
+    func close() async
+    func write(_ data: Data) async throws
+    /// Liefert die innerhalb von `timeout` empfangenen Daten (leer = nichts empfangen).
+    func read(timeout: Duration) async throws -> Data
+}
+extension PrinterConnection {
+    public func write(_ string: String) async throws                      // UTF-8
+    /// Schreibt `data` und sammelt Antworten, bis `isComplete` true liefert, `timeout` abläuft
+    /// oder nach erstem Empfang `idleTimeout` lang nichts mehr kommt.
+    public func request(_ data: Data, timeout: Duration = .seconds(3), idleTimeout: Duration = .milliseconds(400),
+                        isComplete: @Sendable (Data) -> Bool = { _ in false }) async throws -> Data
+}
+public enum TransportError: Error, LocalizedError, Equatable {
+    case notOpen, timeout, closedByPeer
+    case connectionFailed(String), ioError(String), unsupported(String), deviceNotFound(String), permissionDenied(String)
+}
+public actor TCPConnection: PrinterConnection { public init(host: String, port: Int = 9100, connectTimeout: Duration = .seconds(5)) }  // POSIX-Sockets (macOS & Linux)
+public actor CUPSQueueConnection: PrinterConnection { public init(queue: String) }  // write: `lp -d <queue> -o raw` via Process; read → leer
+#if os(macOS)
+public actor USBConnection: PrinterConnection { public init(device: USBDeviceIdentifier) }        // IOKit/IOUSBHost, Bulk-In/Out
+public final class BluetoothClassicConnection: PrinterConnection { public init(address: String) } // IOBluetooth RFCOMM (SPP)
+public final class BLEConnection: PrinterConnection { public init(identifier: String) }          // CoreBluetooth, Zebra Parser Service
+//   Service 38EB4A80-C570-11E3-9507-0002A5D5C51B, Write 38EB4A82-…, Read/Notify 38EB4A81-…
+#endif
+public enum ConnectionFactory {
+    public static func make(_ descriptor: ConnectionDescriptor) throws -> any PrinterConnection
+    /// Wird von LabelWerkKit registriert, um `.virtual` zu bedienen.
+    public static func registerVirtualFactory(_ factory: @escaping @Sendable (String) -> any PrinterConnection)
+}
+
+public enum DiscoverySource: String, Codable, Sendable, CaseIterable { case bonjour, usb, network, cups, bluetooth, ble }
+public struct DiscoveredPrinter: Identifiable, Hashable, Codable, Sendable {
+    public var id: String                    // stabil, aus dem Deskriptor abgeleitet
+    public var name: String
+    public var modelHint: String?            // z. B. "ZD421-203dpi" → ModelCatalog.match(productName:)
+    public var descriptor: ConnectionDescriptor
+    public var source: DiscoverySource
+    public var details: [String: String]
+}
+public final class PrinterDiscovery: Sendable {
+    public init()
+    /// Liefert gefundene Drucker (dedupliziert nach `id`) und endet nach `timeout`.
+    public func discover(sources: Set<DiscoverySource> = Set(DiscoverySource.allCases),
+                         timeout: Duration = .seconds(6)) -> AsyncStream<DiscoveredPrinter>
+}
+public struct NetworkInterfaceInfo: Hashable, Sendable { public var name: String; public var address: String; public var netmask: String }
+public enum SubnetScanner {
+    public static func localIPv4Interfaces() -> [NetworkInterfaceInfo]   // getifaddrs, ohne Loopback
+    public static func hosts(in iface: NetworkInterfaceInfo, limit: Int = 1024) -> [String]
+    public static func scan(hosts: [String], port: Int = 9100, timeout: Duration = .milliseconds(400), maxConcurrent: Int = 64) -> AsyncStream<String>
+}
+public struct CUPSQueueInfo: Hashable, Sendable, Codable { public var name: String; public var deviceURI: String; public var isDefault: Bool; public var makeAndModel: String? }
+public enum CUPSQueueLister {
+    public static func queues() -> [CUPSQueueInfo]                    // `lpstat -v` (+ `-d`), leer wenn lpstat fehlt
+    public static func parseLpstatV(_ text: String) -> [(name: String, uri: String)]   // de/en-Ausgabe
+    public static func modelHint(fromDeviceURI uri: String) -> String?  // usb://Zebra%20Technologies/ZTC%20ZD421-203dpi%20ZPL?serial=… → "ZTC ZD421-203dpi ZPL"
+}
+```
+
+## 7b. LabelWerkKit
+
+```swift
+public struct PrinterIdentity: Codable, Hashable, Sendable {
+    public var model: String?              // Rohname aus ~HI / device.product_name
+    public var matchedModelID: String?     // ModelCatalog-ID
+    public var serialNumber: String?, firmware: String?, friendlyName: String?
+    public var resolution: Resolution?, printWidthDots: Int?, memoryKB: Int?
+    public var languages: [PrinterLanguage]
+    public var ipAddress: String?, macAddress: String?
+    public var isLinkOS: Bool
+}
+public struct NetworkSettings: Codable, Hashable, Sendable {
+    public var useDHCP: Bool
+    public var ipAddress: String, subnetMask: String, gateway: String
+    public var dnsServer: String?, hostname: String?
+    public var wlanEnabled: Bool?, wlanSSID: String?, wlanSecurity: String?
+    public var wlanPassphrase: String?     // nur schreiben
+    public var macAddress: String?         // nur lesen
+}
+public actor PrinterClient {
+    public init(connection: any PrinterConnection, language: PrinterLanguage = .zpl)
+    public nonisolated let connection: any PrinterConnection
+    public var language: PrinterLanguage
+    public func setLanguage(_ language: PrinterLanguage)
+    public func connect() async throws                 // öffnet bei Bedarf
+    public func disconnect() async
+    public func identify() async throws -> PrinterIdentity
+    public func status() async throws -> PrinterStatusSnapshot
+    public func getvar(_ name: String) async throws -> String?
+    public func getvars(_ names: [String]) async throws -> [String: String]   // JSON wenn möglich, sonst einzeln
+    public func setvar(_ name: String, _ value: String) async throws
+    public func doCommand(_ name: String, _ value: String = "") async throws -> String?
+    public func allSettings() async throws -> [String: SGDSetting]
+    public func configuration() async throws -> [ConfigurationEntry]          // ^HH
+    public func perform(_ action: PrinterAction, resolution: Resolution = .dpi203, widthDots: Int = 812, heightDots: Int = 1218) async throws
+    public func send(_ data: Data) async throws
+    public func send(_ text: String) async throws
+    public func printZPL(_ zpl: String) async throws
+    public func printImages(_ images: [GrayImage], settings: PrintSettings, resolution: Resolution,
+                            stock: LabelStock?, copies: Int = 1) async throws
+    public func applySettings(_ settings: PrintSettings, permanently: Bool) async throws  // ~SD, ^MT, ^MN, ^MM, ^PR, ^LT, ^LS, ~TA, ^JS (+ ^JUS)
+    public func listFiles(drive: String = "E:") async throws -> [PrinterFile]
+    public func uploadFont(name: String, data: Data, drive: String = "E:") async throws
+    public func uploadGraphic(name: String, bitmap: MonoBitmap, drive: String = "E:") async throws
+    public func deleteFile(_ path: String) async throws
+    public func sendFirmware(_ data: Data, chunkSize: Int = 16_384, progress: @escaping @Sendable (Double) -> Void) async throws
+    public func terminal(_ input: String, timeout: Duration = .seconds(2)) async throws -> Data
+    public func networkSettings() async throws -> NetworkSettings
+    public func applyNetworkSettings(_ settings: NetworkSettings) async throws   // SGD + device.reset
+}
+
+/// Vollständig simulierter Drucker (Demo-Modus der App, Tests, `lwctl virtual-printer`).
+public actor VirtualPrinter: PrinterConnection {
+    public init(id: String = "demo", model: PrinterModel, resolution: Resolution = .dpi203)
+    public var receivedData: Data { get }
+    public var renderedLabels: [RenderedLabel] { get }   // aus empfangenem ZPL (LabelWerkRender)
+    public func setPaused(_ on: Bool); func setHeadOpen(_ on: Bool); func setMediaOut(_ on: Bool); func setRibbonOut(_ on: Bool)
+    public var files: [PrinterFile] { get }
+    public static func registerWithConnectionFactory()   // `.virtual(id:)` → VirtualPrinter (Standardmodell ZD421t)
+}
+public enum VirtualPrinterServer {
+    public static func run(port: Int, printer: VirtualPrinter) async throws      // TCP-Server (POSIX), bis Abbruch
+}
+```
+
+Antwortverhalten: `~HS` → 3 Zeilen `STX…ETX\r\n`; `~HI` → `STX…ETX`; `~HQES` → Block mit `PRINTER STATUS`, `ERRORS:`, `WARNINGS:`;
+SGD `getvar` → `"wert"`; JSON `{}{…}` → JSON-Objekt; `^HH` → Konfigurationstext; `^WD` → Dateiliste.
+
+## 7c. lwctl (CLI)
+
+`lwctl <befehl> [optionen]`, globale Option `--printer <uri>` mit `tcp://host[:port]`, `usb://vid:pid[/serial]`,
+`cups://queue`, `virtual://demo`. Befehle: `discover`, `status`, `info`, `send <datei|->`, `print <bild…>`
+(PNG/PNM, `--stock`, `--dpi`, `--dither`, `--copies`, `--language`), `encode <bild> [-o datei]`
+(nur erzeugen), `render <zpl-datei> -o out.png [--dpmm 8]`, `action <name>`, `getvar <name>`,
+`setvar <name> <wert>`, `settings` (allconfig), `config` (^HH), `files`, `upload-font <ttf> [--name]`,
+`upload-graphic <png> [--name]`, `firmware <datei>`, `terminal` (interaktiv), `models`, `stocks`,
+`test-label`, `virtual-printer [--port 9100] [--model zd421t]`, `version`, `help`.
 
 ## 8. Druckauftragsformat (verbindlich für `JobEncoder` **und** C-Filter)
 
