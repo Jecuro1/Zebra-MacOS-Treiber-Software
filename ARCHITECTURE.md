@@ -751,7 +751,7 @@ PPD-Eckdaten: `*cupsFilter: "application/vnd.cups-raster 0 /Library/Printers/Lab
 
 Der Filter verarbeitet alle Rasterformate robust (1/8/16 Bit, W/SW/K/RGB → Luminanz) und dithert selbst.
 
-## 11. App-Architektur (Kurzfassung, Details in `Sources/LabelWerkApp/README.md`)
+## 11. App-Architektur (Kurzfassung, Details in `docs/APP_ARCHITECTURE.md`)
 
 * `@Observable` Modelle (Observation-Framework, macOS 14): `AppModel` (global), `PrinterSession` (je Drucker).
 * Navigation: `NavigationSplitView` – Seitenleiste mit Druckern und Bereichen
