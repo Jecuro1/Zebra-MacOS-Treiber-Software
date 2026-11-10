@@ -43,7 +43,11 @@ struct PrinterInstallRequest: Equatable {
     /// „Auch als macOS-Drucker installieren“).
     init(saved: SavedPrinter) {
         self.descriptor = saved.descriptor
-        self.name = saved.name
+        // Heißt der Drucker nur nach seiner Adresse („10.62.13.19“), heißt der macOS-Drucker nach dem
+        // Modell („Zebra ZD421t“) – nie nach der IP-Adresse.
+        self.name = PrinterSetupPlanning.existingName(saved.name, descriptor: saved.descriptor)
+            ?? saved.modelID.flatMap { ModelCatalog.shared.model(id: $0)?.displayName }
+            ?? saved.name
         self.location = saved.location
         self.modelID = saved.modelID
         self.resolution = saved.resolution
@@ -639,6 +643,12 @@ final class PrinterInstallService {
         if let session = model.sessions.first(where: { $0.saved.descriptor.refersToSameDevice(as: request.descriptor) }) {
             var saved = session.saved
             saved.cupsQueueName = queueName
+            // Hieß der Drucker nur nach seiner Adresse („10.62.13.19“), übernimmt er den Namen des
+            // macOS-Druckers („Zebra ZD421t“).
+            if PrinterSetupPlanning.existingName(saved.name, descriptor: saved.descriptor) == nil,
+               let name = PrinterSetupPlanning.nonEmpty(request.name) {
+                saved.name = name
+            }
             // Modell, Auflösung und Sprache der eben eingerichteten Warteschlange (PPD, `lwLanguage`)
             // gelten auch in LabelWerk – sonst glich `QueueSyncService` sie auf die alten Werte zurück.
             if let modelID = request.modelID { saved.modelID = modelID }

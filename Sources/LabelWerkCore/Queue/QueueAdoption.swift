@@ -105,6 +105,69 @@ public enum QueueAdoption {
         return (endpoint.port ?? rawPort) == printer.port
     }
 
+    /// Eingerichteter Drucker, dessen LabelWerk-Verbindung selbst eine macOS-Warteschlange ist
+    /// (`ConnectionDescriptor.cupsQueue`): Host und Port stammen aus deren Geräte-URI (`socket://` mit
+    /// ihrem Port, sonst ``rawPort``). `nil`, wenn die URI keinen Netzwerkhost nennt (USB, Bonjour,
+    /// Datei …).
+    public static func registeredPrinter(id: String, queueDeviceURI uri: String) -> RegisteredPrinter? {
+        guard let endpoint = endpoint(ofDeviceURI: uri), networkSchemes.contains(endpoint.scheme) else { return nil }
+        let port = endpoint.scheme == "socket" ? (endpoint.port ?? rawPort) : rawPort
+        return RegisteredPrinter(id: id, host: endpoint.host, port: port)
+    }
+
+    // MARK: Namen
+
+    /// Beschreibung (`printer-info`, `lpadmin -D`) einer übernommenen Warteschlange – so heißt sie im
+    /// Druckdialog statt „10.62.13.19“; der Name der Warteschlange selbst bleibt.
+    ///
+    /// Grundlage ist der Name des Druckers in LabelWerk; ist der nur eine Adresse
+    /// (``isAddressName(_:host:)``), der Modellname („Zebra ZD421t“). Hat der Drucker schon eine andere
+    /// Warteschlange (seine LabelWerk-Warteschlange trägt im Druckdialog denselben Namen), folgt der
+    /// Name der übernommenen in Klammern: „Zebra ZD421t (10.62.13.19)“.
+    public static func queueDescription(printerName: String, modelName: String?, host: String?, queueName: String,
+                                        printerHasOtherQueue: Bool) -> String {
+        var name = printerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty || isAddressName(name, host: host),
+           let model = modelName?.trimmingCharacters(in: .whitespacesAndNewlines), !model.isEmpty {
+            name = model
+        }
+        guard !name.isEmpty else { return queueName }
+        if printerHasOtherQueue, name.caseInsensitiveCompare(queueName) != .orderedSame {
+            return "\(name) (\(queueName))"
+        }
+        return name
+    }
+
+    /// Ist `name` nur eine Netzwerkadresse – eine IPv4- oder IPv6-Adresse (auch in eckigen Klammern
+    /// oder mit Port) oder der Host `host` der Verbindung (ohne Groß-/Kleinschreibung, auch mit Port)?
+    /// So benennen „Drucker & Scanner“ („10.62.13.19“) und die Netzwerksuche ohne Modell einen
+    /// Drucker; LabelWerk schlägt dann den Modellnamen vor.
+    public static func isAddressName(_ name: String, host: String? = nil) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.contains(where: { $0.isWhitespace || "/?#@".contains($0) }),
+              let candidate = endpoint(ofDeviceURI: "x://" + trimmed)?.host
+        else { return false }
+        if let host, let other = normalizedHost(host), other == candidate { return true }
+        return isIPv4Literal(candidate) || isIPv6Literal(candidate)
+    }
+
+    /// Vier Dezimalzahlen 0…255 mit Punkten (`10.62.13.19`).
+    static func isIPv4Literal(_ text: String) -> Bool {
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        return parts.allSatisfy { part in
+            !part.isEmpty && part.count <= 3 && part.allSatisfy { $0.isASCII && $0.isNumber } && Int(part).map { $0 <= 255 } == true
+        }
+    }
+
+    /// IPv6-Adresse, optional mit Zone (`fe80::1%en0`, `2001:db8::7`, `::ffff:10.0.0.1`).
+    static func isIPv6Literal(_ text: String) -> Bool {
+        let address = text.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+        guard address.filter({ $0 == ":" }).count >= 2 else { return false }
+        return address.allSatisfy { $0.isASCII && ($0.isHexDigit || $0 == ":" || $0 == ".") }
+    }
+
     // MARK: URIs
 
     /// Vergleichbarer Host: ohne eckige Klammern (IPv6), Prozentkodierung (`%25` der Zone) und

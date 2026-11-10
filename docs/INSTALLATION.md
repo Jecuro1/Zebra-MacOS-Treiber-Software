@@ -464,8 +464,9 @@ macOS unterstützt PPD-Treiber weiterhin vollständig.
 
 ### Drucken aus Vorschau, Safari & Co.
 
-**Im Druckdialog muss nichts eingestellt werden.** Wie beim Windows-Treiber ZDesigner wird die
-Etikettengröße einmal festgelegt – danach druckt jedes Programm auf das Etikett:
+**Im Druckdialog muss nichts eingestellt werden** – weder Papierformat noch Skalierung oder
+Ausrichtung. Wie beim Windows-Treiber ZDesigner wird die Etikettengröße einmal festgelegt – danach
+druckt jedes Programm auf das Etikett:
 
 1. **Etikettengröße einmal festlegen.** Der Installationsassistent liest sie beim Einrichten aus dem
    Drucker (z. B. **„Vom Drucker: 104 × 76,2 mm“** beim ZD421t mit 203 dpi – dieselben Werte, die
@@ -475,17 +476,36 @@ Etikettengröße einmal festgelegt – danach druckt jedes Programm auf das Etik
    --size 104x76.2mm` macht dasselbe im Terminal.
 2. **LabelWerk überträgt sie automatisch.** Die macOS-Warteschlange erhält das Etikett als *benannte*
    Standard-Papiergröße – im Druckdialog steht unter „Papierformat“ z. B. **„Etikett 104 × 76,2 mm“**
-   und ist vorausgewählt. Jede Änderung in LabelWerk (Druckeinstellungen, Etiketten, Designer …)
+   zur Auswahl (vorausgewählt nur in Programmen, die nicht das macOS-Standardpapierformat einsetzen,
+   siehe 3.). Jede Änderung in LabelWerk (Druckeinstellungen, Etiketten, Designer …)
    gleicht LabelWerk kurz danach selbst mit der Warteschlange ab, ebenso einmal beim Start für
    Warteschlangen älterer Versionen – ohne Passwortabfrage und ohne Meldung, solange alles klappt;
    nur ein Fehler erscheint als Hinweis mit **„Erneut versuchen“**.
-3. **Andere Papiergrößen passt der Treiber an.** Viele Mac-Programme schicken trotzdem A4, Letter
-   oder die Seitengröße des Dokuments („Andere 210 x 297 mm“). Dann legt der Treiber den Inhalt der
-   Seite automatisch mittig auf das Etikett (**„An Etikett anpassen: Automatisch“**, Standard): Der
-   leere Rand wird abgeschnitten, ein Etikett-PDF auf einem A4-Blatt kommt in Originalgröße auf das
-   Etikett, zu große Inhalte werden verkleinert – vergrößert wird nie. Seiten, die schon
-   Etikettengröße haben, druckt der Treiber unverändert. Ein A4-Auftrag läuft also nicht mehr über
-   mehrere Etiketten.
+3. **Jede Seite kommt richtig auf das Etikett – auch wenn der Druckdialog A4 zeigt.** macOS kennt
+   nur *ein* Standardpapierformat für alle Drucker (Systemeinstellungen › Drucker & Scanner ›
+   „Standardpapierformat“). Safari, Vorschau & Co. zeigen deshalb oft weiterhin **„A4“** bzw.
+   **„Andere 210 x 297 mm“** und „Skalierung 100 %“, und die Vorschau zeigt das Etikett klein und um
+   90° gedreht mitten auf dem Blatt. Das ist kein Fehler und muss nicht geändert werden: Der
+   LabelWerk-Treiber (**„An Etikett anpassen: Automatisch“**, Standard) schneidet den leeren Rand ab,
+   dreht den Inhalt bei Bedarf aufrecht (ein Querformat-Etikett, das macOS gegen den Uhrzeigersinn
+   gedreht auf ein Hochformat-Blatt legt, wird zurückgedreht – umgekehrt ebenso), vergrößert oder
+   verkleinert ihn seitenverhältnistreu und druckt ihn mittig und formatfüllend mit 1,5 mm Rand auf
+   das Etikett. Ein Etikett-PDF mit 15 Seiten ergibt 15 Etiketten in voller Größe, eine ganze A4-Seite
+   wird auf das Etikett verkleinert. Seiten, die schon Etikettengröße haben, druckt der Treiber
+   unverändert; bei Endlosmaterial folgt die Länge dem Inhalt.
+4. **macOS-Drucker aus den Systemeinstellungen stellt LabelWerk um.** Wurde ein in LabelWerk
+   eingerichteter Drucker zusätzlich unter **Systemeinstellungen › Drucker & Scanner** per
+   IP-Adresse hinzugefügt (er heißt dann z. B. **„10.62.13.19“** und nutzt AirPrint oder einen
+   allgemeinen Treiber – ohne Etikettengröße und ohne Anpassen ans Etikett), stellt LabelWerk diesen
+   macOS-Drucker automatisch auf den LabelWerk-Treiber um: beim Start, sobald die App wieder aktiv
+   wird, und wenn ein Drucker in LabelWerk hinzukommt oder eine neue Adresse erhält. Er druckt dann
+   über den Rohdatenport 9100 mit der Etikettengröße und allen Druckeinstellungen aus LabelWerk und
+   heißt im Druckdialog wie in LabelWerk (z. B. **„Zebra ZD421t“**); sein Name in macOS bleibt. Ein
+   Hinweis meldet das einmal: *„macOS-Drucker „10.62.13.19“ nutzt jetzt den LabelWerk-Treiber.“*
+   Voraussetzung: Der Drucker ist in LabelWerk mit derselben IP-Adresse bzw. demselben Hostnamen
+   eingerichtet, und LabelWerk wurde danach einmal geöffnet. macOS-Drucker anderer Adressen ändert
+   LabelWerk nie. Darf der Benutzer keine Drucker ändern, fragt **„Erneut versuchen“** im Hinweis nach
+   dem Administratorpasswort.
 
 **Optional:** Wer will, wählt im Druckdialog trotzdem das Etikettenformat als Papierformat und
 „Skalierung 100 %“ bzw. sichert beides als Voreinstellung – nötig ist das nicht. Soll eine Seite

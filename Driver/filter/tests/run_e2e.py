@@ -23,8 +23,11 @@ schrittweiser Uhr (``LW_FIXED_TIME``/``LW_TIME_STEP_SECONDS``, auch mit anderer 
 Fall wirklich wartet – nur die Zeitmessung wartet kurz), Etikettenbefehle und ``^MF``.
 
 An Etikett anpassen (§8 „F“, ``lwFitToLabel``/``lwLabelWidth``/``lwLabelHeight``): A4/Letter-Seiten mit
-kleinem Etikett in der Ecke, volle Seiten (verkleinert), leere Seiten, passende Größen (unverändert),
-Drehung, Endlosmaterial (nur Breite), ``PageSize`` statt ``cupsPageSize``, PPD-Standard ``Off``.
+kleinem Etikett in der Ecke (vergrößert, 1,5 mm Rand), volle Seiten (verkleinert), leere Seiten,
+passende Größen (unverändert), automatische Drehung (halb so großes, gegen den Uhrzeigersinn gedrehtes
+Etikett mitten auf A4 → im Uhrzeigersinn zurück; Querformat auf 4 × 6 Zoll → gegen den Uhrzeigersinn;
+600 dpi), Benutzer-Drehung, Endlosmaterial (nur Breite, auch vergrößert), ``PageSize`` statt
+``cupsPageSize``, PPD-Standard ``Off``.
 
 Aufruf:
     run_e2e.py --bindir build [--quick] [--wrapper "valgrind -q …"] [--only MUSTER] [--keep]

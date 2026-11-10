@@ -86,7 +86,8 @@ enum CommandCatalog {
         OptionSpec("time-zone", value: "id", "Zeitzone für ^ST, z. B. UTC oder Europe/Berlin (Standard: Systemzeitzone bzw. TZ)"),
         OptionSpec("fit-to-label", value: "auto|off",
                    "An Etikett anpassen (lwFitToLabel): Bilder, deren --page-size um mehr als 2 mm von --label-size abweicht, "
-                   + "auf den Inhalt zuschneiden, nur verkleinern und mittig auf das Etikett setzen – wie der CUPS-Filter (Standard: auto)"),
+                   + "auf den Inhalt zuschneiden, bei Bedarf um 90° drehen, vergrößern oder verkleinern und mittig mit 1,5 mm Rand "
+                   + "auf das Etikett setzen – wie der CUPS-Filter (Standard: auto)"),
         OptionSpec("label-size", value: "BxH[mm|in]",
                    "Etikettengröße der Warteschlange (lwLabelWidth/lwLabelHeight), z. B. 104x76.2mm oder 4x6in; Höhe 0 = frei "
                    + "(Endlosmaterial). Ohne Angabe keine Anpassung"),

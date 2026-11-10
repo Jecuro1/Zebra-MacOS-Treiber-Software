@@ -398,14 +398,20 @@ public enum LabelFit {
     public static let contentLevel = 250            // Inhalt ⇔ L < 250
     public static let toleranceHundredthsMM = 200   // 2 mm
     public static let maxDots = 32_000
-    public struct Plan: Hashable, Sendable { public var width: Int?; public var height: Int? }  // nil = frei
+    public static let marginHundredthsMM = 150      // Sicherheitsrand je Seite (1,5 mm)
+    public struct Plan: Hashable, Sendable {        // Etikett in Punkten (nil = frei) + Rand je Seite in Punkten
+        public var width: Int?; public var height: Int?; public var marginX: Int; public var marginY: Int
+    }
     public static func plan(settings: PrintSettings, pageSize: PageSizePoints?, xDPI: Int, yDPI: Int,
                             imageWidth: Int, imageHeight: Int) -> Plan?   // nil = keine Anpassung
     public static func hundredthsMM(fromPoints points: Double) -> Int?    // ⌊pt·2540/72 + 0,5⌋, nil wenn ungültig
+    public static func margin(dpi: Int) -> Int                            // (150·dpi + 1270) / 2540
     public static func contentBounds(_ image: GrayImage) -> (x: Int, y: Int, width: Int, height: Int)?
+    public static func rotation(contentWidth: Int, contentHeight: Int, plan: Plan) -> QuarterTurn  // F.3: r0/r90/r270
+    public static func box(contentWidth: Int, contentHeight: Int, plan: Plan) -> (width: Int, height: Int)    // F.4
     public static func targetSize(contentWidth: Int, contentHeight: Int, plan: Plan) -> (width: Int, height: Int)
     public static func areaAverage(_ image: GrayImage, x: Int, y: Int, width: Int, height: Int,
-                                   toWidth: Int, toHeight: Int) -> GrayImage   // Flächenmittel, nur Ganzzahlen
+                                   toWidth: Int, toHeight: Int) -> GrayImage   // Flächenmittel (auch vergrößern), nur Ganzzahlen
     public static func apply(_ image: GrayImage, plan: Plan) -> GrayImage
 }
 ```
@@ -831,13 +837,18 @@ Grafikdaten in einer Zeile.
 
 ### F. An Etikett anpassen (`lwFitToLabel`, vor dem Rastern)
 
-macOS-Programme schicken oft die Systempapiergröße (A4/Letter, „Andere 210 × 297 mm“) oder die
-Seitengröße des Dokuments statt der Etikettengröße der Warteschlange. Schritt F legt solche Seiten
-automatisch auf das Etikett, **bevor** gerastert wird (Graustufen `L`, 0 = schwarz); danach läuft
-alles wie gewohnt (Rastern über die volle Breite, Schritte 0–5, Abschneiden auf die Druckbreite …),
-als hätte das Programm eine etikettengroße Seite geschickt. Passt die Seitengröße (± 2 mm), bleibt
-die Ausgabe byte-gleich zu der ohne Schritt F. Alle Rechnungen sind Ganzzahlrechnungen (64 Bit,
-Division mit Abschneiden), bis auf die Umrechnung der Seitengröße (IEEE-754 `double`, genau so).
+macOS-Programme schicken oft die Systempapiergröße (A4/Letter, „Andere 210 × 297 mm“ – das
+Standardpapierformat der macOS-Systemeinstellungen gilt für alle Drucker, nicht je Warteschlange) oder
+die Seitengröße des Dokuments statt der Etikettengröße der Warteschlange. Ein quer liegendes Etikett
+legt macOS dabei („Automatisch drehen“ bzw. IPP-Querformat) um 90° **gegen** den Uhrzeigersinn
+gedreht auf die Hochformatseite, bei „Skalierung 100 %“ oft kleiner als das Etikett. Schritt F legt
+solche Seiten automatisch aufrecht und formatfüllend (abzüglich 1,5 mm Rand) auf das Etikett,
+**bevor** gerastert wird (Graustufen `L`, 0 = schwarz); danach läuft alles wie gewohnt (Rastern über
+die volle Breite, Schritte 0–5 mit Benutzer-Drehung `R`, Spiegeln, Negativ, Abschneiden auf die
+Druckbreite, Bei letztem Element stoppen …), als hätte das Programm eine etikettengroße Seite
+geschickt. Passt die Seitengröße (± 2 mm in beiden Richtungen, so wie sie ist), bleibt die Ausgabe
+byte-gleich zu der ohne Schritt F. Alle Rechnungen sind Ganzzahlrechnungen (64 Bit, Division mit
+Abschneiden, alle Werte ≥ 0), bis auf die Umrechnung der Seitengröße (IEEE-754 `double`, genau so).
 
 Eingaben je Seite: Luminanz `L(x, y)` (`w × h` Punkte; Seiten ohne Fläche werden wie bisher ohne
 Schritt F übersprungen), Seitengröße `pw × ph` in Punkten (Filter: `cupsPageSize[0/1]`, wenn beide
@@ -849,48 +860,86 @@ Auftrags für beide), Einstellungen `lwFitToLabel`, `lwLabelWidth` (`lw`), `lwLa
 1. **Ziel bestimmen.** Schritt F entfällt, wenn `lwFitToLabel = Off`, `lw = 0` oder die
    Seitengröße unbekannt bzw. ungültig ist (nicht `0 < pw ≤ 100000` und `0 < ph ≤ 100000`).
    Etikettenlänge `le = (lwMediaTracking = Continuous) ? 0 : lh` – 0 heißt **frei** (Endlosmaterial:
-   nur die Breite wird angepasst, lange Belege bleiben lang). In Seitenrichtung: `R` = 90/270 →
+   nur die Breite wird angepasst, die Länge folgt dem Inhalt). In Seitenrichtung: `R` = 90/270 →
    `(cw, ch) = (le, lw)` (die Seite liegt quer, Schritt 0 dreht sie später), sonst `(cw, ch) = (lw, le)`.
    Seite in 1/100 mm: `Pw = ⌊pw · 2540 / 72 + 0,5⌋` (genau so in `double`: `floor(pw * 2540.0 / 72.0 + 0.5)`),
    `Ph` ebenso. Schritt F entfällt, wenn keine feste Seite abweicht: weder `cw > 0 ∧ |Pw − cw| > 200`
    noch `ch > 0 ∧ |Ph − ch| > 200`. Etikett in Punkten: `W = (cw · xdpi + 1270) / 2540`,
    `H = (ch · ydpi + 1270) / 2540` (frei: kein Wert). Schritt F entfällt, wenn eine feste Seite
    `< 1` oder `> 32000` Punkte ergibt oder `xdpi`/`ydpi` nicht in 1…100000 liegt (der Filter wertet
-   größere `HWResolution` als unbekannt).
+   größere `HWResolution` als unbekannt). Sicherheitsrand je Seite (1,5 mm, gerundet):
+   `mx = (150 · xdpi + 1270) / 2540` links und rechts, `my = (150 · ydpi + 1270) / 2540` oben und unten
+   (152 dpi: 9, 203 dpi: 12, 300 dpi: 18, 600 dpi: 35 Punkte).
 2. **Inhalt.** Ein Punkt ist Inhalt ⇔ `L < 250`. `x0`/`x1` = kleinste/größte Spalte, `y0`/`y1` =
    kleinste/größte Zeile mit Inhalt; `bw = x1 − x0 + 1`, `bh = y1 − y0 + 1`. Ohne Inhalt (leere Seite)
    wird das Ergebnis ein weißes Etikett `W × H` (`L = 255`; freie Seite = 1 Punkt) – weiter mit dem
    Rastern.
-3. **Zielgröße** `tw × th` (nie vergrößern): beide Seiten fest und `bw ≤ W ∧ bh ≤ H` → `bw × bh`.
-   Beide fest, sonst: `W · bh ≤ H · bw` → `tw = W`, `th = max(1, (2 · bh · W + bw) / (2 · bw))`; andernfalls
-   `th = H`, `tw = max(1, (2 · bw · H + bh) / (2 · bh))`. Nur `W` fest: `bw ≤ W` → `bw × bh`, sonst
-   `tw = W`, `th` wie oben. Nur `H` fest: `bh ≤ H` → `bw × bh`, sonst `th = H`, `tw` wie oben.
-4. **Verkleinern (Flächenmittel).** Für jeden Zielpunkt `(X, Y)`:
-   `S = Σx Σy ax(X, x) · ay(Y, y) · L(x0 + x, y0 + y)` über `0 ≤ x < bw`, `0 ≤ y < bh` mit
-   `ax(X, x) = max(0, min((x + 1) · tw, (X + 1) · bw) − max(x · tw, X · bw))` und
-   `ay(Y, y) = max(0, min((y + 1) · th, (Y + 1) · bh) − max(y · th, Y · bh))`;
-   Wert `= (S + T / 2) / T` mit `T = bw · bh`. Bei `tw = bw ∧ th = bh` ist das genau die Kopie des
-   Ausschnitts (Implementierungen dürfen dann kopieren). Die Summe ist trennbar (erst Zeilen, dann
-   Spalten), darf aber erst am Ende einmal gerundet werden.
-5. **Einsetzen.** Etikett `CW × CH` mit `CW = W` (frei: `tw`), `CH = H` (frei: `th`), weiß (255);
-   das Bild kommt an `ox = (CW − tw) / 2`, `oy = (CH − th) / 2` (waagerecht **und** senkrecht
-   mittig). Dieses Bild ersetzt die Seite.
+3. **Drehen.** Rahmen für einen Inhalt `u × v` (auch in Schritt 4):
+   `BW = W − 2 · mx` (ist das `< 1`: `W`; freie Breite: `max(u, 32000)`),
+   `BH = H − 2 · my` (ist das `< 1`: `H`; freie Länge: `max(v, 32000)`). Gedreht wird nur, wenn
+   **beide** Seiten fest sind (dann hängt der Rahmen `BW × BH` nicht vom Inhalt ab) und der gedrehte
+   Inhalt mehr als 10 % größer würde: `s90 > 1,1 · s0` mit `s0 = min(BW / bw, BH / bh)` und
+   `s90 = min(BW / bh, BH / bw)` (exakte Brüche). Das ist gleichwertig zu – und wird so gerechnet:
+   * `10 · bh > 11 · bw ∧ 10 · BW > 11 · BH` (Inhalt hoch, Etikett quer) → **90° im Uhrzeigersinn**
+     (macht die Drehung gegen den Uhrzeigersinn rückgängig, mit der macOS ein Querformat-Etikett auf
+     eine Hochformatseite legt);
+   * `10 · bw > 11 · bh ∧ 10 · BH > 11 · BW` (Inhalt quer, Etikett hoch) → **90° gegen den
+     Uhrzeigersinn** (270°);
+   * sonst keine Drehung.
 
-Folgen: Ein Etikett-PDF, das Vorschau bei 100 % auf A4 oder Letter setzt, wird in Originalgröße und
-ohne den weißen Rand mittig gedruckt; größerer Inhalt (z. B. eine ganze A4-Seite) wird
-seitenverhältnistreu verkleinert; eine leere Seite ergibt ein leeres Etikett (mit
+   (Mit `q = bh / bw` und `a = BW / BH` gilt `s90 / s0 = min(q, a)` für `q > 1 ∧ a > 1`,
+   `min(1/q, 1/a)` für `q < 1 ∧ a < 1` und `≤ 1` sonst.) Der Ausschnitt wird ganzzahlig gedreht zu
+   `S` mit `rw × rh = bh × bw`: 90°: `S(bh − 1 − y, x) = L(x0 + x, y0 + y)`; 270°:
+   `S(y, bw − 1 − x) = L(x0 + x, y0 + y)` (`0 ≤ x < bw`, `0 ≤ y < bh`). Ohne Drehung: `rw × rh = bw × bh`,
+   `S(x, y) = L(x0 + x, y0 + y)`.
+4. **Zielgröße** `tw × th` (vergrößern **und** verkleinern, Seitenverhältnis erhalten): Rahmen
+   `BW × BH` aus Schritt 3 für `u × v = rw × rh`. `BW · rh ≤ BH · rw` → `tw = BW`,
+   `th = max(1, (2 · rh · BW + rw) / (2 · rw))`; andernfalls `th = BH`, `tw = max(1, (2 · rw · BH + rh) / (2 · rh))`.
+   Bei freier Länge wird also auf die Breite `BW` skaliert (höchstens 32000 Punkte lang, ein schon
+   längerer Inhalt wird nicht länger); bei freier Breite entsprechend auf die Höhe `BH`.
+5. **Skalieren (Flächenmittel, beide Richtungen).** Quellpunkt `x` deckt auf einer gemeinsamen
+   Ganzzahlachse `[x · tw, (x + 1) · tw)`, Zielpunkt `X` deckt `[X · rw, (X + 1) · rw)` (senkrecht mit
+   `th`/`rh` ebenso). Für jeden Zielpunkt `(X, Y)`:
+   `Σ = Σx Σy ax(X, x) · ay(Y, y) · S(x, y)` über `0 ≤ x < rw`, `0 ≤ y < rh` mit
+   `ax(X, x) = max(0, min((x + 1) · tw, (X + 1) · rw) − max(x · tw, X · rw))` und
+   `ay(Y, y) = max(0, min((y + 1) · th, (Y + 1) · rh) − max(y · th, Y · rh))`;
+   Wert `= (Σ + T / 2) / T` mit `T = rw · rh` (die Gewichte eines Zielpunkts ergeben zusammen genau
+   `T`). Dieselbe Formel verkleinert (Flächenmittel) und vergrößert (Box-Abtastung: ein Zielpunkt
+   überdeckt einen oder zwei Quellpunkte je Achse; ganzzahliger Faktor → reine Kopien, z. B.
+   `[0, 255]` → `[0, 0, 255, 255]`, 2 → 3 Punkte → `[0, 128, 255]`); je Achse unabhängig. Bei
+   `tw = rw ∧ th = rh` ist das genau die Kopie (Implementierungen dürfen dann kopieren). Die Summe
+   ist trennbar (erst Zeilen, dann Spalten), darf aber erst am Ende einmal gerundet werden.
+6. **Einsetzen.** Etikett `CW × CH` mit `CW = W` (frei: `tw`), `CH = H` (frei: `th`), weiß (255);
+   das Bild kommt an `ox = (CW − tw) / 2`, `oy = (CH − th) / 2` (waagerecht **und** senkrecht
+   mittig; da `tw ≤ BW` und `th ≤ BH`, bleibt bei fester Seite auf jeder Seite mindestens der Rand
+   `mx` bzw. `my` frei, außer der Rand ist größer als das Etikett). Dieses Bild ersetzt die Seite.
+
+Folgen: Ein Etikett-PDF, das Vorschau oder Safari bei 100 % auf A4 oder Letter setzt – auch halb so
+groß und gegen den Uhrzeigersinn gedreht mitten auf der Seite –, wird ohne den weißen Rand aufrecht,
+seitenverhältnistreu und formatfüllend (1,5 mm Rand) gedruckt; größerer Inhalt (z. B. eine ganze
+A4-Seite) wird verkleinert, kleinerer vergrößert; eine leere Seite ergibt ein leeres Etikett (mit
 `skipBlankLabels` übersprungen). `lwLabelWidth`/`lwLabelHeight` sind Warteschlangen-Standards aus
 dem Etikettenformat (§9); ohne sie (ältere Warteschlangen, `lwctl encode` ohne `--label-size`) und mit
 `lwFitToLabel=Off` bleibt alles wie bisher. Der Filter puffert nur in Schritt F eine ganze Seite
-(`w · h` Bytes, höchstens 1 GiB); ist sie größer oder fehlt Speicher, druckt er sie mit `WARNING:`
-unverändert (die einzige Stelle, an der Filter und `JobEncoder` absichtlich abweichen können).
+(`w · h` Bytes, höchstens 1 GiB) sowie bei einer Drehung den gedrehten Ausschnitt (`bw · bh` Bytes);
+ist die Seite größer oder fehlt Speicher, druckt er sie mit `WARNING:` unverändert (die einzige
+Stelle, an der Filter und `JobEncoder` absichtlich abweichen können). Er meldet jede angepasste Seite
+mit `INFO:` (Größe, Etikett in Punkten, ggf. „um 90° im Uhrzeigersinn gedreht“ bzw. „um 90° gegen den
+Uhrzeigersinn gedreht“).
 
 Entscheidungen (gegenüber dem ersten Entwurf präzisiert): Bei Endlosmaterial
 (`lwMediaTracking=Continuous`) bzw. `lwLabelHeight=0` ist die Länge frei – sonst würde ein langer
-Beleg auf die Abschnittslänge des Formats geschrumpft. Bei `R` = 90/270 gilt das Etikett quer (wie
-`lwctl print` die Seite für eine Drehung quer einpasst). Die Inhaltsschwelle 250 ignoriert
-JPEG-/Scanner-Rauschen nahe Weiß; dunklere Punkte gehören zum Inhalt, auch wenn das gewählte
-Rasterverfahren sie weiß drucken würde.
+Beleg auf die Abschnittslänge des Formats geschrumpft; gedreht wird dann nie, der Rand gilt nur für
+die feste Seite. Bei `R` = 90/270 gilt das Etikett quer (wie `lwctl print` die Seite für eine Drehung
+quer einpasst); Schritt F dreht in Seitenrichtung, die Benutzer-Drehung `R` folgt danach in Schritt 0.
+Die Inhaltsschwelle 250 ignoriert JPEG-/Scanner-Rauschen nahe Weiß; dunklere Punkte gehören zum
+Inhalt, auch wenn das gewählte Rasterverfahren sie weiß drucken würde. Version 2 (Meldung „Etikett
+halb so groß und gedreht auf A4“): Vergrößern ist erlaubt, weil Druckdialoge Etiketten oft mit
+„Skalierung 100 %“ verkleinert liefern; der Rand von 1,5 mm fängt Seitenversatz und Schnitttoleranz
+der Etiketten ab; die Drehschwelle 10 % verhindert, dass fast quadratische Inhalte kippen; die
+Box-Abtastung braucht keine Gleitkommazahlen, ist in C, Swift und Python bitgleich und lässt Striche
+und Barcodes bei ganzzahligen Faktoren scharf (nur Kantenpunkte werden bei krummen Faktoren grau und
+danach wie gewohnt gerastert).
 
 ### ZPL
 
@@ -1038,7 +1087,7 @@ Etikett entfallen ebenso wie alle ZPL-Optionen.
 | `lwCalibrate` `lwSaveSettings` `lwSkipBlank` | `False` `True` | |
 | `lwStartCmd` `lwEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle vor/nach dem Auftrag |
 | `lwLabelStartCmd` `lwLabelEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle am Anfang/Ende jedes Etiketts |
-| `lwFitToLabel` | `Auto` `Off` | „An Etikett anpassen“ (Standard `Auto`; der Wert „Default“ bedeutet `Auto`): Seiten, deren Größe um mehr als 2 mm vom Etikett abweicht (A4/Letter aus dem macOS-Druckdialog), legt der Treiber vor dem Rastern auf das Etikett – zugeschnitten auf den Inhalt, nur verkleinert, mittig (§8 „F“) |
+| `lwFitToLabel` | `Auto` `Off` | „An Etikett anpassen“ (Standard `Auto`; der Wert „Default“ bedeutet `Auto`): Seiten, deren Größe um mehr als 2 mm vom Etikett abweicht (A4/Letter aus dem macOS-Druckdialog), legt der Treiber vor dem Rastern auf das Etikett – zugeschnitten auf den Inhalt, bei Bedarf um 90° gedreht, vergrößert oder verkleinert, mittig mit 1,5 mm Rand (§8 „F“) |
 | `lwLabelWidth` `lwLabelHeight` | `0`…`100000` (1/100 mm, nicht in der PPD; `0` = unbekannt) | Etikettengröße der Warteschlange für `lwFitToLabel` (aus dem Etikettenformat; Endlosmaterial: Länge `0` = frei); ohne `lwLabelWidth` keine Anpassung |
 
 Nicht in der PPD (frei wählbare Werte bzw. veraltet; nur als Warteschlangen-Standard per `lpadmin`
@@ -1136,11 +1185,14 @@ Warteschlangen-Standards `name-default` (printers.conf) bleiben dagegen erhalten
   Abgleiche vergleichen erst (`lpoptions -p <queue> -l` und `lpoptions -p <queue>`,
   `QueueDefaults.difference`) und rufen `lpadmin` nur bei Abweichungen auf, nie mit Passwortabfrage
   (Administratoren gehören zu `_lpadmin`); Fehler → ein Hinweis mit „Erneut versuchen“. In macOS
-  entfernte Warteschlangen werden nicht neu angelegt. Nur Warteschlangen mit LabelWerk-Treiber (PPD mit
-  `*lwModel`, sonst `printer-make-and-model` mit „LabelWerk“) werden abgeglichen: Eine verknüpfte
-  fremde Warteschlange (Zebras oder CUPS' eigene PPD) bleibt unverändert – automatische Abgleiche
-  überspringen sie still, „Druckeinstellungen“ meldet `notLabelWerkQueue`; umstellen kann sie nur eine
-  ausdrückliche Einrichtung (`installQueue`). Die Seitengrößen der Modell-PPD (fehlende bzw. veraltete
+  entfernte Warteschlangen werden nicht neu angelegt (eine entfernte übernommene vergisst der Drucker).
+  Abgeglichen werden die verknüpfte und die übernommenen Warteschlangen (`SavedPrinter.adoptedQueueNames`,
+  „Übernahme von macOS-Warteschlangen“), aber nur mit LabelWerk-Treiber (PPD mit `*lwModel`, sonst
+  `printer-make-and-model` mit „LabelWerk“). Eine fremde Warteschlange stellt nur die Übernahme um – also
+  nur, wenn ihre Geräte-URI zum Gerät eines LabelWerk-Druckers führt; „OK“/„Übernehmen“ versucht sie
+  dafür zuerst. Sonst (z. B. eine verknüpfte USB-Warteschlange mit Zebras eigener PPD) überspringen
+  automatische Abgleiche sie still, „Druckeinstellungen“ meldet `notLabelWerkQueue`, und umstellen kann
+  sie nur eine ausdrückliche Einrichtung (`installQueue`). Die Seitengrößen der Modell-PPD (fehlende bzw. veraltete
   Größe) stammen aus der installierten Datei (`PPDFiles.installedPageSizes`), nur ohne lesbare Datei
   aus dem Katalog der App (`PPDPageSizes`) – App und Treiber können verschiedene Versionen haben.
 * `lwctl install`: `--stock <id>` oder `--size 104x76.2mm` (mm oder in) – Größe, `lwLabelWidth`/
@@ -1181,6 +1233,76 @@ ein schon in LabelWerk eingerichteter Drucker bringt sein Format als eigene Wahl
 „Installieren“ bzw. „Drucker hinzufügen“ macht daraus ein echtes Format (`LabelStockLibrary.resolveStock`)
 – vor dem Installationsauftrag, sodass die Warteschlange es als benannte Seitengröße erhält und ein
 schon eingerichteter Drucker es übernimmt (`PrinterInstallService.register`).
+
+**Name im Assistenten:** nie eine bloße Adresse. Heißt ein schon in LabelWerk eingerichteter Drucker
+nur nach seiner Adresse (`QueueAdoption.isAddressName`: IPv4-/IPv6-Adresse, auch mit Port, oder der
+Host der Verbindung – so benennen ihn die Netzwerksuche ohne erkanntes Modell und das manuelle
+Hinzufügen), schlägt der Assistent `PrinterSetupPlanning.suggestedName` vor („Zebra ZD421t“, sonst
+„Zebra-Drucker“) statt „10.62.13.19“; die Installation übernimmt den Namen dann auch in LabelWerk.
+„Auch als macOS-Drucker installieren“ (`PrinterInstallRequest(saved:)`) benennt die Warteschlange in
+diesem Fall nach dem Modell.
+
+### Übernahme von macOS-Warteschlangen
+
+Wer einen Zebra-Drucker unter „Systemeinstellungen › Drucker & Scanner“ per IP-Adresse hinzufügt,
+erhält eine Warteschlange wie „10.62.13.19“ mit Apples AirPrint- bzw. einem allgemeinen Treiber –
+ohne benannte Etikettengröße, `lwLabelWidth`/`lwLabelHeight` und Schritt F (§8). Führt sie zum Gerät
+eines in LabelWerk eingerichteten Druckers, stellt die App sie automatisch und ohne Rückfrage auf den
+LabelWerk-Treiber um. Warteschlangen anderer Geräte ändert LabelWerk nie (diese Regel ersetzt das
+frühere „fremde Warteschlangen nie ändern“).
+
+**Entscheidung** (`QueueAdoption.decide` in LabelWerkCore, unter Linux getestet) aus Name, Geräte-URI
+(`lpstat -v`), `printer-make-and-model`, „hat LabelWerk-PPD“ (`*lwModel`, `DriverQueueClassifier`) und
+den Netzwerkdruckern der App (`RegisteredPrinter`: Kennung, Host, Rohdatenport):
+* Nur Netzwerk-URIs `socket`, `ipp`, `ipps`, `lpd`, `http`, `https`; `usb://`, `dnssd://` (nennt nur
+  den Bonjour-Dienstnamen), `file:` und Backend-Hüllen wie `beh:/…` → `ignore`. Leerer Name → `ignore`.
+* Host gleich ohne Groß-/Kleinschreibung, ohne Benutzerangabe, Port, Pfad und Abfrage, ohne eckige
+  Klammern (IPv6; Zone `%25` dekodiert) und abschließende Punkte (`ZD421.local.`). Hostnamen werden
+  nicht aufgelöst: Ein per Hostname eingerichteter Drucker passt nicht zu einer URI mit seiner
+  IP-Adresse und umgekehrt.
+* `socket://` nennt mit dem Port das Gerät (Druckserver mit mehreren Anschlüssen): Der Port muss dem
+  des Druckers entsprechen (ohne Angabe 9100). Bei den übrigen Protokollen bezeichnet der Port nur den
+  Dienst.
+* Drucker der App: TCP-Verbindungen mit Host und Port; Verbindungen über eine macOS-Warteschlange
+  (`cupsQueue`) mit Host und Port aus deren Geräte-URI (`QueueAdoption.registeredPrinter(id:queueDeviceURI:)`,
+  `socket://` mit Port, sonst 9100); USB, Bluetooth und der Demo-Drucker nie. Passen mehrere, gilt der
+  erste in der Reihenfolge der Seitenleiste.
+* LabelWerk-Treiber (oder „LabelWerk“ in `printer-make-and-model`) → `labelWerk` (nichts zu tun);
+  sonst `adopt` mit der Geräte-URI `socket://<host>:<port>` des Druckers (`QueueAdoption.socketURI`,
+  IPv6 in eckigen Klammern) – eine passende `socket://`-URI bleibt unverändert. Den Rohdatenport, über
+  den auch LabelWerk selbst druckt, bietet jeder Zebra-Netzwerkdrucker.
+
+**Umstellen** (`CUPSService.adoptQueue`, ein Aufruf):
+`lpadmin -p <queue> -v <uri> -P <PPD> -D <Beschreibung>` + alle Argumente von `QueueDefaults.plan`
+(mit `-R` veralteter Standards) – dieselbe Modell-PPD bzw. ergänzte Kopie mit der Etikettengröße als
+benannter Standardgröße wie bei `installQueue`, `lwLabelWidth`/`lwLabelHeight`, `lwFitToLabel`
+(Standard `Auto`) und alle übrigen gespeicherten Einstellungen des Druckers. Name, Standort, Freigabe und
+Zustand der Warteschlange bleiben. Beschreibung (`printer-info`, so heißt sie im Druckdialog;
+`QueueAdoption.queueDescription`): der Name des Druckers in LabelWerk – ist der nur eine Adresse, der
+Modellname („Zebra ZD421t“); hat der Drucker schon eine andere vorhandene Warteschlange (deren
+Beschreibung ebenso lautet), mit dem Warteschlangennamen in Klammern („Zebra ZD421t (10.62.13.19)“).
+Danach muss die Warteschlange den LabelWerk-Treiber haben (sonst `notLabelWerkQueue`); abweichende
+Optionen gleicht der nächste Abgleich nach.
+
+**Merken:** Ohne (noch vorhandene) verknüpfte Warteschlange wird die übernommene `cupsQueueName` des
+Druckers, sonst kommt sie zu `SavedPrinter.adoptedQueueNames` (tolerant dekodiert, Standard leer).
+`QueueSyncService` hält beide auf dem Stand der Einstellungen (Fingerabdruck über alle Warteschlangen
+des Druckers).
+
+**Wann** (`QueueSyncService`): einmal 2 s nach dem Start (vor dem Abgleich), bei jedem Aktivieren der
+App (`NSApplication.didBecomeActiveNotification`, nach 1 s zusammengefasst), wenn ein Drucker hinzukommt
+oder seine Verbindung ändert (Beobachtung von `AppModel.sessions`, nur bei geänderten Netzwerk- bzw.
+Warteschlangenverbindungen) und bei „OK“/„Übernehmen“ in „Druckeinstellungen“, wenn eine Warteschlange
+des Druckers noch einen fremden Treiber hat. Eine Prüfung liest `lpstat -v` und `lpoptions -p`
+(`CUPSService.queues`); `lpadmin` läuft nur für umzustellende Warteschlangen, nie zwei Prüfungen
+gleichzeitig. Automatisch ohne Passwortabfrage; Erfolg → **ein** Hinweis „macOS-Drucker „10.62.13.19“
+nutzt jetzt den LabelWerk-Treiber.“ (bei mehreren einer für alle), Fehler → ein Hinweis mit „Erneut
+versuchen“ (dann mit Passwortabfrage). Eine fehlgeschlagene Übernahme versucht die App erst wieder,
+wenn sich Geräte-URI, Treiber oder Soll-Zustand ändern, oder nach einem Neustart.
+
+macOS wählt beim Hinzufügen per USB bzw. per IP mit LPD/„HP Jetdirect – Socket“ selbst die
+LabelWerk-PPD, wenn deren `*1284DeviceID` zur Gerätekennung passt (`Driver/ppd/README.md`
+„Gerätezuordnung“); die Übernahme fängt die übrigen Fälle (AirPrint/IPP, allgemeiner Treiber) ab.
 
 ## 10. Treiber & Installation (macOS)
 

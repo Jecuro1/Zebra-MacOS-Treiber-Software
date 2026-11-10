@@ -248,6 +248,51 @@ enum CUPSService {
         return outcome.approximated.map(optionTitle)
     }
 
+    // MARK: Übernahme fremder Warteschlangen
+
+    /// Stellt eine vorhandene Warteschlange mit fremdem Treiber (z. B. „10.62.13.19“, in „Drucker &
+    /// Scanner“ per IP-Adresse mit AirPrint angelegt) auf den LabelWerk-Treiber um – ARCHITECTURE.md §9
+    /// „Übernahme von macOS-Warteschlangen“. Ob sie zu einem LabelWerk-Drucker gehört, entscheidet
+    /// `QueueAdoption.decide` (LabelWerkCore); hier läuft nur `lpadmin`.
+    ///
+    /// Ein Aufruf: Geräte-URI `deviceURI` (Rohdatenport), Modell-PPD (bzw. ergänzte Kopie mit der
+    /// Etikettengröße als benannter Standardgröße), Beschreibung `description` (Name im Druckdialog) und
+    /// alle Standardwerte des Plans (`lwLabelWidth`/`lwLabelHeight`, `lwFitToLabel` …). Name, Standort,
+    /// Freigabe und Zustand der Warteschlange bleiben.
+    ///
+    /// - Throws: `queueMissing`, `driverNotInstalled`, `noPPD`, `notAuthorized` (ohne Passwortabfrage),
+    ///   `notLabelWerkQueue` (danach weiterhin fremder Treiber), Fehler von `lpadmin`.
+    static func adoptQueue(_ queue: String, deviceURI: String, description: String,
+                           configuration: QueueConfiguration, allowAdminPrompt: Bool) async throws {
+        guard isDriverInstalled else { throw CUPSError.driverNotInstalled }
+        guard !queue.isEmpty, !queue.contains("/"), !queue.hasPrefix(".") else { throw CUPSError.invalidQueueName }
+        let before = await queueState(queue)
+        guard before.isKnown else { throw CUPSError.queueMissing(queue) }
+        guard let ppd = ppdURL(modelID: configuration.modelID, resolution: configuration.resolution ?? .dpi203,
+                               language: configuration.language ?? .zpl) else {
+            throw CUPSError.noPPD(configuration.modelID.flatMap { ModelCatalog.shared.model(id: $0)?.displayName } ?? queue)
+        }
+        // Die Warteschlange besteht: veraltete Warteschlangen-Standards (`-R`) dürfen entfernt werden.
+        let plan = configuration.plan(removingStale: true)
+        let queuePPD = try queuePPDFile(base: ppd, size: configuration.labelSize, queue: queue)
+        defer { queuePPD.cleanup() }
+        var args = ["-p", queue, "-v", deviceURI, "-P", queuePPD.path]
+        let info = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !info.isEmpty { args += ["-D", info] }
+        args += plan.arguments
+        try await runLpadmin(args, allowAdminPrompt: allowAdminPrompt)
+
+        let after = await queueState(queue)
+        // `lpoptions` ohne Antwort: nicht prüfbar. Sonst muss die Warteschlange jetzt den LabelWerk-Treiber haben.
+        guard !after.isKnown || after.isLabelWerk else { throw CUPSError.notLabelWerkQueue(queue) }
+        let difference = QueueDefaults.difference(plan, current: after.options, pageSizeChoices: after.pageSizeChoices)
+        if after.isKnown, !difference.mismatchedOptions.isEmpty || difference.missingPageSize {
+            // Der automatische Abgleich bzw. „Druckeinstellungen“ gleicht erneut ab.
+            NSLog("LabelWerk: übernommene Warteschlange %@ hat Optionen nicht übernommen: %@", queue,
+                  difference.mismatchedOptions.joined(separator: ", "))
+        }
+    }
+
     // MARK: Abgleich (Soll ↔ Ist)
 
     /// Soll-Zustand einer Warteschlange aus den gespeicherten LabelWerk-Einstellungen.

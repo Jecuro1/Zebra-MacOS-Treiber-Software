@@ -27,7 +27,11 @@ Pausieren, eigene Steuerzeichen, RTC (``^ST`` mit fester Uhr, Schritt je Etikett
 (§8 „F“: ``lwctl --label-size/--page-size/--fit-to-label`` ↔ Filter ``lwLabelWidth``/``lwLabelHeight``/
 ``lwFitToLabel`` mit ``cupsPageSize`` aus ``mkraster pw=/ph=`` ↔ Referenz ``page_sizes``): A4/Letter
 mit kleinem Etikett in der Ecke, Letter, leere Seite, passende Größe (byte-gleich zu ohne Anpassung),
-Querformat-Inhalt auf Hochformat-Etikett, ``Off``, Drehung, Endlosmaterial und zufällige Kombinationen.
+Querformat-Inhalt auf Hochformat-Etikett, ``Off``, Drehung, Endlosmaterial und zufällige Kombinationen;
+dazu Rand, automatische Drehung (``turns``: erwartete Drehung je Seite, Referenz und Filtermeldung)
+und Vergrößern – der Fall aus der Meldung (halb so großes, gegen den Uhrzeigersinn gedrehtes Etikett
+mitten auf A4), Etikett in Originalgröße auf A4, Letter bei 300 dpi, Querformat auf 4 × 6 Zoll,
+600 dpi, die 10-%-Grenze und Endlosmaterial.
 Kennt das gebaute ``lwctl`` eine der neuen Optionen noch nicht, werden genau die Fälle, die sie
 brauchen, mit Hinweis übersprungen. Bei einer Abweichung nennt die Meldung die erste abweichende
 Befehlszeile (Zeile, Spalte, Auszug) und – bei Grafikdaten – das erste
@@ -181,6 +185,7 @@ class Case:
     time_step: int = 0                       # Sekunden je Etikett (--time-step / LW_TIME_STEP_SECONDS)
     time_zone: str = "UTC"                   # --time-zone / TZ
     same_as_unfitted: bool = False           # §8 „F“ darf hier nichts ändern (passende Größe, Off)
+    turns: Optional[Tuple[int, ...]] = None  # §8 „F.3“: erwartete Drehung je Seite (0/90/270)
 
     def image_format(self, index: int) -> str:
         if self.formats:
@@ -194,11 +199,11 @@ def build_cases() -> List[Case]:
     def add(name: str, pages: Sequence[Page], copies: int = 1, collate: bool = True, dpi: int = 203,
             max_width: Optional[int] = None, stock: Optional[str] = None, formats: Tuple[str, ...] = (),
             fixed_time: Optional[int] = None, time_step: int = 0, time_zone: str = "UTC",
-            same_as_unfitted: bool = False, **settings) -> None:
+            same_as_unfitted: bool = False, turns: Optional[Tuple[int, ...]] = None, **settings) -> None:
         if settings.get("rtc") and fixed_time is None:
             fixed_time = FIXED_TIME            # ^ST nur mit fester Uhr reproduzierbar
         cases.append(Case(name, tuple(pages), dict(settings), copies, collate, dpi, max_width, stock, formats,
-                          fixed_time, time_step, time_zone, same_as_unfitted))
+                          fixed_time, time_step, time_zone, same_as_unfitted, turns))
 
     # 1. Sprache × Kompression × Rasterverfahren
     for lang in LANGS:
@@ -557,6 +562,39 @@ def fit_cases(add) -> None:
             max_width=1248, language=lang, **label)
     add("anpassen_152dpi_negativ_spiegeln", [sized(A6, 152, "text", 1, (5, 5, 400, 500))], dpi=152,
         negative=True, mirror=True, label_width=5000, label_height=3000)
+
+    # Rand 1,5 mm, Drehung (s90 > 1,1 · s0) und Vergrößern; `turns` prüft die Drehung je Seite.
+    def centered(points, dpi, bw, bh):
+        page = sized(points, dpi, "blank")
+        return (page.width - bw) // 2, (page.height - bh) // 2, bw, bh
+
+    # Fall aus der Meldung: Etikett 104 × 76,2 mm halb so groß (416 × 305 Punkte), von macOS gegen den
+    # Uhrzeigersinn gedreht (305 × 416) mitten auf A4 hoch → im Uhrzeigersinn zurück, formatfüllend.
+    half_turned = centered(A4, 203, 305, 416)
+    for lang in LANGS:
+        add("anpassen_meldung_a4_halb_gedreht_%s" % lang,
+            [sized(A4, 203, "text", seed, half_turned) for seed in (5, 6)] + [sized(A4, 203, "bars", 0, half_turned)],
+            copies=2, max_width=832, language=lang, compression="Z64", turns=(90, 90, 90), **label)
+    add("anpassen_a4_etikett_originalgroesse", [sized(A4, 203, "bars", 0, centered(A4, 203, 831, 609))],
+        max_width=832, dither="Ordered", turns=(0,), **label)
+    add("anpassen_a4_etikett_originalgroesse_gedreht", [sized(A4, 203, "text", 2, centered(A4, 203, 609, 831))],
+        max_width=832, compression="ACS", turns=(90,), **label)
+    add("anpassen_letter_halb_gedreht_300dpi", [sized(LETTER, 300, "text", 8, centered(LETTER, 300, 450, 614))],
+        dpi=300, max_width=1248, dither="Atkinson", turns=(90,), **label)
+    for lang in ("ZPL", "EPL"):
+        add("anpassen_4x6_quer_inhalt_%s" % lang, [sized(LETTER, 203, "bars", 3, (100, 200, 1000, 600))],
+            max_width=832, language=lang, label_width=10160, label_height=15240, turns=(270,))
+    add("anpassen_600dpi_gedreht", [sized((216.0, 288.0), 600, "bars", 0, (300, 400, 700, 1100))], dpi=600,
+        max_width=1248, compression="ACS", label_width=5000, label_height=3000, turns=(90,))
+    add("anpassen_grenze_10_prozent", [sized(A4, 203, "bars", 0, (40, 40, 200, 220)),
+                                       sized(A4, 203, "bars", 0, (40, 40, 200, 221))],
+        max_width=832, turns=(0, 90), **label)
+    add("anpassen_endlos_vergroessert", [sized(A4, 203, "bars", 2, (30, 100, 300, 400))], max_width=640,
+        tracking="Continuous", label_width=8000, label_height=15000, turns=(0,))
+    add("anpassen_endlos_drehung_90_vergroessert", [sized(A4, 203, "text", 3, (30, 100, 300, 400))],
+        max_width=832, tracking="Continuous", rotation=90, label_width=8000, label_height=15000, turns=(0,))
+    add("anpassen_leer_mit_rand", [sized(LETTER, 203, "blank"), sized(A4, 203, "text", 1, half_turned)],
+        max_width=832, language="CPCL", turns=(0, 90), **label)
 
     # Zufällige Kombinationen (eigener Zufallsgenerator – die übrigen Abschnitte bleiben gleich)
     rng = random.Random(20261112)
@@ -1146,6 +1184,14 @@ class EncoderConformanceTest(unittest.TestCase):
         self.assertIn(stock, self.tools.stock_gaps_mm, "Etikettenformat %s fehlt in „lwctl stocks“" % stock)
         gap = gap_dots(self.tools.stock_gaps_mm[stock], case.dpi)
         prepared = self.raster_for(case.pages, case.dpi)
+        if case.turns is not None:
+            # §8 „F.3“: Drehung je Seite wie erwartet (Referenz: Rahmen des Inhalts, Etikett, Rand)
+            turns = []
+            for (w, h, lum), size in zip(prepared.images, prepared.page_sizes):
+                plan = ref.fit_plan(s.clamped(), w, h, size, case.dpi, case.dpi)
+                bounds = ref.content_bounds(lum, w, h) if plan is not None else None
+                turns.append(ref.fit_rotation(bounds[2], bounds[3], plan) if bounds is not None else 0)
+            self.assertEqual(tuple(turns), case.turns, "%s: Drehung je Seite" % case.name)
         files = [self.image_file(page, case.image_format(i)) for i, page in enumerate(case.pages)]
         directory = self.workdir / "faelle" / case.name
         directory.mkdir(parents=True, exist_ok=True)
@@ -1180,6 +1226,9 @@ class EncoderConformanceTest(unittest.TestCase):
                                  str(prepared.raster)], capture_output=True, env=env, timeout=TIMEOUT)
         stderr = result.stderr.decode("utf-8", "replace")
         self.assertEqual(result.returncode, 0, "rastertolabelwerk: %s" % stderr.strip()[-2000:])
+        if case.turns is not None:
+            for turn, note in ((90, "um 90° im Uhrzeigersinn gedreht"), (270, "gegen den Uhrzeigersinn gedreht")):
+                self.assertEqual(note in stderr, turn in case.turns, "%s: Filtermeldung „%s“" % (case.name, note))
         c_output = result.stdout
         (directory / "c.out").write_bytes(c_output)
 
@@ -1277,6 +1326,10 @@ class EncoderConformanceTest(unittest.TestCase):
         self.assertTrue(any(case.same_as_unfitted for case in fit))
         self.assertTrue({A4, LETTER, LABEL_PAGE} <= {page.points for case in fit for page in case.pages})
         self.assertTrue(set(LANGS) <= {case.settings.get("language", "ZPL") for case in fit})
+        # v2: Drehung in beide Richtungen und ohne, 203/300/600 dpi, Endlosmaterial mit Vergrößern
+        self.assertTrue({0, 90, 270} <= {turn for case in fit for turn in case.turns or ()})
+        self.assertTrue({203, 300, 600} <= {case.dpi for case in fit if case.turns})
+        self.assertTrue(any(case.settings.get("tracking") == "Continuous" for case in fit if case.turns))
 
 
 def _make_test(case: Case):

@@ -225,12 +225,31 @@ enum PrinterSetupPlanning {
     // MARK: Namen
 
     /// Vorschlag für den Druckernamen in macOS, z. B. „Zebra ZD421t (Lager)“ – eindeutig gegenüber
-    /// `taken` (Groß-/Kleinschreibung zählt nicht).
+    /// `taken` (Groß-/Kleinschreibung zählt nicht). Nie eine bloße Adresse wie „10.62.13.19“
+    /// (``QueueAdoption/isAddressName(_:host:)``): Dann gilt `fallback` („Zebra-Drucker“).
     static func suggestedName(modelName: String?, location: String, fallback: String, taken: [String]) -> String {
-        let base = nonEmpty(modelName) ?? fallback
+        let model = nonEmpty(modelName).flatMap { QueueAdoption.isAddressName($0) ? nil : $0 }
+        let base = model ?? fallback
         let place = location.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = place.isEmpty ? base : "\(base) (\(place))"
         return uniqueDisplayName(name, taken: taken)
+    }
+
+    /// Name eines schon in LabelWerk eingerichteten Druckers als Vorschlag für den macOS-Drucker –
+    /// `nil`, wenn er nur die Adresse des Geräts ist („10.62.13.19“, „zd421.local:9100“, wie ihn die
+    /// Netzwerksuche ohne erkanntes Modell oder das manuelle Hinzufügen vergibt). Dann schlägt der
+    /// Assistent ``suggestedName(modelName:location:fallback:taken:)`` vor, also das Modell („Zebra ZD421t“).
+    static func existingName(_ name: String, descriptor: ConnectionDescriptor) -> String? {
+        guard let trimmed = nonEmpty(name), !QueueAdoption.isAddressName(trimmed, host: host(of: descriptor)) else {
+            return nil
+        }
+        return trimmed
+    }
+
+    /// Host einer Netzwerkverbindung (`nil` bei USB, Bluetooth …).
+    static func host(of descriptor: ConnectionDescriptor) -> String? {
+        if case .tcp(let host, _) = descriptor { return host }
+        return nil
     }
 
     /// Hängt bei Bedarf „ 2“, „ 3“ … an.

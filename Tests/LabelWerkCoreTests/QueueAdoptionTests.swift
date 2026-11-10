@@ -94,6 +94,57 @@ struct QueueAdoptionTests {
         #expect(QueueAdoption.normalizedHost("[]") == nil)
     }
 
+    @Test func printersConnectedThroughAQueueUseItsHost() {
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "socket://10.62.13.19:6101")
+                == QueueAdoption.RegisteredPrinter(id: "q", host: "10.62.13.19", port: 6101))
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "socket://10.62.13.19")
+                == QueueAdoption.RegisteredPrinter(id: "q", host: "10.62.13.19", port: 9100))
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "ipp://ZD421.local:631/ipp/print")
+                == QueueAdoption.RegisteredPrinter(id: "q", host: "zd421.local", port: 9100))
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "usb://Zebra%20Technologies/ZTC%20ZD421") == nil)
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "dnssd://Zebra._ipp._tcp.local./") == nil)
+        // Eine zweite Warteschlange desselben Geräts wird dann übernommen.
+        let viaQueue = QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "lpd://10.62.13.19/")!
+        #expect(decide("ipp://10.62.13.19/ipp/print", printers: [viaQueue])
+                == .adopt(printerID: "q", deviceURI: "socket://10.62.13.19:9100"))
+    }
+
+    @Test func addressNames() {
+        #expect(QueueAdoption.isAddressName("10.62.13.19"))
+        #expect(QueueAdoption.isAddressName(" 10.62.13.19:9100 "))
+        #expect(QueueAdoption.isAddressName("fe80::1%en0"))
+        #expect(QueueAdoption.isAddressName("[2001:db8::7]:9100"))
+        #expect(QueueAdoption.isAddressName("ZD421-Lager.local", host: "zd421-lager.local."))
+        #expect(QueueAdoption.isAddressName("zd421-lager.local:9100", host: "ZD421-Lager.local"))
+        #expect(!QueueAdoption.isAddressName("ZD421-Lager.local"))
+        #expect(!QueueAdoption.isAddressName("Zebra ZD421t"))
+        #expect(!QueueAdoption.isAddressName("Zebra ZD421t", host: "10.62.13.19"))
+        #expect(!QueueAdoption.isAddressName("Lager/10.62.13.19", host: "10.62.13.19"))
+        #expect(!QueueAdoption.isAddressName("10.62.13"))
+        #expect(!QueueAdoption.isAddressName("10.62.13.256"))
+        #expect(!QueueAdoption.isAddressName("Kasse:1"))
+        #expect(!QueueAdoption.isAddressName(""))
+    }
+
+    @Test func descriptionOfAdoptedQueues() {
+        func description(_ name: String, model: String? = "Zebra ZD421t", queue: String = "10.62.13.19",
+                         other: Bool = false) -> String {
+            QueueAdoption.queueDescription(printerName: name, modelName: model, host: "10.62.13.19", queueName: queue,
+                                           printerHasOtherQueue: other)
+        }
+        // Der Druckdialog zeigt den Namen aus LabelWerk statt der Adresse.
+        #expect(description("Zebra ZD421t") == "Zebra ZD421t")
+        #expect(description("Versand") == "Versand")
+        // Heißt der Drucker selbst nur „10.62.13.19“, gilt das Modell.
+        #expect(description("10.62.13.19") == "Zebra ZD421t")
+        #expect(description(" ") == "Zebra ZD421t")
+        #expect(description("10.62.13.19", model: nil) == "10.62.13.19")
+        #expect(description("", model: nil) == "10.62.13.19")
+        // Neben der eigenen LabelWerk-Warteschlange (gleicher Name im Druckdialog) unterscheidbar.
+        #expect(description("Zebra ZD421t", other: true) == "Zebra ZD421t (10.62.13.19)")
+        #expect(description("Zebra ZD421t", queue: "zebra zd421t", other: true) == "Zebra ZD421t")
+    }
+
     @Test func socketURIs() {
         #expect(QueueAdoption.socketURI(host: "10.62.13.19", port: 9100) == "socket://10.62.13.19:9100")
         #expect(QueueAdoption.socketURI(host: "fe80::1%en0", port: 9100) == "socket://[fe80::1%25en0]:9100")

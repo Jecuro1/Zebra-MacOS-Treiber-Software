@@ -40,7 +40,7 @@ Einzelne End-to-End-Fälle: `python3 tests/run_e2e.py --bindir build --only kopi
 | `lw_options.c/.h` | Optionen aus §9: Zerlegung, Vorrang, Begrenzung (entspricht `PrintSettings`) |
 | `lw_raster.c/.h` | Rasterzeile → 8-Bit-Luminanz (alle Bittiefen, Farbräume, chunky/banded) |
 | `lw_dither.c/.h` | Schwelle, Bayer, Halbton, Floyd–Steinberg, Atkinson, Stucki – zeilenweise (Streaming) |
-| `lw_fit.c/.h` | An Etikett anpassen (§8 „F“): Entscheidung, Inhaltsrahmen, Zielgröße, Flächenmittel, Einsetzen |
+| `lw_fit.c/.h` | An Etikett anpassen (§8 „F“): Entscheidung, Rand, Inhaltsrahmen, Drehung, Zielgröße, Flächenmittel (auch vergrößern), Einsetzen |
 | `lw_encode.c/.h` | Hex, ACS, Base64, CRC-16/XMODEM, Z64, Base64url, UTF-8-Prüfung |
 | `lw_job.c/.h` | ZPL-/EPL-/CPCL-Schreiber, Vorverarbeitung, Kopien/Sortierung (Zwischendatei) |
 | `lw_bitmap.c/.h` | 1-Bit-Bitmaps: Abschneiden, Negativ, Spiegeln, 90°/180°/270°, Höhe ändern |
@@ -88,16 +88,28 @@ PPD-Auswahl liegen (auch als `Custom.37`) und werden auf gültige Bereiche begre
 | `lwFitToLabel` | `Auto` (Standard) `Off` | An Etikett anpassen (alle Sprachen, siehe unten) |
 | `lwLabelWidth` `lwLabelHeight` | 0…100000 (1/100 mm, 0 = unbekannt; nicht in der PPD) | Etikettengröße der Warteschlange für `lwFitToLabel`; Länge 0 bzw. `Continuous` = nur die Breite anpassen |
 
-**An Etikett anpassen** (§8 „F“). macOS-Programme schicken oft A4/Letter („Andere 210 × 297 mm“)
-statt der Etikettengröße der Warteschlange. Weicht die Seitengröße aus dem Rasterkopf
-(`cupsPageSize`, sonst `PageSize`) um mehr als 2 mm von `lwLabelWidth` × `lwLabelHeight` ab, liest der
-Filter die Seite ganz (8-Bit-Luminanz, `cupsWidth · cupsHeight` Bytes, höchstens 1 GiB), schneidet sie
-auf den Inhalt (`L < 250`) zu, verkleinert ihn bei Bedarf per Flächenmittel (nie vergrößern,
-Seitenverhältnis bleibt) und setzt ihn mittig auf ein weißes Etikett in der Auflösung des Auftrags
-(`HWResolution`); danach geht es normal weiter (Rastern, Drehung, Abschneiden …). Bei 90°/270°
-Drehung gilt das Etikett quer. Meldung: `INFO: Seite 1 (210 × 297 mm) passt nicht zum Etikett – der
-Inhalt wird automatisch auf das Etikett gelegt (831 × 609 Punkte).` Passende Seiten, `Off` und
-Warteschlangen ohne `lwLabelWidth` laufen wie bisher zeilenweise ohne Seitenpuffer.
+**An Etikett anpassen** (§8 „F“). macOS-Programme schicken oft A4/Letter („Andere 210 × 297 mm“ –
+das Standardpapierformat von macOS gilt für alle Drucker) statt der Etikettengröße der
+Warteschlange, ein Querformat-Etikett dabei oft halb so groß und um 90° gegen den Uhrzeigersinn
+gedreht mitten auf der Hochformatseite. Weicht die Seitengröße aus dem Rasterkopf (`cupsPageSize`,
+sonst `PageSize`) um mehr als 2 mm von `lwLabelWidth` × `lwLabelHeight` ab, liest der Filter die
+Seite ganz (8-Bit-Luminanz, `cupsWidth · cupsHeight` Bytes, höchstens 1 GiB) und
+
+1. schneidet sie auf den Inhalt (`L < 250`) zu,
+2. dreht den Ausschnitt um 90°, wenn er gedreht mehr als 10 % größer würde (`s90 > 1,1 · s0`, nur bei
+   fester Etikettenlänge): Hochformat-Inhalt auf Querformat-Etikett im Uhrzeigersinn (macht die
+   Drehung von macOS rückgängig), Querformat-Inhalt auf Hochformat-Etikett gegen den Uhrzeigersinn,
+3. skaliert ihn seitenverhältnistreu – vergrößern **und** verkleinern – so groß wie möglich in das
+   Etikett abzüglich 1,5 mm Rand je Seite (203 dpi: 12 Punkte), per Flächenmittel bzw.
+   Box-Abtastung in Ganzzahlen (byte-gleich zu `LabelFit` in Swift und `fit_page` in Python),
+4. setzt ihn mittig auf ein weißes Etikett in der Auflösung des Auftrags (`HWResolution`).
+
+Danach geht es normal weiter (Rastern, Drehung `lwRotation`, Spiegeln, Negativ, Abschneiden …). Bei
+90°/270° Drehung gilt das Etikett quer. Endlosmaterial (`Continuous` bzw. Länge 0): nur die Breite
+wird angepasst (mit Rand), die Länge folgt dem Inhalt (höchstens 32000 Punkte), gedreht wird nie.
+Meldung: `INFO: Seite 1 (210 × 297 mm) passt nicht zum Etikett – der Inhalt wird automatisch auf das
+Etikett gelegt (831 × 609 Punkte, um 90° im Uhrzeigersinn gedreht).` Passende Seiten, `Off` und
+Warteschlangen ohne `lwLabelWidth` laufen wie bisher zeilenweise ohne Seitenpuffer (byte-gleich).
 
 Reihenfolge des ZPL-Auftragskopfs: `~JA`, Startbefehle, `~SD`, `~TA`, `~JS`, `~JC`, SGD
 `media.printmode` (Linerless), `^MF`, `^ST`. Je Etikett: (`^ST`), `^XA`, Etikettenanfang, `^MM`,
@@ -173,7 +185,9 @@ werden mit `DEBUG:` übergangen.
   Drehung 90/270 gegen eine Naivimplementierung, Stoppen/Stoppversatz, eigene Steuerzeichen
   (auch vertauscht `^`↔`~`), RTC mit fester und schrittweiser Uhr, `~JA` samt Wartehaken,
   Etikettenbefehle, `^MF`, Linerless, Kerben, Markenversatz; An Etikett anpassen (Entscheidung,
-  Inhaltsrahmen, Zielgröße, Flächenmittel gegen die Definition, Einsetzen, freie Länge).
+  Rand, Inhaltsrahmen, Drehung samt Kurzform = `s90 > 1,1 · s0` für 5000 Zufallsfälle, Zielrahmen und
+  Zielgröße, Flächenmittel beim Verkleinern und Vergrößern gegen die Definition, Einsetzen, freie
+  Länge, der Fall aus der Meldung: gedrehtes halbes Etikett auf A4 → aufrecht und 10-fach).
 * **End-to-End** (`tests/run_e2e.py`): fast 500 Fälle – alle Sprachen × Kompressionen ×
   Rasterverfahren, Negativ/Spiegeln/180°/leere Seiten/Abschneiden/Kopien/Sortierung/Start- und
   Endbefehle, sämtliche Auftragseinstellungen, Vorrangregeln mit PPD-Varianten, 36 Rasterformate
@@ -182,8 +196,10 @@ werden mit `DEBUG:` übergangen.
   die Test-PPD; dazu jede Option der Windows-Druckeinstellungen je Sprache (RTC mit
   `LW_FIXED_TIME`/`LW_TIME_STEP_SECONDS`, auch mit Sommerzeit über `TZ`), PPD-Standardwerte und
   ungültige Werte der neuen Optionen sowie eine Zeitmessung der Wartezeit nach `~JA` (300 ms,
-  Faktor, SIGTERM). „An Etikett anpassen“: A4/Letter mit kleinem Etikett in der Ecke, volle Seiten
-  (verkleinert), quer, leer, gemischt, Drehung, Endlosmaterial, `PageSize`-Ersatz, PWG, 300 dpi und
+  Faktor, SIGTERM). „An Etikett anpassen“: A4/Letter mit kleinem Etikett in der Ecke (vergrößert),
+  volle Seiten (verkleinert), halb so großes, gegen den Uhrzeigersinn gedrehtes Etikett auf A4
+  (Meldung, ZPL und EPL), Querformat-Inhalt auf 4 × 6 Zoll, quer, leer, gemischt, Drehung,
+  Endlosmaterial (auch vergrößert), `PageSize`-Ersatz, PWG, 300 und 600 dpi und
   die unveränderten Fälle (passende Größe, `Off`, ohne Etikett, PPD-Standard `Off`). `mkraster`
   setzt dafür `pw=`/`ph=` (Seitengröße in Punkten), `cps=0` und ein Inhaltsrechteck `bx/by/bw/bh`.
   Die Referenz prüft sich vorab selbst (`python3 tests/reference_encoder.py`).

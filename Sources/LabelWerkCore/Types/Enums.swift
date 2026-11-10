@@ -522,7 +522,8 @@ public enum RTCUpdate: String, Codable, CaseIterable, Sendable, Identifiable {
 
 /// „An Etikett anpassen“ (`lwFitToLabel`): Schickt ein Programm eine Seite, deren Größe nicht zum
 /// Etikett der Warteschlange passt (z. B. A4 aus Vorschau), legt der Treiber den Seiteninhalt
-/// automatisch auf das Etikett – verkleinert, aber nie vergrößert (ARCHITECTURE.md §8).
+/// automatisch auf das Etikett – zugeschnitten auf den Inhalt, bei Bedarf um 90° gedreht, vergrößert
+/// oder verkleinert, mittig mit 1,5 mm Rand (ARCHITECTURE.md §8 „F“).
 public enum LabelFitMode: String, Codable, CaseIterable, Sendable, Identifiable {
     /// Seiten mit abweichender Größe automatisch auf das Etikett legen (Standard).
     case auto

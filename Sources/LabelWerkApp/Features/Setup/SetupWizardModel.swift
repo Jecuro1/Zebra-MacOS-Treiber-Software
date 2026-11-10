@@ -493,9 +493,12 @@ final class PrinterSetupWizardModel {
         adjustSettings(preferredResolution: result.resolution, preferredLanguages: preferredLanguages)
         if location.isEmpty, let place = result.location { location = place }
         if let session, !nameEdited {
-            // Bereits in LabelWerk: denselben Namen vorschlagen.
-            name = session.displayName
-            nameEdited = true
+            // Bereits in LabelWerk: denselben Namen vorschlagen – außer er ist nur die Adresse
+            // („10.62.13.19“): Dann gilt `suggestedName` mit dem Modell („Zebra ZD421t“).
+            if let existing = PrinterSetupPlanning.existingName(session.displayName, descriptor: session.saved.descriptor) {
+                name = existing
+                nameEdited = true
+            }
             if location.isEmpty { location = session.saved.location }
         }
     }
