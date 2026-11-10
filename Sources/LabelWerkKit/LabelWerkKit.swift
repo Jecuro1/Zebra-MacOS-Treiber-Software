@@ -10,7 +10,7 @@ import Foundation
 /// * ``ImageLayout`` – das Einpassen beliebiger Bilder in ein Etikettenformat.
 public enum LabelWerkKitInfo {
     /// Produktversion (identisch mit `VERSION` in `Installer/config.env`).
-    public static let version = "1.0.0"
+    public static let version = "1.1.0"
 
     /// Produktname.
     public static let productName = "LabelWerk"

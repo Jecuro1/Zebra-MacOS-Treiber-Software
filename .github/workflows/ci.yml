@@ -93,6 +93,9 @@ jobs:
        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: macos-15
     timeout-minutes: 90
+    env:
+      # Fortlaufende Build-Nummer (CFBundleVersion) je CI-Lauf – jeder Download ist eindeutig.
+      BUILD: ${{ github.run_number }}
     steps:
       - name: Quelltext auschecken
         uses: actions/checkout@v4
