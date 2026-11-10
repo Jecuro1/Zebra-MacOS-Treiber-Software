@@ -114,9 +114,7 @@ public struct JobEncoder: Sendable {
     /// Kodiert einen Auftrag aus Graustufenbildern; jedes Bild wird zuvor gemäß
     /// `settings.dither` und `settings.threshold` gerastert (vor dem Drehen und Abschneiden).
     public func encode(images: [GrayImage], copies: Int = 1, collate: Bool = true) throws -> Data {
-        let s = settings.clamped()
-        let pages = images.map { Ditherer.dither($0, algorithm: s.dither, threshold: s.threshold) }
-        return try encode(pages: pages, copies: copies, collate: collate)
+        try encode(pages: images.map(dithered), copies: copies, collate: collate)
     }
 
     /// Wie ``encode(images:copies:collate:)``, legt aber jedes Bild vorher mit seiner Seitengröße
@@ -139,14 +137,28 @@ public struct JobEncoder: Sendable {
     public func fitted(_ images: [GrayImage], pageSizes: [PageSizePoints?]) -> [GrayImage] {
         var reference: LabelFit.Reference?
         return images.enumerated().map { index, image in
-            let pageSize = index < pageSizes.count ? pageSizes[index] : nil
-            guard let pageSize, let plan = fitPlan(image, pageSize: pageSize),
-                  let pageWidth = LabelFit.hundredthsMM(fromPoints: pageSize.width),
-                  let pageHeight = LabelFit.hundredthsMM(fromPoints: pageSize.height)
-            else { return image }
-            return LabelFit.apply(image, plan: plan, pageWidth: pageWidth, pageHeight: pageHeight,
-                                  reference: &reference)
+            fitted(image, pageSize: index < pageSizes.count ? pageSizes[index] : nil, reference: &reference)
         }
+    }
+
+    /// Schritt F für die nächste Seite eines Auftrags, Seite für Seite (z. B. für Vorschauen, die nicht
+    /// alle Seiten zugleich im Speicher halten): `reference` trägt die Referenz des Auftrags von Seite zu
+    /// Seite (anfangs `nil`). Die Seiten nacheinander hiermit angepasst ergeben genau
+    /// ``fitted(_:pageSizes:)``.
+    public func fitted(_ image: GrayImage, pageSize: PageSizePoints?, reference: inout LabelFit.Reference?) -> GrayImage {
+        guard let pageSize, let plan = fitPlan(image, pageSize: pageSize),
+              let pageWidth = LabelFit.hundredthsMM(fromPoints: pageSize.width),
+              let pageHeight = LabelFit.hundredthsMM(fromPoints: pageSize.height)
+        else { return image }
+        return LabelFit.apply(image, plan: plan, pageWidth: pageWidth, pageHeight: pageHeight, reference: &reference)
+    }
+
+    /// Rastert ein (angepasstes) Graustufenbild genau wie ``encode(images:copies:collate:)`` – mit
+    /// `settings.dither` und `settings.threshold` (begrenzt). ``encode(pages:copies:collate:)`` mit diesen
+    /// Seiten ergibt dieselben Bytes wie ``encode(images:copies:collate:)`` mit den Bildern.
+    public func dithered(_ image: GrayImage) -> MonoBitmap {
+        let s = settings.clamped()
+        return Ditherer.dither(image, algorithm: s.dither, threshold: s.threshold)
     }
 
     /// Schritt F aus §8 für ein Bild (allein bzw. die erste Seite eines Auftrags): legt eine Seite,

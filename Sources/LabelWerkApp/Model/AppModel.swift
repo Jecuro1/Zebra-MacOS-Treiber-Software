@@ -227,6 +227,11 @@ final class AppModel {
         let session = sessions[index]
         session.stopMonitoring()
         Task { await session.disconnect() }
+        // Die macOS-Drucker seiner Etikettentypen hat LabelWerk angelegt: mit dem Drucker entfernen
+        // (seine eigene Warteschlange bleibt wie bisher).
+        if !session.saved.labelTypes.isEmpty {
+            queueSync?.removeLabelTypeQueues(session.saved.labelTypes, of: session.displayName)
+        }
         animate(.spring(response: 0.4, dampingFraction: 0.85)) {
             sessions.remove(at: index)
             if selection == .printer(id) {
@@ -270,7 +275,81 @@ final class AppModel {
     }
 
     func removeCustomStock(id: String) {
+        // Etikettentypen mit diesem Format übernehmen das Format ihres Druckers (wie die Drucker selbst
+        // unter „Etiketten“) – ihre Warteschlange folgt beim nächsten Abgleich.
+        for session in sessions where session.saved.labelTypes.contains(where: { $0.stockID == id }) {
+            var saved = session.saved
+            for index in saved.labelTypes.indices where saved.labelTypes[index].stockID == id {
+                saved.labelTypes[index].stockID = saved.stockID == id ? (session.model?.defaultStock ?? "w4h6in")
+                                                                     : saved.stockID
+            }
+            session.saved = saved
+        }
         customStocks.removeAll { $0.id == id }
+    }
+
+    // MARK: Etikettentypen
+
+    /// Fügt einem Drucker einen Etikettentyp hinzu. Die macOS-Warteschlange „<Drucker> – <Typ>“ legt
+    /// `QueueSyncService` kurz darauf automatisch an (Name in `LabelType.queueName`); eine mitgegebene
+    /// `queueName` wird ignoriert – LabelWerk entfernt nur Warteschlangen, die es selbst angelegt hat.
+    @discardableResult
+    func addLabelType(_ type: LabelType, to session: PrinterSession) -> LabelType {
+        var added = type
+        added.name = Self.labelTypeName(type.name)
+        added.queueName = nil
+        if session.saved.labelTypes.contains(where: { $0.id == added.id }) { added.id = UUID() }
+        animate(.spring(response: 0.4, dampingFraction: 0.85)) {
+            session.saved.labelTypes.append(added)
+        }
+        return added
+    }
+
+    /// Ändert einen Etikettentyp (gleiche Kennung). Der Name seiner Warteschlange bleibt (die Beschreibung
+    /// im Druckdialog folgt dem neuen Namen); Format und Einstellungen gleicht `QueueSyncService` ab.
+    func updateLabelType(_ type: LabelType, in session: PrinterSession) {
+        guard let index = session.saved.labelTypes.firstIndex(where: { $0.id == type.id }) else { return }
+        var updated = type
+        updated.name = Self.labelTypeName(type.name)
+        updated.queueName = session.saved.labelTypes[index].queueName
+        guard updated != session.saved.labelTypes[index] else { return }
+        session.saved.labelTypes[index] = updated
+    }
+
+    /// Entfernt einen Etikettentyp samt der Warteschlange, die LabelWerk für ihn angelegt hat
+    /// (`lpadmin -x`, nur mit LabelWerk-Treiber).
+    func removeLabelType(id: UUID, from session: PrinterSession) {
+        guard let index = session.saved.labelTypes.firstIndex(where: { $0.id == id }) else { return }
+        let removed = session.saved.labelTypes[index]
+        animate(.spring(response: 0.4, dampingFraction: 0.85)) {
+            session.saved.labelTypes.remove(at: index)
+        }
+        queueSync?.removeLabelTypeQueues([removed], of: session.displayName)
+    }
+
+    /// Wie ``addLabelType(_:to:)`` mit der Kennung des Druckers (`nil`, wenn es ihn nicht gibt).
+    @discardableResult
+    func addLabelType(_ type: LabelType, to printerID: UUID) -> LabelType? {
+        guard let session = session(for: printerID) else { return nil }
+        return addLabelType(type, to: session)
+    }
+
+    /// Wie ``updateLabelType(_:in:)`` mit der Kennung des Druckers.
+    func updateLabelType(_ type: LabelType, in printerID: UUID) {
+        guard let session = session(for: printerID) else { return }
+        updateLabelType(type, in: session)
+    }
+
+    /// Wie ``removeLabelType(id:from:)`` mit der Kennung des Druckers.
+    func removeLabelType(id: UUID, from printerID: UUID) {
+        guard let session = session(for: printerID) else { return }
+        removeLabelType(id: id, from: session)
+    }
+
+    /// Name eines Etikettentyps ohne Leerraum am Rand; leer → „Etikettentyp“.
+    static func labelTypeName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? tr("Etikettentyp") : trimmed
     }
 
     // MARK: Verlauf

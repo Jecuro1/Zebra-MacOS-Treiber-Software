@@ -286,6 +286,7 @@ struct PrintPreferencesView: View {
         let context = self.context
         switch pane {
         case .page: PrintPrefsPagePane(context: context)
+        case .labelTypes: PrintPrefsLabelTypesPane(context: context)
         case .options: PrintPrefsOptionsPane(context: context)
         case .operation: PrintPrefsOperationPane(context: context)
         case .graphics: PrintPrefsGraphicsPane(context: context)

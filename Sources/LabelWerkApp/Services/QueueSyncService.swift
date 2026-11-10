@@ -34,6 +34,16 @@ import LabelWerkKit
 /// und meldet das mit einem Hinweis – nach dem Start, bei jedem Aktivieren der App (``adoptionDebounce``)
 /// und wenn ein Drucker hinzukommt oder seine Verbindung ändert. Warteschlangen anderer Hosts und
 /// Freigaben eines Druckservers (`…/printers/…`) bleiben unberührt (`QueueAdoption.deviceEndpoint`).
+///
+/// **Etikettentypen** (ARCHITECTURE.md §9 „Etikettentypen“): Jeder Typ eines Druckers (`SavedPrinter.labelTypes`)
+/// erhält eine eigene Warteschlange „<Drucker> – <Typ>“ mit derselben Geräte-URI wie die Warteschlange des
+/// Druckers (ohne sie `socket://host:port` bzw. die USB-URI), dem Format des Typs als benannter Standardgröße
+/// und den Einstellungen des Druckers mit den Abweichungen des Typs. Sie folgt denselben Auslösern (Änderung,
+/// Start, „OK“/„Übernehmen“) und wird – anders als die Warteschlange des Druckers – neu angelegt, wenn sie
+/// fehlt: Ein Etikettentyp *ist* ein macOS-Drucker. Den Namen vergibt der erste Abgleich
+/// (`LabelTypeQueueNaming`) und merkt ihn im Typ; nur diese Warteschlangen entfernt LabelWerk wieder
+/// (Typ bzw. Drucker gelöscht, ``removeLabelTypeQueues(_:of:)``). Den Zustand je Typ zeigt
+/// ``labelTypeStatus``.
 @MainActor
 final class QueueSyncService {
 
@@ -41,6 +51,18 @@ final class QueueSyncService {
     struct Fingerprint: Equatable {
         /// Verknüpfte Warteschlange zuerst, danach die übernommenen (``queueNames(of:)``).
         var queues: [String]
+        var configuration: CUPSService.QueueConfiguration
+        /// Soll-Zustand der Warteschlangen der Etikettentypen (ohne deren Namen – die vergibt der Abgleich).
+        var labelTypes: [LabelTypeTarget] = []
+        /// Verbindung des Druckers (Geräte-URI der Typ-Warteschlangen); nur mit Etikettentypen gesetzt.
+        var descriptor: ConnectionDescriptor?
+    }
+
+    /// Soll-Zustand der Warteschlange eines Etikettentyps.
+    struct LabelTypeTarget: Equatable {
+        var typeID: UUID
+        /// Beschreibung im Druckdialog („Zebra ZD421t – Brillenetikett“).
+        var description: String
         var configuration: CUPSService.QueueConfiguration
     }
 
@@ -85,19 +107,54 @@ final class QueueSyncService {
     private var failedAdoptions: [String: AdoptionAttempt] = [:]
     private var activationObserver: NSObjectProtocol?
 
+    /// Zustand der Warteschlange je Etikettentyp (für „Druckeinstellungen › Etikettentypen“).
+    let labelTypeStatus = LabelTypeQueueStatusStore()
+
     init(model: AppModel) {
         self.model = model
     }
 
     // MARK: Soll-Zustand
 
-    /// Soll-Zustand der Warteschlangen eines Druckers (`nil`: keine Warteschlange bzw. Demo-Drucker).
+    /// Soll-Zustand der Warteschlangen eines Druckers (`nil`: weder Warteschlange noch Etikettentypen bzw.
+    /// Demo-Drucker).
     func fingerprint(for session: PrinterSession) -> Fingerprint? {
         guard !session.isVirtual else { return nil }
         let queues = Self.queueNames(of: session.saved)
-        guard !queues.isEmpty else { return nil }
-        return Fingerprint(queues: queues, configuration: CUPSService.QueueConfiguration(printer: session.saved,
-                                                                                        stock: session.stock))
+        let types = Self.labelTypeTargets(of: session)
+        guard !queues.isEmpty || !types.isEmpty else { return nil }
+        return Fingerprint(queues: queues,
+                           configuration: CUPSService.QueueConfiguration(printer: session.saved, stock: session.stock),
+                           labelTypes: types, descriptor: types.isEmpty ? nil : session.saved.descriptor)
+    }
+
+    /// Soll-Zustand der Warteschlangen aller Etikettentypen eines Druckers.
+    static func labelTypeTargets(of session: PrinterSession) -> [LabelTypeTarget] {
+        session.saved.labelTypes.map { type in
+            LabelTypeTarget(typeID: type.id, description: labelTypeQueueDescription(type, of: session),
+                            configuration: labelTypeConfiguration(type, of: session))
+        }
+    }
+
+    /// Soll-Zustand der Warteschlange eines Etikettentyps: Format des Typs, Einstellungen des Druckers mit
+    /// den Abweichungen des Typs (`PrinterSession.effectiveSettings(for:)`), Sprache, Auflösung und Modell
+    /// des Druckers.
+    static func labelTypeConfiguration(_ type: LabelType, of session: PrinterSession) -> CUPSService.QueueConfiguration {
+        CUPSService.QueueConfiguration(settings: session.effectiveSettings(for: type), stock: session.stock(for: type),
+                                       language: session.saved.language, resolution: session.saved.resolution,
+                                       modelID: session.saved.modelID)
+    }
+
+    /// „Zebra ZD421t – Brillenetikett“ (`LabelTypeQueueNaming.description`).
+    static func labelTypeQueueDescription(_ type: LabelType, of session: PrinterSession) -> String {
+        LabelTypeQueueNaming.description(printerName: session.saved.name, modelName: session.model?.displayName,
+                                         host: host(of: session.saved.descriptor), typeName: type.name)
+    }
+
+    /// Host einer Netzwerkverbindung (für die Erkennung von Adressnamen).
+    static func host(of descriptor: ConnectionDescriptor) -> String? {
+        if case .tcp(let host, _) = descriptor { return host }
+        return nil
     }
 
     /// Warteschlangen eines Druckers: die verknüpfte (`cupsQueueName`), danach die übernommenen – ohne
@@ -189,9 +246,20 @@ final class QueueSyncService {
                 if isLinked { linkedError = error }
             }
         }
+        // Etikettentypen folgen den Einstellungen des Druckers; ihre Fehler meldet ein eigener Hinweis.
+        let types = await syncLabelTypeQueues(session, allowAdminPrompt: allowAdminPrompt)
+        reportLabelTypeResults([types])
         if let linkedError { throw linkedError }
-        synced[session.id] = fingerprint
+        if types.failures.isEmpty { synced[session.id] = fingerprint }
         return outcome
+    }
+
+    /// Gleicht nur die Warteschlangen der Etikettentypen eines Druckers sofort ab (Aktion des Benutzers,
+    /// z. B. „Sichern“ im Etikettentyp oder „Erneut versuchen“; mit Passwortabfrage). Ein Hinweis meldet
+    /// neu eingerichtete macOS-Drucker bzw. Fehler.
+    func syncLabelTypesNow(_ session: PrinterSession, allowAdminPrompt: Bool = true) async {
+        let result = await syncLabelTypeQueues(session, allowAdminPrompt: allowAdminPrompt)
+        reportLabelTypeResults([result])
     }
 
     /// Gleicht eine Warteschlange ab. Hat sie (noch) einen fremden Treiber, wird sie zuerst übernommen,
@@ -217,7 +285,14 @@ final class QueueSyncService {
 
     /// Automatischer Abgleich: still bei Erfolg, ein Hinweis mit „Erneut versuchen“ bei Fehlern.
     private func syncInBackground(_ sessions: [PrinterSession], reason: Reason) async {
-        guard CUPSService.isDriverInstalled else { return }
+        guard CUPSService.isDriverInstalled else {
+            for session in sessions {
+                for type in session.saved.labelTypes {
+                    labelTypeStatus.set(.unavailable(tr("Der LabelWerk-Treiber ist nicht installiert.")), for: type.id)
+                }
+            }
+            return
+        }
         let candidates = sessions.compactMap { session in fingerprint(for: session).map { (session, $0) } }
             .filter { reason == .launch || (synced[$0.0.id] != $0.1 && attempted[$0.0.id] != $0.1) }
         guard !candidates.isEmpty else { return }
@@ -227,6 +302,7 @@ final class QueueSyncService {
         // (`runAdoption`) um, sofern sie zum Gerät des Druckers führt – sonst bleibt sie unverändert.
         let labelWerk = await DriverQueueClassifier.labelWerkQueueNames(in: queues)
         var failures: [(session: PrinterSession, queue: String, error: Error)] = []
+        var typeResults: [LabelTypeSyncResult] = []
         for (session, fingerprint) in candidates {
             // Inzwischen erneut geändert: der nächste geplante Abgleich übernimmt.
             guard self.fingerprint(for: session) == fingerprint else { continue }
@@ -255,12 +331,18 @@ final class QueueSyncService {
                     failures.append((session, queue, error))
                 }
             }
+            if !fingerprint.labelTypes.isEmpty {
+                let result = await syncLabelTypeQueues(session, allowAdminPrompt: false)
+                if !result.failures.isEmpty { failed = true }
+                typeResults.append(result)
+            }
             if !failed { synced[session.id] = fingerprint }
             if !vanished.isEmpty {
                 session.saved.adoptedQueueNames.removeAll { vanished.contains($0) }
             }
         }
         reportFailures(failures)
+        reportLabelTypeResults(typeResults)
     }
 
     /// Ein Hinweis für alle fehlgeschlagenen Abgleiche, mit „Erneut versuchen“ (dann mit
@@ -315,6 +397,188 @@ final class QueueSyncService {
         }
         tail = Task { _ = try? await task.value }
         return try await task.value
+    }
+
+    // MARK: Etikettentypen
+
+    /// Ergebnis eines Abgleichs der Typ-Warteschlangen eines Druckers.
+    struct LabelTypeSyncResult: Sendable {
+        var printerID: UUID
+        /// Neu angelegte macOS-Drucker (Beschreibung).
+        var created: [String] = []
+        /// Fehlgeschlagene Typen: Beschreibung und Fehlermeldung.
+        var failures: [LabelTypeFailure] = []
+    }
+
+    struct LabelTypeFailure: Sendable {
+        var description: String
+        var message: String
+    }
+
+    /// Legt die Warteschlangen der Etikettentypen eines Druckers an bzw. gleicht sie ab
+    /// (``CUPSService/ensureLabelTypeQueue(_:deviceURI:description:location:configuration:allowAdminPrompt:)``).
+    /// Läuft als Ganzes in der Reihe der `lpadmin`-Aufrufe: Namensvergabe, Anlegen und Merken des Namens
+    /// überschneiden sich nie mit einem gleichzeitigen Abgleich (sonst entstünde eine zweite Warteschlange).
+    private func syncLabelTypeQueues(_ session: PrinterSession, allowAdminPrompt: Bool) async -> LabelTypeSyncResult {
+        let id = session.id
+        let empty = LabelTypeSyncResult(printerID: id)
+        guard !session.isVirtual, !session.saved.labelTypes.isEmpty else { return empty }
+        guard CUPSService.isDriverInstalled else {
+            for type in session.saved.labelTypes {
+                labelTypeStatus.set(.unavailable(tr("Der LabelWerk-Treiber ist nicht installiert.")), for: type.id)
+            }
+            return empty
+        }
+        for type in session.saved.labelTypes where !labelTypeStatus.status(for: type.id).isReady {
+            labelTypeStatus.set(.syncing, for: type.id)
+        }
+        return (try? await serialized { [weak self] () async -> LabelTypeSyncResult in
+            guard let self, let session = self.model?.session(for: id) else { return empty }
+            return await self.performLabelTypeSync(session, allowAdminPrompt: allowAdminPrompt)
+        }) ?? empty
+    }
+
+    /// Eigentlicher Abgleich (nur aus ``syncLabelTypeQueues(_:allowAdminPrompt:)`` – innerhalb von
+    /// ``serialized(_:)``, ruft `CUPSService` deshalb direkt auf).
+    private func performLabelTypeSync(_ session: PrinterSession, allowAdminPrompt: Bool) async -> LabelTypeSyncResult {
+        var result = LabelTypeSyncResult(printerID: session.id)
+        let queues = await CUPSService.queues()
+        guard let deviceURI = await Self.labelTypeDeviceURI(for: session, queues: queues) else {
+            let reason = tr("Für diese Verbindung kann kein macOS-Drucker eingerichtet werden (nur Netzwerk, USB oder eine macOS-Warteschlange).")
+            for type in session.saved.labelTypes { labelTypeStatus.set(.unavailable(reason), for: type.id) }
+            return result
+        }
+        var known = Set(queues.map { $0.name.lowercased() })
+        let base = Self.baseQueueName(for: session)
+        for type in session.saved.labelTypes {
+            // Inzwischen gelöscht: nichts anlegen.
+            guard let current = session.labelType(id: type.id) else { continue }
+            let target = LabelTypeTarget(typeID: current.id, description: Self.labelTypeQueueDescription(current, of: session),
+                                         configuration: Self.labelTypeConfiguration(current, of: session))
+            let name = current.queueName ?? LabelTypeQueueNaming.queueName(
+                baseQueue: base, typeName: current.name, existing: Array(known) + otherLabelTypeQueueNames(excluding: current.id))
+            do {
+                let outcome = try await CUPSService.ensureLabelTypeQueue(
+                    name, deviceURI: deviceURI, description: target.description, location: session.saved.location,
+                    configuration: target.configuration, allowAdminPrompt: allowAdminPrompt)
+                known.insert(name.lowercased())
+                if outcome == .created { result.created.append(target.description) }
+                if current.queueName != name, !recordLabelTypeQueue(name, typeID: current.id, in: session) {
+                    // Der Typ wurde während des Anlegens gelöscht: seine neue Warteschlange gleich wieder entfernen.
+                    _ = try? await CUPSService.removeLabelTypeQueue(name, allowAdminPrompt: false)
+                    labelTypeStatus.remove(current.id)
+                    continue
+                }
+                labelTypeStatus.set(.ready(name), for: current.id)
+            } catch {
+                let message = PrinterSession.describe(error)
+                labelTypeStatus.set(.failed(message), for: current.id)
+                result.failures.append(LabelTypeFailure(description: target.description, message: message))
+            }
+        }
+        return result
+    }
+
+    /// Namen der Warteschlangen aller anderen Etikettentypen (aller Drucker) – auch solcher, die gerade
+    /// fehlen: Ein neuer Typ bekommt nie den Namen eines anderen.
+    private func otherLabelTypeQueueNames(excluding typeID: UUID) -> [String] {
+        (model?.sessions ?? []).flatMap { session in
+            session.saved.labelTypes.compactMap { $0.id == typeID ? nil : $0.queueName }
+        }
+    }
+
+    /// Merkt den Namen der Warteschlange im Typ. `false`, wenn es den Typ nicht mehr gibt.
+    private func recordLabelTypeQueue(_ name: String, typeID: UUID, in session: PrinterSession) -> Bool {
+        var saved = session.saved
+        guard let index = saved.labelTypes.firstIndex(where: { $0.id == typeID }) else { return false }
+        saved.labelTypes[index].queueName = name
+        session.saved = saved
+        return true
+    }
+
+    /// Geräte-URI der Typ-Warteschlangen: die der Warteschlange des Druckers (verknüpfte, Verbindung über
+    /// eine Warteschlange, übernommene – so erreicht macOS den Drucker bereits), sonst die der Verbindung
+    /// (`socket://host:port`, USB-URI). `nil` für Bluetooth und den Demo-Drucker.
+    static func labelTypeDeviceURI(for session: PrinterSession, queues: [CUPSQueueInfo]) async -> String? {
+        var names = queueNames(of: session.saved)
+        if case .cupsQueue(let name) = session.saved.descriptor { names.insert(name, at: min(1, names.count)) }
+        for name in names {
+            if let queue = queues.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+                let uri = queue.deviceURI.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !uri.isEmpty { return uri }
+            }
+        }
+        return (try? await CUPSService.deviceURI(for: session.saved.descriptor)) ?? nil
+    }
+
+    /// Grundlage des Namens neuer Typ-Warteschlangen: die verknüpfte Warteschlange des Druckers, sonst
+    /// sein bereinigter Name – nie eine bloße Adresse („10.62.13.19“ → „Zebra_ZD421t“).
+    static func baseQueueName(for session: PrinterSession) -> String {
+        let host = host(of: session.saved.descriptor)
+        if let linked = session.saved.cupsQueueName?.trimmingCharacters(in: .whitespaces), !linked.isEmpty,
+           !QueueAdoption.isAddressName(linked, host: host) {
+            return linked
+        }
+        let name = LabelTypeQueueNaming.description(printerName: session.saved.name, modelName: session.model?.displayName,
+                                                    host: host, typeName: "")
+        return CUPSService.sanitizedQueueName(name)
+    }
+
+    /// Entfernt die Warteschlangen gelöschter Etikettentypen (bzw. aller Typen eines gelöschten Druckers) –
+    /// nur die, die LabelWerk angelegt hat (`LabelType.queueName`, mit LabelWerk-Treiber). Fehler meldet ein
+    /// Hinweis.
+    func removeLabelTypeQueues(_ types: [LabelType], of printerName: String) {
+        for type in types { labelTypeStatus.remove(type.id) }
+        let names = types.compactMap(\.queueName)
+        guard !names.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            var failures: [(name: String, message: String)] = []
+            for name in names {
+                do {
+                    _ = try await self.serialized {
+                        try await CUPSService.removeLabelTypeQueue(name, allowAdminPrompt: true)
+                    }
+                } catch {
+                    failures.append((name, PrinterSession.describe(error)))
+                }
+            }
+            guard let model = self.model, let first = failures.first else { return }
+            model.toast(tr("macOS-Drucker nicht entfernt"),
+                        message: tr("„%@“ konnte nicht entfernt werden: %@", failures.map(\.name).joined(separator: ", "),
+                                    first.message),
+                        style: .warning)
+        }
+    }
+
+    /// Ein Hinweis für neu eingerichtete macOS-Drucker, einer (mit „Erneut versuchen“) für Fehler.
+    private func reportLabelTypeResults(_ results: [LabelTypeSyncResult]) {
+        guard let model else { return }
+        let created = results.flatMap(\.created)
+        if created.count == 1 {
+            model.toast(tr("macOS-Drucker „%@“ ist eingerichtet.", created[0]),
+                        message: tr("Im Druckdialog jedes Programms einfach diesen Drucker wählen."), style: .success)
+        } else if created.count > 1 {
+            model.toast(tr("%d macOS-Drucker für Etikettentypen eingerichtet.", created.count),
+                        message: created.map { "„\($0)“" }.joined(separator: ", "), style: .success)
+        }
+        let failures = results.flatMap(\.failures)
+        guard let first = failures.first else { return }
+        let ids = results.filter { !$0.failures.isEmpty }.map(\.printerID)
+        let message = failures.count == 1
+            ? tr("„%@“ konnte nicht eingerichtet werden: %@", first.description, first.message)
+            : tr("%@ konnten nicht eingerichtet werden: %@", failures.map(\.description).joined(separator: ", "),
+                 first.message)
+        model.toast(tr("macOS-Drucker für Etikettentypen nicht eingerichtet"), message: message, style: .warning,
+                    action: ToastAction(title: tr("Erneut versuchen")) { [weak self] in
+                        guard let self else { return }
+                        Task {
+                            for id in ids {
+                                guard let session = self.model?.session(for: id) else { continue }
+                                await self.syncLabelTypesNow(session, allowAdminPrompt: true)
+                            }
+                        }
+                    })
     }
 
     // MARK: Übernahme fremder Warteschlangen
@@ -390,6 +654,30 @@ final class QueueSyncService {
             await adoptForeignQueues(allowAdminPrompt: false, only: nil)
         } while adoptionRequested
         isAdopting = false
+        if launchAdoptionDone { await restoreMissingLabelTypeQueues() }
+    }
+
+    /// Beim Aktivieren der App: Fehlt die Warteschlange eines eingerichteten Etikettentyps (in macOS
+    /// entfernt, CUPS zurückgesetzt), legt der Abgleich sie neu an – ein Etikettentyp ist ein macOS-Drucker.
+    /// Nur für Typen, deren Warteschlange schon bestand: Fehlgeschlagene versucht erst eine Änderung, ein
+    /// Neustart oder „Erneut versuchen“ wieder (sonst bei jedem Aktivieren ein Hinweis).
+    private func restoreMissingLabelTypeQueues() async {
+        guard let model, CUPSService.isDriverInstalled else { return }
+        let candidates = model.sessions.filter { session in
+            !session.isVirtual && session.saved.labelTypes.contains { labelTypeStatus.status(for: $0.id).isReady }
+        }
+        guard !candidates.isEmpty else { return }
+        let existing = Set(await CUPSService.queues().map { $0.name.lowercased() })
+        guard !existing.isEmpty else { return }
+        var results: [LabelTypeSyncResult] = []
+        for session in candidates {
+            let missing = session.saved.labelTypes.contains { type in
+                guard labelTypeStatus.status(for: type.id).isReady, let name = type.queueName else { return false }
+                return !existing.contains(name.lowercased())
+            }
+            if missing { results.append(await syncLabelTypeQueues(session, allowAdminPrompt: false)) }
+        }
+        reportLabelTypeResults(results)
     }
 
     /// Stellt fremde Warteschlangen, die zu einem LabelWerk-Drucker führen, auf den LabelWerk-Treiber um
@@ -522,5 +810,43 @@ final class QueueSyncService {
         Task { [weak self] in
             await self?.adoptForeignQueues(allowAdminPrompt: true, only: queues)
         }
+    }
+}
+
+// MARK: - Zustand der Typ-Warteschlangen
+
+/// Zustand der macOS-Warteschlange je Etikettentyp (beobachtbar für die Oberfläche).
+@Observable
+@MainActor
+final class LabelTypeQueueStatusStore {
+    enum Status: Equatable {
+        /// Noch nicht geprüft (kurz nach dem Start bzw. dem Anlegen).
+        case pending
+        /// Wird angelegt bzw. abgeglichen.
+        case syncing
+        /// Warteschlange vorhanden und auf dem Stand.
+        case ready(String)
+        /// Anlegen bzw. Abgleich fehlgeschlagen (Meldung).
+        case failed(String)
+        /// Für diesen Drucker nicht möglich (Grund).
+        case unavailable(String)
+
+        var isReady: Bool {
+            if case .ready = self { return true }
+            return false
+        }
+    }
+
+    private(set) var statuses: [UUID: Status] = [:]
+
+    func status(for typeID: UUID) -> Status { statuses[typeID] ?? .pending }
+
+    func set(_ status: Status, for typeID: UUID) {
+        guard statuses[typeID] != status else { return }
+        statuses[typeID] = status
+    }
+
+    func remove(_ typeID: UUID) {
+        statuses[typeID] = nil
     }
 }

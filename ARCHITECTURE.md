@@ -382,6 +382,11 @@ public struct JobEncoder: Sendable {
         // wie oben, vorher je Bild Schritt F aus §8 (An Etikett anpassen) mit seiner Seitengröße
         // (pageSizes.count == images.count, sonst ImagingError.invalidArgument; nil = Etikettengröße)
     public func fitted(_ image: GrayImage, pageSize: PageSizePoints?) -> GrayImage   // nur Schritt F
+    public func fitted(_ image: GrayImage, pageSize: PageSizePoints?, reference: inout LabelFit.Reference?) -> GrayImage
+        // Schritt F Seite für Seite (Referenz von Seite zu Seite) – nacheinander = fitted(_:pageSizes:)
+    public func dithered(_ image: GrayImage) -> MonoBitmap   // Rastern wie encode(images:) (settings.dither/threshold)
+        // App „Etikettendruck“: fitted(…, reference:) → dithered → Vorschau mit preprocess, Druck mit
+        // encode(pages:) – dieselben Bytes wie encode(images:pageSizes:)
     public func preprocess(_ page: MonoBitmap) -> MonoBitmap?     // Schritte (0)–(5) aus §8, z. B. für Vorschauen
     public func cancelPrefixLength() -> Int?      // Länge der ~JA-Zeile am Auftragsanfang (Aufrufer wartet danach)
 }
@@ -1341,6 +1346,74 @@ wenn sich Geräte-URI, Treiber oder Soll-Zustand ändern, oder nach einem Neusta
 macOS wählt beim Hinzufügen per USB bzw. per IP mit LPD/„HP Jetdirect – Socket“ selbst die
 LabelWerk-PPD, wenn deren `*1284DeviceID` zur Gerätekennung passt (`Driver/ppd/README.md`
 „Gerätezuordnung“); die Übernahme fängt die übrigen Fälle (AirPrint/IPP, allgemeiner Treiber) ab.
+
+### Etikettentypen
+
+Wer verschiedene Etiketten auf einem Drucker verwendet (z. B. Versandetiketten und Brillenetiketten),
+legt unter „Druckeinstellungen › Etikettentypen“ je Etikett einen **Etikettentyp** an. Jeder Typ ist in
+macOS ein eigener Drucker – „Zebra ZD421t – Brillenetikett“ –; im Druckdialog wählt man nur diesen Drucker,
+Format und Einstellungen kommen aus LabelWerk.
+
+**Modell** (`LabelType`, `LabelTypeOverrides` in LabelWerkCore, unter Linux getestet;
+`SavedPrinter.labelTypes`, tolerant dekodiert, Standard leer):
+* `id`, `name`, `stockID` (Format aus Katalog oder eigenen Formaten), `overrides`, `queueName` (Name der
+  von LabelWerk angelegten Warteschlange, `nil` bis zum ersten Abgleich). Pflicht beim Dekodieren sind nur
+  `id` und `stockID`; ein ungültiger Typ fällt aus der Liste, ein ungültiger Wert in `overrides` gilt als
+  „wie Drucker“.
+* `LabelTypeOverrides`: `rotation`, `darkness`, `speed`, `mediaTracking`, `mediaType`, `printMode`,
+  `labelTop`, `labelLeft`, `tearOffAdjust`, `mirror`, `negative`, `fitToLabel` – je `nil` = „wie Drucker“
+  (Typen wie in `PrintSettings`). `applied(to:)` setzt die gesetzten Werte und begrenzt (`clamped()`);
+  eine Drehung setzt `rotate180` zurück.
+* **Wirksame Einstellungen** (`LabelType.settings(printerSettings:printerStock:stock:)`, in der App
+  `PrinterSession.effectiveSettings(for:)`): Einstellungen des Druckers → hat der Typ ein anderes Format,
+  folgen Medientyp (`tracking`) und – falls das Format eines nennt – Druckmodus (`mediaType`) dem Format
+  (wie die Wahl einer Vorlage; „Druckerwert“ bleibt, wenn beide Formate denselben Wert haben) → Abweichungen
+  des Typs → `lwLabelWidth`/`lwLabelHeight` aus dem Format (Endlosmaterial ohne Länge).
+  `effectiveSettings(for: nil)` sind die gespeicherten Einstellungen des Druckers mit der Größe seines
+  Formats. Dieselben Werte gelten für die Warteschlange des Typs und für Drucke aus LabelWerk
+  („Mit LabelWerk drucken“): `PrinterSession.stock(for:)` (gelöschtes Format → Format des Druckers),
+  `queueName(for:)`.
+
+**Warteschlange je Typ** (`QueueSyncService`, `CUPSService.ensureLabelTypeQueue`):
+* **Name** (`LabelTypeQueueNaming.queueName`): `<Warteschlange des Druckers>_<Kürzel>`, z. B.
+  `Zebra_ZD421t_Brillenetikett`. Ohne verknüpfte Warteschlange bzw. wenn sie nur eine Adresse ist
+  („10.62.13.19“), dient der bereinigte Drucker- bzw. Modellname. Kürzel: Umlaute als `ae oe ue ss`, Akzente
+  entfernt, nur `A–Z a–z 0–9 - .`, alles andere `_` (zusammengefasst, nicht am Rand); leer → `Etikettentyp`.
+  Höchstens 127 Bytes (zuerst wird das Kürzel bis auf 8 Zeichen gekürzt, dann der Druckerteil), eindeutig
+  ohne Groß-/Kleinschreibung gegenüber allen Warteschlangen und allen Typen (`_2`, `_3` …). Vergeben wird
+  er beim ersten Anlegen und im Typ gemerkt; Umbenennen ändert nur die Beschreibung.
+* **Beschreibung** (`printer-info`, `-D`; `LabelTypeQueueNaming.description`): „<Drucker> – <Typ>“ mit dem
+  Namen des Druckers in LabelWerk, bei einem Adressnamen dem Modellnamen.
+* **Anlegen** (fehlt sie): `lpadmin -p <name> -E -v <uri> -P <PPD> -o printer-is-shared=false -D … [-L …]`
+  + alle Argumente von `QueueDefaults.plan` (ohne `-R`): Modell-PPD für Modell/Auflösung/Sprache des
+  Druckers bzw. die ergänzte Kopie mit dem Format des Typs als benannter Standardgröße (`QueuePPD`),
+  `lwLabelWidth`/`lwLabelHeight`, `lwFitToLabel` und alle Einstellungen mit den Abweichungen. Geräte-URI:
+  die der Warteschlange des Druckers (verknüpfte, Verbindung über eine Warteschlange, übernommene – laut
+  `lpstat -v`), sonst die der Verbindung (`socket://host:port`, USB-URI); Bluetooth und der Demo-Drucker
+  erhalten keine.
+* **Abgleich** (besteht sie, mit LabelWerk-Treiber): `CUPSService.apply` (Optionen, PPD wie oben), danach
+  `lpadmin -p <name> -v … -D …`, falls Geräte-URI (`device-uri`) oder Beschreibung (`printer-info` laut
+  `lpoptions -p`) abweichen. Eine Warteschlange dieses Namens mit fremdem Treiber bleibt unverändert
+  (`notLabelWerkQueue`).
+* **Wann:** wie die Warteschlange des Druckers – 1,5 s nach jeder Änderung (der Fingerabdruck enthält je
+  Typ Kennung, Beschreibung und Soll-Zustand sowie die Verbindung des Druckers; der vergebene Name zählt
+  nicht), 2 s nach dem Start, bei „OK“/„Übernehmen“ –, dazu sofort beim Sichern eines Typs (mit
+  Passwortabfrage, falls nötig) und beim Aktivieren der App für Typen, deren Warteschlange bestand und
+  inzwischen fehlt. Anders als die Warteschlange des Druckers wird eine fehlende neu angelegt: Ein
+  Etikettentyp *ist* ein macOS-Drucker – entfernen heißt, den Typ zu löschen. Namensvergabe, Anlegen und
+  Merken des Namens laufen als ein Schritt in der Reihe aller `lpadmin`-Aufrufe (kein doppeltes Anlegen
+  bei gleichzeitigen Abgleichen); ein während des Anlegens gelöschter Typ verliert die neue Warteschlange
+  sofort wieder.
+* **Entfernen:** Typ löschen bzw. Drucker aus LabelWerk entfernen → `lpadmin -x <queueName>`, nur für den
+  gemerkten Namen und nur mit LabelWerk-Treiber. Andere Warteschlangen ändert die Funktion nie (für die
+  Warteschlange des Druckers gelten weiter die Regeln oben und „Übernahme von macOS-Warteschlangen“).
+* **Zustand** je Typ (`QueueSyncService.labelTypeStatus`): wird geprüft, wird eingerichtet, bereit (Name),
+  Fehler (Meldung, „Erneut versuchen“), nicht verfügbar (Grund: kein Treiber, keine passende Verbindung).
+  Neu eingerichtete macOS-Drucker meldet ein Hinweis („macOS-Drucker „Zebra ZD421t – Brillenetikett“ ist
+  eingerichtet.“), Fehler einer mit „Erneut versuchen“.
+
+Ein eigenes Format, das ein Typ verwendet, gilt als geteilt (`LabelStockLibrary.customStockID` ändert es
+nicht für einen anderen Drucker); wird es gelöscht, übernimmt der Typ das Format seines Druckers.
 
 ## 10. Treiber & Installation (macOS)
 

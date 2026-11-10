@@ -62,7 +62,7 @@ enum LabelStockLibrary {
     ///
     /// 1. Ein eigenes Format gleicher Größe (± 0,05 mm) und gleichen Medientyps wird wiederverwendet.
     /// 2. Sonst wird das zuletzt hier erzeugte Format des Druckers (`currentStock`, Präfix
-    ///    ``customStockPrefix``) aktualisiert, solange es kein anderer Drucker nutzt,
+    ///    ``customStockPrefix``) aktualisiert, solange es kein anderer Drucker und kein Etikettentyp nutzt,
     /// 3. sonst ein neues Format angelegt.
     static func customStockID(widthMM: Double, heightMM: Double, gapMM: Double, tracking: MediaTracking,
                               mediaType: MediaType?, currentStock: LabelStock, ownerID: UUID,
@@ -73,7 +73,11 @@ enum LabelStockLibrary {
                                                  in: model.customStocks) {
             return match.id
         }
-        let sharedWithOthers = model.sessions.contains { $0.id != ownerID && $0.saved.stockID == currentStock.id }
+        // Auch Etikettentypen (jedes Druckers) zählen: Ihr Format darf sich nicht unbemerkt ändern.
+        let sharedWithOthers = model.sessions.contains { session in
+            (session.id != ownerID && session.saved.stockID == currentStock.id)
+                || session.saved.labelTypes.contains { $0.stockID == currentStock.id }
+        }
         let id = currentStock.isCustom && currentStock.id.hasPrefix(customStockPrefix) && !sharedWithOthers
             ? currentStock.id
             : customStockPrefix + UUID().uuidString.lowercased()

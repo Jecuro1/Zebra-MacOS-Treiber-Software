@@ -29,6 +29,10 @@ struct SavedPrinter: Codable, Identifiable, Hashable {
     /// umgestellt hat (z. B. „10.62.13.19“ aus „Drucker & Scanner“, `QueueSyncService`). Sie werden wie
     /// `cupsQueueName` auf dem Stand der Einstellungen gehalten.
     var adoptedQueueNames: [String] = []
+    /// Etikettentypen dieses Druckers (Druckeinstellungen › Etikettentypen): je eigenes Format, eigene
+    /// Abweichungen und – sobald der Drucker eine macOS-Warteschlange haben kann – ein eigener
+    /// macOS-Drucker „<Drucker> – <Typ>“ (`QueueSyncService`, ARCHITECTURE.md §9 „Etikettentypen“).
+    var labelTypes: [LabelType] = []
 
     init(
         id: UUID = UUID(),
@@ -270,6 +274,7 @@ extension SavedPrinter {
             location: c.value(.location, default: "")
         )
         adoptedQueueNames = c.value(.adoptedQueueNames, default: [])
+        labelTypes = c.array(LabelType.self, .labelTypes)
     }
 }
 

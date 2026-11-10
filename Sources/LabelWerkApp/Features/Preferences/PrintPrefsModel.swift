@@ -5,9 +5,11 @@ import LabelWerkKit
 
 // MARK: - Bereiche (Seitenleiste wie im Windows-Dialog)
 
-/// Die acht Bereiche des Dialogs „Druckeinstellungen für …“ des Windows-Treibers ZDesigner.
+/// Die acht Bereiche des Dialogs „Druckeinstellungen für …“ des Windows-Treibers ZDesigner, dazu
+/// „Etikettentypen“ (eigene macOS-Drucker je Etikett, nur in LabelWerk).
 enum PrintPrefsPane: String, CaseIterable, Identifiable, Hashable {
     case page
+    case labelTypes
     case options
     case operation
     case graphics
@@ -21,6 +23,7 @@ enum PrintPrefsPane: String, CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
         case .page: return tr("Seite einrichten")
+        case .labelTypes: return tr("Etikettentypen")
         case .options: return tr("Druckoptionen")
         case .operation: return tr("Bedienermodus")
         case .graphics: return tr("Grafik Optionen")
@@ -34,6 +37,7 @@ enum PrintPrefsPane: String, CaseIterable, Identifiable, Hashable {
     var subtitle: String {
         switch self {
         case .page: return tr("Etikettengröße, Medientyp, Ausrichtung und Endlosmaterial")
+        case .labelTypes: return tr("Eigene macOS-Drucker je Etikett, z. B. für Brillen- oder Schmucketiketten")
         case .options: return tr("Geschwindigkeit, Temperatur, Versatz und erweiterte Druckereinstellungen")
         case .operation: return tr("Verhalten nach dem Druck: Abreißen, Spenden, Schneiden, Aufwickeln")
         case .graphics: return tr("Rasterung von Graustufen und Kompression der Druckdaten")
@@ -47,6 +51,7 @@ enum PrintPrefsPane: String, CaseIterable, Identifiable, Hashable {
     var systemImage: String {
         switch self {
         case .page: return "doc.text"
+        case .labelTypes: return "tag"
         case .options: return "printer"
         case .operation: return "gearshape.2"
         case .graphics: return "photo"
@@ -60,6 +65,7 @@ enum PrintPrefsPane: String, CaseIterable, Identifiable, Hashable {
     var tint: Color {
         switch self {
         case .page: return Theme.violet
+        case .labelTypes: return Theme.teal
         case .options: return Theme.printing
         case .operation: return Theme.magenta
         case .graphics: return Theme.teal

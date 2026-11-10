@@ -299,6 +299,89 @@ enum CUPSService {
         return true
     }
 
+    // MARK: Etikettentypen
+
+    /// Ergebnis von ``ensureLabelTypeQueue(_:deviceURI:description:location:configuration:allowAdminPrompt:)``.
+    enum LabelTypeQueueOutcome: Equatable {
+        /// Die Warteschlange wurde neu angelegt.
+        case created
+        /// Sie bestand und wurde angepasst (Optionen, PPD, Geräte-URI oder Beschreibung).
+        case updated
+        /// Sie war schon auf dem Stand.
+        case unchanged
+    }
+
+    /// Bringt die Warteschlange eines Etikettentyps (ARCHITECTURE.md §9 „Etikettentypen“) auf den
+    /// Soll-Zustand – in einem Ablauf, der die Warteschlange unmittelbar davor liest:
+    ///
+    /// * **Fehlt sie**, wird sie angelegt wie bei ``installQueue(for:queueName:stock:)``:
+    ///   `lpadmin -p <name> -E -v <uri> -P <PPD> -D <beschreibung> -o printer-is-shared=false` und alle
+    ///   Standardwerte des Plans – Modell-PPD bzw. ergänzte Kopie mit dem Format des Typs als benannter
+    ///   Standardgröße, `lwLabelWidth`/`lwLabelHeight`, Einstellungen des Druckers mit den Abweichungen
+    ///   des Typs.
+    /// * **Besteht sie** (mit LabelWerk-Treiber), gleicht ``apply(_:to:force:allowAdminPrompt:)`` Optionen
+    ///   und PPD ab; weichen Geräte-URI oder Beschreibung ab, folgt `lpadmin -p <name> -v <uri> -D …`.
+    ///
+    /// Nur für Warteschlangen, die LabelWerk für den Typ angelegt hat (`LabelType.queueName`) bzw. jetzt
+    /// anlegt – eine Warteschlange mit fremdem Treiber bleibt unverändert (`notLabelWerkQueue`).
+    @discardableResult
+    static func ensureLabelTypeQueue(_ name: String, deviceURI: String, description: String, location: String,
+                                     configuration: QueueConfiguration,
+                                     allowAdminPrompt: Bool) async throws -> LabelTypeQueueOutcome {
+        guard isDriverInstalled else { throw CUPSError.driverNotInstalled }
+        guard LabelTypeQueueNaming.isValidQueueName(name) else { throw CUPSError.invalidQueueName }
+        let info = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let state = await queueState(name)
+        guard state.isKnown else {
+            guard let ppd = ppdURL(modelID: configuration.modelID, resolution: configuration.resolution ?? .dpi203,
+                                   language: configuration.language ?? .zpl) else {
+                throw CUPSError.noPPD(configuration.modelID.flatMap { ModelCatalog.shared.model(id: $0)?.displayName } ?? name)
+            }
+            // Neue Warteschlange: kein `-R` (wirkt nur auf vorhandene).
+            let plan = configuration.plan(removingStale: false)
+            let queuePPD = try queuePPDFile(base: ppd, size: configuration.labelSize, queue: name)
+            defer { queuePPD.cleanup() }
+            var args = ["-p", name, "-E", "-v", deviceURI, "-P", queuePPD.path, "-o", "printer-is-shared=false"]
+            if !info.isEmpty { args += ["-D", info] }
+            if !location.isEmpty { args += ["-L", location] }
+            args += plan.arguments
+            try await runLpadmin(args, allowAdminPrompt: allowAdminPrompt)
+            let after = await queueState(name)
+            if after.isKnown {
+                let difference = QueueDefaults.difference(plan, current: after.options,
+                                                          pageSizeChoices: after.pageSizeChoices)
+                if !difference.mismatchedOptions.isEmpty || difference.missingPageSize {
+                    // Der nächste Abgleich (`apply`) stellt die übrigen Werte nach.
+                    NSLog("LabelWerk: Etikettentyp-Warteschlange %@ hat Optionen nicht übernommen: %@", name,
+                          difference.mismatchedOptions.joined(separator: ", "))
+                }
+            }
+            return .created
+        }
+        guard state.isLabelWerk else { throw CUPSError.notLabelWerkQueue(name) }
+        let outcome = try await apply(configuration, to: name, force: false, allowAdminPrompt: allowAdminPrompt)
+        var identity: [String] = []
+        if let current = state.deviceURI, !current.isEmpty, current != deviceURI { identity += ["-v", deviceURI] }
+        if !info.isEmpty, (state.info ?? "") != info { identity += ["-D", info] }
+        if !identity.isEmpty {
+            try await runLpadmin(["-p", name] + identity, allowAdminPrompt: allowAdminPrompt)
+        }
+        return outcome.changed || !identity.isEmpty ? .updated : .unchanged
+    }
+
+    /// Entfernt die Warteschlange eines gelöschten Etikettentyps (`lpadmin -x`) – nur, wenn sie den
+    /// LabelWerk-Treiber verwendet (eine inzwischen fremd belegte bleibt).
+    ///
+    /// - Returns: `false`, wenn es sie nicht (mehr) gibt oder sie nicht von LabelWerk stammt.
+    @discardableResult
+    static func removeLabelTypeQueue(_ name: String, allowAdminPrompt: Bool) async throws -> Bool {
+        guard LabelTypeQueueNaming.isValidQueueName(name) else { return false }
+        let state = await queueState(name)
+        guard state.isKnown, state.isLabelWerk else { return false }
+        try await runLpadmin(["-x", name], allowAdminPrompt: allowAdminPrompt)
+        return true
+    }
+
     // MARK: Abgleich (Soll ↔ Ist)
 
     /// Soll-Zustand einer Warteschlange aus den gespeicherten LabelWerk-Einstellungen.
@@ -354,6 +437,10 @@ enum CUPSService {
         var ppdText: String?
         /// `printer-make-and-model` laut `lpoptions -p <queue>` (falls gemeldet).
         var makeAndModel: String?
+        /// Beschreibung `printer-info` (Name im Druckdialog) laut `lpoptions -p <queue>`.
+        var info: String?
+        /// Geräte-URI `device-uri` laut `lpoptions -p <queue>`.
+        var deviceURI: String?
         /// `lpoptions` hat geantwortet (die Warteschlange existiert).
         var isKnown: Bool { !options.isEmpty || !pageSizeChoices.isEmpty }
         /// Verwendet die Warteschlange den LabelWerk-Treiber? Nach der PPD (`*lwModel`), ist sie nicht
@@ -389,6 +476,8 @@ enum CUPSService {
                result.succeeded {
                 plain = CUPSQueueLister.parseLpoptions(result.stdout)
                 state.makeAndModel = plain["printer-make-and-model"]
+                state.info = plain["printer-info"]
+                state.deviceURI = plain["device-uri"]
             }
             state.options = QueueDefaults.currentOptions(list: parsed, plain: plain)
         }

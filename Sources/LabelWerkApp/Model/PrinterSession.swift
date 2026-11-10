@@ -84,6 +84,49 @@ final class PrinterSession: Identifiable {
 
     var labelHeightDots: Int { stock.heightDots(resolution) }
 
+    // MARK: - Etikettentypen
+
+    /// Etikettentypen des Druckers (Druckeinstellungen › Etikettentypen). Ändern nur über
+    /// `AppModel.addLabelType`/`updateLabelType`/`removeLabelType`.
+    var labelTypes: [LabelType] { saved.labelTypes }
+
+    /// Aktueller Stand eines Typs (gleiche Kennung), `nil`, wenn er inzwischen gelöscht wurde.
+    func labelType(id: UUID) -> LabelType? {
+        saved.labelTypes.first { $0.id == id }
+    }
+
+    /// Wirksame Einstellungen für einen Druck mit diesem Typ – dieselben, die seine macOS-Warteschlange
+    /// als Standard erhält (`LabelType.settings(printerSettings:printerStock:stock:)`): Einstellungen des
+    /// Druckers, Medientyp/Druckmodus des Formats, Abweichungen des Typs, `lwLabelWidth`/`lwLabelHeight`
+    /// aus dem Format. `nil` = die gespeicherten Einstellungen des Druckers selbst (mit der Größe seines
+    /// Formats, damit „An Etikett anpassen“ in der App wie im Treiber wirkt).
+    func effectiveSettings(for type: LabelType?) -> PrintSettings {
+        guard let type else { return saved.settings.withLabelSize(of: self.stock) }
+        let current = labelType(id: type.id) ?? type
+        return current.settings(printerSettings: saved.settings, printerStock: self.stock, stock: stock(for: current))
+    }
+
+    /// Etikettenformat eines Typs (`nil` = Format des Druckers). Ein inzwischen gelöschtes Format fällt
+    /// auf das des Druckers zurück.
+    func stock(for type: LabelType?) -> LabelStock {
+        guard let type else { return self.stock }
+        let stockID = (labelType(id: type.id) ?? type).stockID
+        return app?.stock(id: stockID) ?? ModelCatalog.shared.stock(id: stockID) ?? self.stock
+    }
+
+    /// macOS-Warteschlange für einen Druck mit diesem Typ: die von LabelWerk angelegte des Typs (`nil`,
+    /// solange keine angelegt ist) bzw. bei `nil` die verknüpfte Warteschlange des Druckers.
+    func queueName(for type: LabelType?) -> String? {
+        let name: String?
+        if let type {
+            name = (labelType(id: type.id) ?? type).queueName
+        } else {
+            name = saved.cupsQueueName
+        }
+        guard let trimmed = name?.trimmingCharacters(in: .whitespaces), !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
     /// Zusammengefasster Zustand für Anzeige & Farben.
     var state: PrinterState {
         switch connectionState {
@@ -416,13 +459,16 @@ final class PrinterSession: Identifiable {
     }
 
     /// Druckt Bilder (bereits auf Etikettengröße gebracht) mit den Treibereinstellungen.
+    ///
+    /// - Parameter stock: Etikettenformat des Auftrags (Lücke bei EPL/CPCL, Länge bei Endlosmaterial),
+    ///   z. B. `stock(for: etikettentyp)`; `nil` = Format des Druckers.
     @discardableResult
     func printImages(_ images: [GrayImage], title: String, copies: Int = 1,
-                     settings: PrintSettings? = nil) async -> Bool {
+                     settings: PrintSettings? = nil, stock: LabelStock? = nil) async -> Bool {
         guard !images.isEmpty else { return false }
         let effective = settings ?? saved.settings
         let encoder = JobEncoder(language: saved.language, resolution: resolution, settings: effective,
-                                 stock: stock, maxPrintWidthDots: model?.printWidthDots(resolution))
+                                 stock: stock ?? self.stock, maxPrintWidthDots: model?.printWidthDots(resolution))
         let data: Data
         do {
             data = try await Task.detached(priority: .userInitiated) {

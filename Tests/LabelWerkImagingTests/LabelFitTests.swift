@@ -348,4 +348,36 @@ struct LabelFitTests {
         let job = String(decoding: try encoder.encode(images: [a4], pageSizes: [.a4]), as: UTF8.self)
         #expect(job.contains("^PW831\n^LL609\n"))
     }
+
+    @Test("JobEncoder: Seite für Seite angepasst und gerastert = ganzer Auftrag (Etikettendruck-Vorschau)")
+    func streamingFitMatchesJob() throws {
+        // Seite 1 legt Drehung und Maßstab fest (Referenz), Seite 2 (kurzer Inhalt) übernimmt sie,
+        // Seite 3 ist leer, Seite 4 ist etikettengroß (ohne Anpassung), Seite 5 hat keine Seitengröße.
+        let label = Self.labelImage(width: 416, height: 305)
+        var short = GrayImage(width: 416, height: 305)
+        for y in 0..<40 { for x in 0..<200 where (x + y) % 3 == 0 { short[x, y] = 0 } }
+        let pages = [
+            Self.onPage(label.rotated(.r270), width: 1678, height: 2374),
+            Self.onPage(short.rotated(.r270), width: 1678, height: 2374),
+            GrayImage(width: 1678, height: 2374),
+            GrayImage(width: 831, height: 609, fill: 90),
+            Self.labelImage(width: 500, height: 300),
+        ]
+        let sizes: [PageSizePoints?] = [.a4, .a4, .a4, PageSizePoints(width: 295, height: 216), nil]
+        for language in [PrinterLanguage.zpl, .epl, .cpcl] {
+            var settings = Self.label
+            settings.dither = .floydSteinberg
+            settings.rotation = .r90
+            settings.mirror = true
+            settings.negative = true
+            let encoder = JobEncoder(language: language, resolution: .dpi203, settings: settings,
+                                     maxPrintWidthDots: 832)
+            var reference: LabelFit.Reference?
+            let streamed = zip(pages, sizes).map { encoder.fitted($0, pageSize: $1, reference: &reference) }
+            #expect(streamed == encoder.fitted(pages, pageSizes: sizes))
+            let bitmaps = streamed.map(encoder.dithered)
+            #expect(try encoder.encode(pages: bitmaps, copies: 3) == encoder.encode(images: pages, pageSizes: sizes,
+                                                                                 copies: 3))
+        }
+    }
 }

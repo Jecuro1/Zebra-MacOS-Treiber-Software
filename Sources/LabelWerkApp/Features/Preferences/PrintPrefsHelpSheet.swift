@@ -109,6 +109,15 @@ struct PrintPrefsHelpSheet: View {
             Topic(id: $0.rawValue, title: $0.title == $0.summaryTitle ? $0.title : $0.summaryTitle, text: $0.helpText)
         }
         switch pane {
+        case .labelTypes:
+            list.append(contentsOf: [
+                Topic(id: "labelTypes", title: tr("Etikettentypen"),
+                      text: tr("Jeder Etikettentyp erscheint in macOS als eigener Drucker („<Drucker> – <Typ>“). Im Druckdialog jedes Programms einfach diesen Drucker wählen – Etikettengröße und Einstellungen kommen von hier, im Dialog ist nichts weiter einzustellen.")),
+                Topic(id: "labelTypeOverrides", title: tr("Abweichungen vom Drucker"),
+                      text: tr("Drehung, Temperatur, Geschwindigkeit, Versatz, Medientyp, Druckmodus und Bedienermodus stehen auf „Wie Drucker“, bis Sie einen eigenen Wert wählen. Alle übrigen Einstellungen und spätere Änderungen am Drucker gelten auch für den Typ.")),
+                Topic(id: "labelTypeQueue", title: tr("macOS-Drucker des Typs"),
+                      text: tr("LabelWerk richtet den Drucker beim Sichern automatisch ein und hält ihn aktuell. Wird der Typ gelöscht, entfernt LabelWerk auch seinen macOS-Drucker.")),
+            ])
         case .maintenance:
             list.insert(contentsOf: [
                 Topic(id: "reset", title: tr("Auf Standardeinstellungen zurücksetzen"),
