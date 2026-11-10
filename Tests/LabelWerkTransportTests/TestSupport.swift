@@ -18,6 +18,12 @@ final class TestClientSocket: @unchecked Sendable {
 
     init(fd: Int32) {
         self.fd = fd
+        #if canImport(Darwin)
+        // Ohne SO_NOSIGPIPE beendet ein send() an einen bereits geschlossenen Client den ganzen
+        // Testprozess per SIGPIPE (Linux nutzt stattdessen MSG_NOSIGNAL pro Aufruf).
+        var one: Int32 = 1
+        _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+        #endif
     }
 
     /// Sendet alle Bytes (blockierend).

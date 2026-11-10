@@ -48,7 +48,9 @@ enum ProcessRunner {
                     return
                 }
                 if let input {
-                    inPipe.fileHandleForWriting.write(input)
+                    // EPIPE (Prozess hat vorzeitig beendet) als Fehler statt SIGPIPE/Ausnahme.
+                    _ = fcntl(inPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+                    try? inPipe.fileHandleForWriting.write(contentsOf: input)
                     try? inPipe.fileHandleForWriting.close()
                 }
                 // Ausgaben vollständig lesen, bevor auf das Prozessende gewartet wird (verhindert Deadlocks).

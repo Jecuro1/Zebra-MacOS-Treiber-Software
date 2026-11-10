@@ -37,6 +37,12 @@ struct LabelWerkApp: App {
 
 /// App-Delegate: Fenster nach Schließen weiter im Hintergrund (Menüleiste), sauberes Speichern.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Schreiben in eine Pipe/einen Socket, dessen Gegenstelle beendet ist (z. B. `lp`, das
+        // vorzeitig abbricht), soll einen Fehler liefern statt die App per SIGPIPE zu beenden.
+        signal(SIGPIPE, SIG_IGN)
+    }
+
     weak var model: AppModel?
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

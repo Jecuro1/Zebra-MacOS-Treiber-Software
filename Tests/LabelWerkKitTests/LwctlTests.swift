@@ -62,7 +62,13 @@ enum CLIRunner {
                     process.standardError = errors
                     process.standardInput = input
                     try process.run()
-                    if let stdin { input.fileHandleForWriting.write(stdin) }
+                    if let stdin {
+                        #if canImport(Darwin)
+                        // Beendet sich lwctl vor dem Lesen, liefert write EPIPE statt SIGPIPE.
+                        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+                        #endif
+                        try? input.fileHandleForWriting.write(contentsOf: stdin)
+                    }
                     try? input.fileHandleForWriting.close()
                     let collector = DataCollector()
                     let group = DispatchGroup()
