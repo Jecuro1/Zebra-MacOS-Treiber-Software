@@ -888,7 +888,7 @@ Etikett entfallen ebenso wie alle ZPL-Optionen.
 |---|---|---|
 | `lwLanguage` | `ZPL` `EPL` `CPCL` | Ausgabesprache |
 | `lwDarkness` | `Default`, `0`…`30` (PPD: 1…30) | `~SD` („Temperatur“) |
-| `lwSpeed` | `Default`, `1`…`14` (PPD: bis Modellmaximum) | `^PR` |
+| `lwSpeed` | `Default`, `1`…`14` (PPD: 2 … Modellmaximum) | `^PR`; PPD wie Windows ab 51 mm/s (2 Zoll/s), `1` nur als Auftragsoption |
 | `lwMediaType` | `Default` `DirectThermal` `ThermalTransfer` | `^MT` („Druckmodus“) |
 | `lwMediaTracking` | `Default` `Gap` `BlackMark` `Continuous` `Auto` `Notch` | `^MN` („Medientyp“; `Notch` = `^MNW`, EPL wie `Gap`) |
 | `lwPrintMode` | `Default` `TearOff` `PeelOff` `Cutter` `DelayedCut` `Rewind` `Applicator` `Kiosk` `LinerlessPeel` `LinerlessCut` `LinerlessDelayedCut` `LinerlessRewind` `LinerlessTear` | `^MM`; Linerless: kein `^MM`, SGD `media.printmode` im Auftragskopf mit dem dokumentierten Setzwert (`L`/`U`/`V`, für `LinerlessCut`/`LinerlessDelayedCut` das Wort; PPD: Linerless nur bei Modellen mit Linerless-Ausstattung) |

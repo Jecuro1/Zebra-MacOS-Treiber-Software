@@ -38,7 +38,7 @@ extension PrintPrefsSetting {
         case .backfeed:
             return tr("Wann das Etikett nach dem Abreißen oder Spenden zurückgezogen wird (~JS): kein Rückzug, vor dem Drucken, nach dem Drucken oder Standard (überwiegend vor dem Drucken).")
         case .pauseEvery:
-            return tr("Hält den Drucker nach jeweils N Etiketten an (^PQ n,N,0,N), z. B. zum Entnehmen. Hat Vorrang vor „Schneiden alle N Etiketten“. Nur ZPL.")
+            return tr("Hält den Drucker nach jeweils N Etiketten an (^PQ n,N,0,N), z. B. zum Entnehmen. Hat Vorrang vor „Schneiden alle N Etiketten“. Gezählt wird je Seite und Kopiengruppe: Bei sortierten Aufträgen mit mehreren Seiten (jede Seite einzeln) pausiert der Drucker ab N = 2 nicht. Nur ZPL.")
         case .controlCharacters:
             return tr("„Standard“ verwendet ^, ~ und , als Steuerzeichen. „Intern“ verwendet die im Drucker eingestellten Zeichen (^CC, ^CT, ^CD) für alle vom Treiber erzeugten Befehle – eigene Befehle bleiben unverändert. Nur ZPL.")
         case .rtcUpdate:
@@ -50,7 +50,7 @@ extension PrintPrefsSetting {
         case .language:
             return tr("Befehlssprache des Druckers (ZPL II, EPL2, CPCL). ZPL bietet alle Funktionen. Ein Wechsel baut die Verbindung nach dem Speichern neu auf.")
         case .cancelJobs:
-            return tr("Löscht vor jedem Auftrag alle aktuellen und wartenden Aufträge im Drucker (~JA), damit nur der neue gedruckt wird. Wirkt bei ZPL und EPL.")
+            return tr("Löscht vor jedem Auftrag alle aktuellen und wartenden Aufträge im Drucker (~JA, ganz am Anfang des Auftrags vor den Startbefehlen), damit nur der neue gedruckt wird. Wirkt bei ZPL und EPL.")
         case .cancelDelay:
             return tr("Wartezeit nach dem Abbrechen, bevor der neue Auftrag folgt (0 bis 10 000 ms, Standard 1000 ms).")
         case .printMode:
@@ -58,7 +58,7 @@ extension PrintPrefsSetting {
         case .tearOff:
             return tr("Feinjustierung der Abreiß- bzw. Spendeposition (~TA, −120 bis 120 Punkte).")
         case .cutEvery:
-            return tr("Mit Abschneider: nur am Auftragsende schneiden oder nach jeweils N Etiketten (^PQ n,N,0,Y).")
+            return tr("Mit Abschneider: nur am Auftragsende schneiden oder nach jeweils N Etiketten (^PQ n,N,0,Y). Gezählt wird je Seite und Kopiengruppe: Bei sortierten Aufträgen mit mehreren Seiten schneidet der Drucker ab N = 2 nicht zwischendurch.")
         case .dither:
             return tr("Wie Graustufen und Fotos in Druckpunkte umgewandelt werden: Schwellenwert für Text und Barcodes, Raster- oder Fehlerdiffusionsverfahren für Bilder.")
         case .threshold:
@@ -76,7 +76,7 @@ extension PrintPrefsSetting {
         case .labelEndCommands:
             return tr("Befehle am Ende jedes Etiketts (ZPL: direkt vor ^XZ). CPCL sendet sie nicht.")
         case .powerUpAction:
-            return tr("Was der Drucker beim Einschalten tut (^MF): Vorschub, Kalibrieren, Länge messen, keine Bewegung oder Kurzkalibrierung. Wird nur zusammen mit der Aktion nach dem Schließen des Druckkopfs gesendet.")
+            return tr("Was der Drucker beim Einschalten tut (^MF): Vorschub, Kalibrieren, Länge messen, keine Bewegung oder Kurzkalibrierung. Wird nur zusammen mit der Aktion nach dem Schließen des Druckkopfs gesendet und wirkt erst beim nächsten Einschalten – dafür muss „Einstellungen im Drucker speichern“ eingeschaltet sein.")
         case .headCloseAction:
             return tr("Was der Drucker nach dem Schließen des Druckkopfs tut (^MF). Wird nur zusammen mit der Aktion beim Einschalten gesendet.")
         }

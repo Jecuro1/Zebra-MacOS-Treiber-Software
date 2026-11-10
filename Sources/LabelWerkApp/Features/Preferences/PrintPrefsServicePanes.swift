@@ -164,7 +164,12 @@ struct PrintPrefsMaintenancePane: View {
         if (s.powerUpAction == nil) != (s.headCloseAction == nil) {
             return tr("^MF wird nur gesendet, wenn beide Aktionen festgelegt sind.")
         }
-        return context.isZPL ? nil : tr("Wirkt nur bei ZPL.")
+        guard context.isZPL else { return tr("Wirkt nur bei ZPL.") }
+        if s.powerUpAction != nil, !s.saveToPrinter {
+            // ^MF ohne ^JUS gilt nur bis zum Ausschalten – die Aktion beim Einschalten käme nie zum Zug.
+            return tr("Die Aktion beim Einschalten wirkt erst beim nächsten Einschalten: „Einstellungen im Drucker speichern“ einschalten oder „Dauerhaft speichern“ verwenden.")
+        }
+        return nil
     }
 
     private var queueDetail: String {

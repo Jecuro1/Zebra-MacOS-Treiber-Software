@@ -139,26 +139,26 @@ passenden Katalogformate und `*CustomPageSize` mit `*MaxMediaWidth`/`*MaxMediaHe
 | | `lwRotation` (Drehung) | `0` „0° – Hochformat“, `90` „90° – Querformat“, `180` „180° – Hochformat“, `270` „270° – Querformat“ | `0` |
 | | `lwMirror` (Spiegeln), `lwNegative` (Invers), `lwStopAtLast` (Bei letztem Element stoppen) | Boolean `False`/`True` | `False` |
 | | `lwStopOffset` (Stoppversatz) | 0 1 2 3 5 10 mm in Punkten der Auflösung | `0` |
-| Druckoptionen | `lwSpeed` (Geschwindigkeit) | `Default`, `1`…Modellmaximum (höchstens 14), Text in mm/s: „102 mm/s (4 Zoll/s)“ | `Default` |
+| Druckoptionen | `lwSpeed` (Geschwindigkeit) | `Default`, `2`…Modellmaximum (höchstens 14; wie Windows ab 51 mm/s – `1` nur als Auftragsoption), Text in mm/s: „102 mm/s (4 Zoll/s)“ | `Default` |
 | | `lwDarkness` (Temperatur) | `Default`, `1`…`30` | `Default` |
 | | `lwMediaType` (Druckmodus) | `Default` + `ThermalTransfer` (Thermotransfer) / `DirectThermal` (Thermo-Direkt) des Modells | `Default` |
 | | `lwLabelTop` (Versatz oben) | `Default`, `-120`…`120` Punkte in 10er-Schritten, Text in mm | `Default` |
 | | `lwLabelLeft` (Versatz links) | `Default`, `-200`…`200` Punkte in 10er-Schritten, Text in mm | `Default` |
 | | `lwBackfeed` (Rückzug) | `Default` `Off` (Kein Rückzug) `Before` (Vor dem Drucken) `After` (Nach dem Drucken) `Normal` (Standard) | `Default` |
-| | `lwPauseEvery` (Pausieren) | `0` (Keine Pause) `1 2 5 10 25 50 100` (ZPL) | `0` |
+| | `lwPauseEvery` (Pausieren) | `0` (Keine Pause) `1 2 5 10 25 50 100` (ZPL; zählt je Seite und Kopiengruppe – ohne Wirkung bei sortierten Aufträgen mit mehreren Seiten) | `0` |
 | | `lwControlChars` (Steuerzeichen) | `Standard`, `Printer` (Intern) (ZPL) | `Standard` |
 | | `lwRTC` (RTC aktualisieren) | `Default` `JobStart` (Druckzeit starten) `EveryLabel` (Jedes Etikett) `EveryMinute` (Jede Minute) (ZPL) | `Default` |
 | | `lwCancelBefore` (Aufträge vor dem Drucken abbrechen) | Boolean; `True` = „Alle aktuellen und nächsten Druckjobs löschen“ (ZPL, EPL) | `False` |
 | | `lwCancelDelay` (Verzögerung) | `0 250 500 1000 2000 3000 5000 10000` ms (ZPL, EPL) | `1000` |
 | Bedienermodus | `lwPrintMode` (Modus) | `Default` + Modi des Modells (Abreißen, Spendemodus, Abschneider, Verzögerter Abschneider, Aufwickeln, Applikator, Kiosk); Linerless ablösen/schneiden/verzögert schneiden/aufwickeln, Linerless-Abriss nur bei Modellen mit Ausstattung `linerless` und ZPL | `Default` |
 | | `lwTearOff` (Versatz) | `Default`, `-120`…`120` Punkte in 10er-Schritten | `Default` |
-| | `lwCutEvery` (Schneiden alle) | `0 1 2 5 10 25 50 100` – nur Modelle mit Schneider/verzögertem Schnitt | `0` |
+| | `lwCutEvery` (Schneiden alle) | `0 1 2 5 10 25 50 100` – nur Modelle mit Schneider/verzögertem Schnitt (zählt wie `lwPauseEvery` je Seite und Kopiengruppe) | `0` |
 | Grafik Optionen | `lwDither` | `Threshold` `Ordered` `Halftone` `FloydSteinberg` `Atkinson` `Stucki` | `Threshold` |
 | | `lwThreshold` | `64 96 128 160 192` | `128` |
 | | `lwCompression` | `Z64` `ACS` `Hex` | `Z64` |
 | Erweitert | `lwLanguage` | Sprachen des Modells (`ZPL` `EPL` `CPCL`) | Standardsprache des Modells |
 | | `lwCalibrate`, `lwSaveSettings`, `lwSkipBlank` | Boolean `False`/`True` | `False` |
-| | `lwPowerUpAction`, `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` (ZPL; `^MF` nur, wenn beide gesetzt) | `Default` |
+| | `lwPowerUpAction`, `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` (ZPL; `^MF` nur, wenn beide gesetzt; die Aktion beim Einschalten wirkt erst beim nächsten Einschalten und nur mit `lwSaveSettings=True`) | `Default` |
 
 Die Standardwerte entsprechen `PrintSettings.default`. Versatzwerte zeigen die Millimeter für die
 Auflösung der Datei und die Punkte („+1,3 mm (+10 Punkte)“); Markierung Versatz und Stoppversatz

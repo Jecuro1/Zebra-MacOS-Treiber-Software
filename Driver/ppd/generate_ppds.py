@@ -104,6 +104,9 @@ CUSTOM_MIN_HEIGHT_PT = 18.0
 STOCK_WIDTH_TOLERANCE_MM = 2.0
 #: Obergrenze der Geschwindigkeit laut §9 (``lwSpeed`` 1…14) und ``PrintSettings.clamped()``.
 MAX_SPEED_IPS = 14
+#: Kleinste Geschwindigkeit in der PPD: wie die Windows-Liste ab 51 mm/s (2 Zoll/s); 1 Zoll/s bleibt
+#: als Auftragsoption erlaubt (Modelle mit Höchstwert 1 bekommen trotzdem eine Auswahl).
+MIN_PPD_SPEED_IPS = 2
 
 #: Generische PPDs: (Sprache, Auflösung).
 GENERIC_TARGETS: Tuple[Tuple[str, int], ...] = (
@@ -487,6 +490,12 @@ def swift_round(value: float) -> int:
         return -swift_round(-value)
     whole = math.floor(value)
     return int(whole) + (1 if value - whole >= 0.5 else 0)
+
+
+def ppd_speeds(max_speed: int) -> List[int]:
+    """Geschwindigkeiten der PPD in Zoll/s: ``MIN_PPD_SPEED_IPS`` … Modellmaximum (wie Windows ab
+    51 mm/s); bei einem Höchstwert darunter nur dieser."""
+    return list(range(min(MIN_PPD_SPEED_IPS, max_speed), max_speed + 1))
 
 
 def mm_to_points(mm: float) -> float:
@@ -1225,7 +1234,7 @@ def build_options(target: Target) -> List[UIOption]:
 
     # Geschwindigkeit wie im Windows-Treiber in mm/s (51, 76, 102 … = 2, 3, 4 … Zoll/s).
     speeds = [Choice(DEFAULT_CHOICE, *DEFAULT_TEXT)]
-    for value in range(1, target.max_speed + 1):
+    for value in ppd_speeds(target.max_speed):
         mm_s = swift_round(value * 25.4)
         speeds.append(Choice(str(value), f"{mm_s} mm/s ({value} ips)", f"{mm_s} mm/s ({value} Zoll/s)"))
     add(OPT_SPEED, speeds, DEFAULT_CHOICE)

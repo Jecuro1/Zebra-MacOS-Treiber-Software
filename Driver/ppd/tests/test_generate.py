@@ -175,6 +175,7 @@ class OptionSpec:
     free_form: bool                      # Base64url
     not_in_ppd: bool = False             # „nicht in der PPD“ (freie Werte, veraltete Optionen)
     ppd_mm: Optional[List[int]] = None   # „PPD: … mm je Auflösung“ – Millimeterwerte, in Punkte umgerechnet
+    model_min: int = 1                   # „PPD: n … Modellmaximum“ – kleinster Wert der PPD
 
     def allows(self, value: str) -> bool:
         if value in self.tokens:
@@ -201,12 +202,15 @@ def parse_architecture_options() -> Dict[str, OptionSpec]:
         ppd_values: Optional[List[int]] = None
         ppd_mm: Optional[List[int]] = None
         model_max = False
+        model_min = 1
         if ppd_part:
             ppd_part = ppd_part.split(")", 1)[0]
             steps = re.search(r"Schritte(?: von)? (\d+)", ppd_part)
             explicit_range = re.search(r"(-?\d+)\s*…\s*(-?\d+)", ppd_part)
             if "Modellmaximum" in ppd_part:
                 model_max = True
+                lowest = re.search(r"(\d+)\s*…\s*Modellmaximum", ppd_part)
+                model_min = int(lowest.group(1)) if lowest else 1
             elif "je Auflösung" in ppd_part:
                 ppd_mm = [int(v) for v in re.findall(r"-?\d+", ppd_part.split("mm", 1)[0])]
             elif steps:
@@ -219,7 +223,7 @@ def parse_architecture_options() -> Dict[str, OptionSpec]:
                 ppd_values = [int(v) for v in re.findall(r"-?\d+", ppd_part)]
         spec = OptionSpec(names, tokens, int_range, "Default" in tokens, ppd_values, model_max,
                           free_form="Base64url" in values, not_in_ppd="nicht in der PPD" in values,
-                          ppd_mm=ppd_mm)
+                          ppd_mm=ppd_mm, model_min=model_min)
         for name in names:
             specs[name] = spec
     return specs
@@ -698,9 +702,11 @@ class GeneratedSetTests(unittest.TestCase):
             else:
                 model = MODELS[target.model_id]
                 limit = min(model.max_speed_ips.get(str(target.dpi), min(model.max_speed_ips.values())), 14)
-            self.assertEqual(speeds, list(range(1, limit + 1)), stem)
+            # Wie die Windows-Liste ab 51 mm/s (2 Zoll/s) bis zum Modellmaximum.
+            self.assertEqual(speeds, list(range(min(2, limit), limit + 1)), stem)
             self.assertLessEqual(max(speeds), 14)
-        self.assertEqual(len(PPDS["LabelWerk-ze511-203dpi"].options["lwSpeed"].choices), 15)  # 18 ips → 14
+        self.assertEqual(len(PPDS["LabelWerk-ze511-203dpi"].options["lwSpeed"].choices), 14)  # 18 ips → 2…14
+        self.assertEqual(list(PPDS["LabelWerk-zd421t-203dpi"].options["lwSpeed"].choices)[:2], ["Default", "2"])
         self.assertEqual(max(int(c) for c in PPDS["LabelWerk-zt410-600dpi"].options["lwSpeed"].choices
                              if c != "Default"), 6)
 
@@ -912,6 +918,7 @@ class ArchitectureContractTests(unittest.TestCase):
         self.assertEqual(self.spec["lwLabelLeft"].ppd_values, list(range(-200, 201, 10)))
         self.assertEqual(self.spec["lwLabelTop"].ppd_values, list(range(-120, 121, 10)))
         self.assertTrue(self.spec["lwSpeed"].model_max)
+        self.assertEqual(self.spec["lwSpeed"].model_min, 2)
         self.assertTrue(self.spec["lwStartCmd"].free_form)
 
     @unittest.skipUnless(PRINT_SETTINGS_SWIFT.exists(), "PrintSettings.swift fehlt")
@@ -951,7 +958,8 @@ class ArchitectureContractTests(unittest.TestCase):
                             dots.append(value)
                     self.assertEqual([int(v) for v in values], dots, f"{stem}: {keyword}")
                 if spec.model_max:
-                    self.assertEqual([int(v) for v in values], list(range(1, target.max_speed + 1)))
+                    self.assertEqual([int(v) for v in values],
+                                     list(range(min(spec.model_min, target.max_speed), target.max_speed + 1)))
                 if set(spec.tokens) == {"False", "True"}:
                     self.assertEqual(option.ui, "Boolean", keyword)
                     self.assertEqual(sorted(choices), ["False", "True"])
@@ -1365,7 +1373,7 @@ class CupsTestPPDTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             source = PPDS["LabelWerk-zd421t-203dpi"].data.decode("utf-8")
             broken = Path(tmp) / "LabelWerk-broken-203dpi.ppd"
-            line = '*de.lwSpeed 1/25 mm/s (1 Zoll/s): ""\n'
+            line = '*de.lwSpeed 2/51 mm/s (2 Zoll/s): ""\n'
             self.assertIn(line, source)
             broken.write_text(source.replace(line, ""), encoding="utf-8")
             result = gen.run_cupstestppd([broken])[0]
