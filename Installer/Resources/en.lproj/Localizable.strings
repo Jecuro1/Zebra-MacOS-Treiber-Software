@@ -491,6 +491,7 @@
 "Drucker öffnen" = "Open Printer";
 "Drucker hinzufügen" = "Add Printer";
 "Drucker hinzufügen (⌘↩)" = "Add Printer (⌘↩)";
+"Bitte Breite und Höhe des Etiketts prüfen." = "Please check the label width and height.";
 "Bitte IP-Adresse oder Hostnamen des Druckers eingeben." = "Please enter the printer’s IP address or host name.";
 "Bitte eine macOS-Warteschlange auswählen." = "Please select a macOS queue.";
 "Bitte einen gefundenen USB-Drucker auswählen." = "Please select a USB printer that was found.";
@@ -732,7 +733,7 @@
 "Als Papiergröße das eingelegte Etikettenformat wählen, z. B. „4 × 6 Zoll“ oder „100 × 150 mm“." = "Choose the loaded label format as the paper size, e.g. “4 × 6 in” or “100 × 150 mm”.";
 "Skalierung 100 %" = "Scale 100 %";
 "100 % statt „An Seite anpassen“ verwenden, damit Barcodes exakt und scannbar gedruckt werden." = "Use 100 % instead of “Scale to Fit” so that barcodes print accurately and are scannable.";
-"Schwärzung, Tempo und Medien stammen aus LabelWerk. „Synchronisieren“ überträgt Änderungen in die Warteschlange; im Druckdialog lassen sie sich pro Auftrag anpassen." = "Darkness, speed and media come from LabelWerk. “Sync” transfers changes to the queue; in the print dialog they can be adjusted per job.";
+"Schwärzung, Tempo, Medien und Etikettengröße stammen aus LabelWerk und werden automatisch in die Warteschlange übernommen – im Druckdialog muss nichts eingestellt werden." = "Darkness, speed, media and label size come from LabelWerk and are transferred to the queue automatically – nothing needs to be set in the print dialog.";
 "Treiber nicht installiert" = "Driver not installed";
 "Treiberpaket fehlt" = "Driver package missing";
 "Treiber ist aktuell" = "Driver is up to date";
@@ -1696,6 +1697,7 @@
 "Druckt invers: Schwarz und Weiß werden vertauscht." = "Prints inverted: black and white are swapped.";
 "Nur bei Endlosmaterial: Das Etikett endet nach dem letzten bedruckten Element statt nach der vollen Seitenlänge – das spart Material." = "Continuous media only: the label ends after the last printed element instead of after the full page length – this saves media.";
 "Zusätzlicher Vorschub nach dem letzten Element, wenn „Bei letztem Element stoppen“ aktiv ist (0 bis 32 000 Punkte)." = "Additional feed after the last element when “Stop at last element” is on (0 to 32,000 dots).";
+"Schickt ein Programm eine andere Papiergröße als das Etikett (z. B. A4 aus Vorschau), legt der Treiber den Inhalt der Seite mittig auf das Etikett: zu große Inhalte werden verkleinert, nie vergrößert. Seiten in Etikettengröße bleiben unverändert. „Aus“ druckt die Seite wie geliefert (nur auf die Druckbreite abgeschnitten)." = "If an app sends a paper size other than the label (e.g. A4 from Preview), the driver centers the page content on the label: content that is too large is scaled down, never enlarged. Label-sized pages stay unchanged. “Off” prints the page as delivered (only cropped to the print width).";
 "Druckgeschwindigkeit (^PR) in mm/s bis zum Höchstwert des Modells (51 mm/s = 2 Zoll/s). Langsamer druckt sauberer, schneller erhöht den Durchsatz." = "Print speed (^PR) in mm/s up to the model’s maximum (51 mm/s = 2 in/s). Slower prints cleaner, faster increases throughput.";
 "Temperatur des Druckkopfs bzw. Schwärzung (~SD) von 1 bis 30. Höhere Werte drucken dunkler, lassen den Druckkopf aber schneller altern." = "Print head temperature or darkness (~SD) from 1 to 30. Higher values print darker but age the print head faster.";
 "Thermotransfer druckt mit Farbband (^MTT), Thermo-Direkt auf wärmeempfindliches Papier ohne Farbband (^MTD)." = "Thermal transfer prints with a ribbon (^MTT), direct thermal prints on heat-sensitive paper without a ribbon (^MTD).";
@@ -1770,6 +1772,7 @@
 "Markierung Versatz" = "Mark Offset";
 "Bei letztem Element stoppen" = "Stop at last element";
 "Stoppversatz" = "Stop offset";
+"An Etikett anpassen" = "Fit to label";
 "Temperatur" = "Darkness";
 "Oben" = "Top";
 "Links" = "Left";
@@ -1799,7 +1802,6 @@
 "Verzögerung nach dem Abbrechen" = "Delay after cancelling";
 "Schneiden alle N Etiketten" = "Cut every N labels";
 "%d mm/s" = "%d mm/s";
-"Benutzerdefiniert %@ × %@ mm" = "Custom %@ × %@ mm";
 "Wert nicht verfügbar" = "Value not available";
 "Der Drucker meldet „%@“ nicht." = "The printer does not report “%@”.";
 "Keine verwertbaren Werte" = "No usable values";
@@ -1917,8 +1919,7 @@
 "Sprache %@ wird von diesem Modell nicht unterstützt" = "Language %@ is not supported by this model";
 "Profil importiert" = "Profile imported";
 "Mit „OK“ oder „Übernehmen“ speichern." = "Save with “OK” or “Apply”.";
-"Alle Programme drucken auf „%@“ mit diesen Einstellungen. Eigene Etikettenformate im Druckdialog als Papiergröße wählen." = "All apps print to “%@” with these settings. Choose custom label formats as the paper size in the print dialog.";
-"Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen." = "All apps now print to “%@” with these settings.";
+"Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen und dem Etikett %@ – ohne Auswahl im Druckdialog." = "All apps now print to “%@” with these settings and the label %@ – nothing to choose in the print dialog.";
 "Im macOS-Druckdialog steht für %@ nur der nächstliegende Wert zur Auswahl." = "In the macOS print dialog, only the closest value is available for %@.";
 "macOS-Standard aktualisiert" = "macOS default updated";
 "macOS-Standard konnte nicht gesetzt werden" = "The macOS default could not be set";
@@ -1941,6 +1942,8 @@
 "Horizontal gespiegelt" = "Mirrored horizontally";
 "Nur bei „Endlosmaterial“." = "Only for “Continuous media”.";
 "Etikett endet nach dem letzten Element" = "Label ends after the last element";
+"A4, Letter & Co. aus Vorschau, Safari usw. landen automatisch auf dem Etikett %@ – im Druckdialog muss nichts eingestellt werden." = "A4, Letter & co. from Preview, Safari etc. land on the label %@ automatically – nothing has to be set in the print dialog.";
+"Andere Papiergrößen werden nicht angepasst – im Druckdialog muss dann „%@“ gewählt werden." = "Other paper sizes are not adjusted – “%@” must then be chosen in the print dialog.";
 "Breiter als die Druckbreite von %@ (%@) – rechts wird abgeschnitten." = "Wider than the print width of %@ (%@) – cropped on the right.";
 "Die Vorlage „%@“ ist als „%@“ hinterlegt." = "The stock “%@” is stored as “%@”.";
 "Druckeinstellungen" = "Print Settings";
@@ -2346,6 +2349,23 @@
 "Moderner Treiber und Steuerzentrale für Zebra®-Etikettendrucker auf dem Mac." = "Modern driver and control center for Zebra® label printers on the Mac.";
 "Zebra ist eine Marke der Zebra Technologies Corp. LabelWerk ist ein unabhängiges Projekt und steht in keiner Verbindung zu Zebra Technologies." = "Zebra is a trademark of Zebra Technologies Corp. LabelWerk is an independent project and is not affiliated with Zebra Technologies.";
 
+/* MARK: Features/Setup/LabelStockChooser.swift */
+"%@ – vom Drucker erkannt" = "%@ – detected from printer";
+"Vom Drucker: %@" = "From printer: %@";
+"Benutzerdefiniert …" = "Custom …";
+"Vom Drucker übernehmen" = "Take from Printer";
+"Liest die im Drucker eingestellte Etikettengröße erneut und übernimmt sie." = "Reads the label size configured in the printer again and applies it.";
+"Vom Drucker erkannt" = "Detected from printer";
+"%d × %d Punkte bei %d dpi" = "%d × %d dots at %d dpi";
+"Breite %@–%@ mm, Höhe %@–%@ mm" = "Width %@–%@ mm, height %@–%@ mm";
+"%@ in mm" = "%@ in mm";
+"Breite in mm eingeben" = "Enter width in mm";
+"Höhe in mm eingeben" = "Enter height in mm";
+"Breite mindestens %@ mm" = "Width at least %@ mm";
+"Breite höchstens %@ mm" = "Width at most %@ mm";
+"Höhe mindestens %@ mm" = "Height at least %@ mm";
+"Höhe höchstens %@ mm" = "Height at most %@ mm";
+
 /* MARK: Features/Setup/NetworkPrinterInstallWizard.swift */
 "Drucker installieren" = "Install Printer";
 "Schritt %d von %d: %@" = "Step %d of %d: %@";
@@ -2435,6 +2455,7 @@
 "Verwendet bereits den LabelWerk-Treiber – Name, Modell und Einstellungen werden erneuert." = "Already uses the LabelWerk driver – name, model and settings are renewed.";
 "Gleiche Adresse über ein anderes Protokoll (%@) – wird auf den LabelWerk-Treiber umgestellt." = "Same address via another protocol (%@) – will be switched to the LabelWerk driver.";
 "Verwendet einen anderen Treiber (%@) – wird auf den LabelWerk-Treiber umgestellt." = "Uses another driver (%@) – will be switched to the LabelWerk driver.";
+"Alle Programme drucken auf dieses Etikett – im Druckdialog muss nichts eingestellt werden." = "All apps print on this label – nothing has to be set in the print dialog.";
 "LabelWerk-Treiber installiert" = "LabelWerk driver installed";
 "Der LabelWerk-Treiber wird bei der Installation mit eingerichtet – macOS fragt dafür einmal nach einem Administratorpasswort." = "The LabelWerk driver is set up during the installation – macOS asks once for an administrator password.";
 "Der LabelWerk-Treiber fehlt, und diese App enthält kein Treiberpaket. Bitte LabelWerk mit dem Installationspaket installieren." = "The LabelWerk driver is missing, and this app contains no driver package. Please install LabelWerk with the installer package.";
@@ -2454,6 +2475,9 @@
 "LabelWerk richtet den Drucker als macOS-Drucker ein." = "LabelWerk sets up the printer as a macOS printer.";
 "%@ liegt nicht im Netz dieses Macs. Das funktioniert nur, wenn ein Router zwischen den Netzen vermittelt – sonst die IP-Adresse am Drucker prüfen." = "%@ is not on this Mac’s network. This only works if a router connects the networks – otherwise check the IP address on the printer.";
 "Nicht als Zebra-Drucker erkannt · %@" = "Not identified as a Zebra printer · %@";
+"vom Drucker erkannt" = "detected from printer";
+"Der Drucker hat keine Etikettengröße gemeldet. Bitte unter „Benutzerdefiniert …“ eingeben." = "The printer did not report a label size. Please enter it under “Custom …”.";
+"In LabelWerk war bisher „%@“ eingestellt." = "LabelWerk was previously set to “%@”.";
 
 /* MARK: Features/Stocks/StockLibraryComponents.swift */
 "Millimeter" = "Millimeters";
@@ -2491,7 +2515,6 @@
 "Markenhöhe" = "Mark height";
 "Medienerkennung" = "Media sensing";
 "Keine Vorgabe" = "Not specified";
-"%d × %d Punkte bei %d dpi" = "%d × %d dots at %d dpi";
 "Druckbreite %@" = "Print width %@";
 "Passt auf den %@." = "Fits the %@.";
 "Entspricht dem vorhandenen Format „%@“." = "Matches the existing format “%@”.";
@@ -2526,7 +2549,6 @@
 "Marke %@ mm" = "Mark %@ mm";
 "Lücke %@ mm" = "Gap %@ mm";
 "Etikettenlänge und Sensor neu einmessen (~JC)" = "Re-measure label length and sensor (~JC)";
-"Vom Drucker übernehmen" = "Take from Printer";
 "Format aus gemeldeter Druckbreite und gemessener Etikettenlänge anlegen" = "Create a format from the reported print width and measured label length";
 "Diese Verbindung kann keine Messwerte lesen (nur Senden)." = "This connection cannot read measurements (send only).";
 "Neues Format …" = "New Format…";
@@ -2832,6 +2854,9 @@
 "mm" = "mm";
 "Verbindung fehlgeschlagen" = "Connection failed";
 
+/* MARK: Model/LabelStockLibrary.swift */
+"Benutzerdefiniert %@ × %@ mm" = "Custom %@ × %@ mm";
+
 /* MARK: Model/Navigation.swift */
 "Übersicht" = "Overview";
 "Dateien & Schriften" = "Files & Fonts";
@@ -2871,10 +2896,14 @@
 "Mehrere Zebra-Drucker sind per USB angeschlossen, und dieser lässt sich keinem eindeutig zuordnen. Bitte nur den gewünschten Drucker anschließen und erneut versuchen." = "Several Zebra printers are connected via USB, and this one cannot be matched unambiguously. Please connect only the desired printer and try again.";
 "Ungültiger Warteschlangenname." = "Invalid queue name.";
 "Die Warteschlange hat diese Einstellungen nicht übernommen: %@" = "The queue did not accept these settings: %@";
+"macOS erlaubt diesem Benutzer nicht, Drucker zu ändern. Ein Administrator kann die Einstellungen unter „Druckeinstellungen“ erneut übertragen." = "macOS does not allow this user to change printers. An administrator can transfer the settings again under “Printing Preferences”.";
+"Die macOS-Warteschlange „%@“ ist nicht eingerichtet." = "The macOS queue “%@” is not set up.";
+"Die Warteschlange „%@“ verwendet nicht den LabelWerk-Treiber – bitte unter „Treiber“ neu einrichten." = "The queue “%@” does not use the LabelWerk driver – please set it up again under “Driver”.";
 "Oberer Versatz (^LT)" = "Top offset (^LT)";
 "Linker Versatz (^LS)" = "Left offset (^LS)";
 "Abreißposition (~TA)" = "Tear-off position (~TA)";
 "Schneiden nach je" = "Cut every";
+"Etikettengröße" = "Label size";
 "LabelWerk möchte eine Druckerwarteschlange einrichten." = "LabelWerk wants to set up a printer queue.";
 
 /* MARK: Services/ImageImport.swift */
@@ -2940,6 +2969,7 @@
 "Nicht gewünscht – nur als macOS-Drucker eingerichtet." = "Not requested – set up as a macOS printer only.";
 "Live-Status, Werkzeuge und Mitteilungen sind aktiv." = "Live status, tools and notifications are active.";
 "Drucker identifizieren" = "Identify printer";
+"Etikettengröße wird gelesen …" = "Reading label size …";
 "macOS-Drucker wird eingerichtet …" = "Setting up macOS printer…";
 "„%@“ erscheint jetzt in jedem Druckdialog und in „Drucker & Scanner“." = "“%@” now appears in every print dialog and in “Printers & Scanners”.";
 "Als macOS-Drucker installiert" = "Installed as macOS printer";
@@ -2949,6 +2979,13 @@
 /* MARK: Services/ProcessRunner.swift */
 "Programm konnte nicht gestartet werden: %@" = "The program could not be started: %@";
 "„%@“ ist fehlgeschlagen (Code %d): %@" = "“%@” failed (code %d): %@";
+
+/* MARK: Services/QueueSyncService.swift */
+"„%@“ übernimmt die Einstellungen aus LabelWerk nicht: %@" = "“%@” does not take the settings from LabelWerk: %@";
+"%@ übernehmen die Einstellungen aus LabelWerk nicht: %@" = "%@ do not take the settings from LabelWerk: %@";
+"macOS-Drucker nicht aktualisiert" = "macOS printer not updated";
+"macOS-Drucker aktualisiert" = "macOS printer updated";
+"Alle Programme drucken auf „%@“ mit den Einstellungen aus LabelWerk." = "All apps print to “%@” with the settings from LabelWerk.";
 
 /* MARK: Dynamisch: LabelWerkCore/Commands/PrinterAction.swift (displayName, detail) */
 "Berichte & Testdrucke" = "Reports & Test Prints";
@@ -3014,6 +3051,7 @@
 "Druckzeit starten" = "Job start";
 "Jedes Etikett" = "Every label";
 "Jede Minute" = "Every minute";
+"Automatisch" = "Automatic";
 "Länge messen" = "Measure length";
 "Keine Bewegung" = "No motion";
 "Kurzkalibrierung" = "Short calibration";
@@ -3075,6 +3113,9 @@
 "Prüfen, ob der Drucker eingeschaltet und verbunden ist (USB-Kabel, Netzwerk oder Bluetooth-Kopplung), und danach „Neu verbinden“ wählen." = "Check that the printer is switched on and connected (USB cable, network or Bluetooth pairing), then choose “Reconnect”.";
 
 /* MARK: Nicht mehr verwendet – wird mit --prune entfernt */
+"Schwärzung, Tempo und Medien stammen aus LabelWerk. „Synchronisieren“ überträgt Änderungen in die Warteschlange; im Druckdialog lassen sie sich pro Auftrag anpassen." = "Darkness, speed and media come from LabelWerk. “Sync” transfers changes to the queue; in the print dialog they can be adjusted per job.";
+"Alle Programme drucken auf „%@“ mit diesen Einstellungen. Eigene Etikettenformate im Druckdialog als Papiergröße wählen." = "All apps print to “%@” with these settings. Choose custom label formats as the paper size in the print dialog.";
+"Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen." = "All apps now print to “%@” with these settings.";
 "Hält den Drucker nach jeweils N Etiketten an (^PQ n,N,0,N), z. B. zum Entnehmen. Hat Vorrang vor „Schneiden alle N Etiketten“. Nur ZPL." = "Pauses the printer after every N labels (^PQ n,N,0,N), e.g. to remove them. Takes precedence over “Cut every N labels”. ZPL only.";
 "Löscht vor jedem Auftrag alle aktuellen und wartenden Aufträge im Drucker (~JA), damit nur der neue gedruckt wird. Wirkt bei ZPL und EPL." = "Before every job, clears all current and pending jobs in the printer (~JA) so only the new one is printed. Works with ZPL and EPL.";
 "Mit Abschneider: nur am Auftragsende schneiden oder nach jeweils N Etiketten (^PQ n,N,0,Y)." = "With a cutter: cut only at the end of the job or after every N labels (^PQ n,N,0,Y).";
@@ -3179,7 +3220,6 @@
 "Thermodirekt" = "Direct thermal";
 "Etiketten mit Lücke" = "Labels with gap";
 "Schwarze Markierung" = "Black mark";
-"Automatisch" = "Automatic";
 "Spenden (Peel-Off)" = "Peel off";
 "Schneiden" = "Cutter";
 "Verzögert schneiden" = "Delayed cut";

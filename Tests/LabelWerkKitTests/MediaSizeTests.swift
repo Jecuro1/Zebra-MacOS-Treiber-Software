@@ -118,6 +118,24 @@ struct MediaSizeTests {
             }
         }
         #expect(!PPDFiles.containsPageSize(size, basePPD: output.appendingPathComponent("LabelWerk-zd421t-203dpi.ppd.gz").path))
+        // Treiber-Update: Der postinstall (awk) übernimmt die ergänzte Größe einer Warteschlange in die
+        // neue Modell-PPD mit demselben Ergebnis wie QueuePPD.patched und setzt lwLabelWidth/lwLabelHeight.
+        if let bash = GeneratorSupport.executable(["bash"]) {
+            for url in patchedSamples {
+                let base = output.appendingPathComponent(url.lastPathComponent.replacingOccurrences(of: "-patched.ppd", with: ".ppd.gz"))
+                let carried = output.appendingPathComponent(url.lastPathComponent + ".carried")
+                let script = try PostinstallSupport.functions("patch_added_size", "label_size_defaults", "added_page_size")
+                    + "\nset -euo pipefail\n"
+                    + "added=\"$(added_page_size \"$1\")\"\n"
+                    + "patch_added_size \"$1\" \"$2\" \"$3\" \"$added\"\n"
+                    + "label_size_defaults \"$1\"\n"
+                let result = try GeneratorSupport.capture(bash, ["-c", script, "postinstall", url.path, base.path, carried.path])
+                #expect(result.status == 0, "\(url.lastPathComponent): \(result.output)")
+                #expect(result.output == "lwLabelWidth-default=10400\nlwLabelHeight-default=7620\n", "\(result.output)")
+                let expected = try QueuePPD.patched(try PPDFiles.read(base.path), adding: size)
+                #expect(try PPDFiles.read(carried.path) == expected, "postinstall ≠ QueuePPD.patched für \(base.lastPathComponent)")
+            }
+        }
         // cupstestppd (falls vorhanden) wie generate_ppds.py --check: -I filters, Übersetzungen streng.
         guard let cupstestppd = GeneratorSupport.cupstestppd else { return }
         for url in patchedSamples {
@@ -136,6 +154,19 @@ struct MediaSizeTests {
         let base = directory.appendingPathComponent("LabelWerk-zd421t-203dpi.ppd")
         try PPDFiles.write(QueuePPDSample.text, to: base)
         #expect(!PPDFiles.containsPageSize(size, basePPD: base.path))
+        // Die installierte Datei entscheidet, nicht der Katalog der App (Treiber und App können
+        // verschiedene Versionen haben); ohne lesbare Datei gilt der Dateiname.
+        let sampleSizes = QueuePPD.pageSizeKeywords(in: QueuePPDSample.text)
+        #expect(PPDFiles.installedPageSizes(basePPD: base.path) == sampleSizes)
+        let catalogOnly = ModelCatalog.shared.stocks.map(QueueLabelSize.init(stock:)).first {
+            PPDPageSizes.keywords(forPPDNamed: base.path)?.contains($0.keyword) == true && !sampleSizes.contains($0.keyword)
+        }
+        #expect(catalogOnly != nil)
+        if let catalogOnly {
+            #expect(!PPDFiles.containsPageSize(catalogOnly, basePPD: base.path))
+            let missing = directory.appendingPathComponent("fehlt/LabelWerk-zd421t-203dpi.ppd.gz").path
+            #expect(PPDFiles.containsPageSize(catalogOnly, basePPD: missing))
+        }
         let patched = try PPDFiles.patchedText(basePPD: base.path, size: size)
         #expect(PPDFiles.addedLabelSize(inQueuePPD: patched) == size)
         #expect(PPDFiles.defaultLabelSize(in: patched)?.keyword == "w295h216")
@@ -175,6 +206,27 @@ enum QueuePPDSample {
     *DefaultResolution: 203dpi
 
     """
+}
+
+/// Funktionen aus dem postinstall des Treibers (Installer/pkg/scripts/driver/postinstall).
+enum PostinstallSupport {
+    static var script: URL {
+        GeneratorSupport.repositoryRoot.appendingPathComponent("Installer/pkg/scripts/driver/postinstall")
+    }
+
+    /// Schneidet Funktionsdefinitionen („name() {“ … „}“ am Zeilenanfang) aus dem Skript aus.
+    static func functions(_ names: String...) throws -> String {
+        let lines = try String(contentsOf: script, encoding: .utf8).components(separatedBy: "\n")
+        var parts: [String] = []
+        for name in names {
+            guard let start = lines.firstIndex(of: "\(name)() {"),
+                  let end = lines[start...].firstIndex(of: "}") else {
+                throw CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedDescriptionKey: "Funktion \(name) fehlt"])
+            }
+            parts.append(lines[start...end].joined(separator: "\n"))
+        }
+        return parts.joined(separator: "\n\n") + "\n"
+    }
 }
 
 /// Python-Generator und cupstestppd für den Abgleich.

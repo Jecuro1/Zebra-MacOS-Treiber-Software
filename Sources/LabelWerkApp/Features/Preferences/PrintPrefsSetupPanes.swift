@@ -153,7 +153,25 @@ struct PrintPrefsPagePane: View {
                     PrintPrefsMeasureField(dots: context.binding(\.settings.stopOffset), range: 0...32_000,
                                            length: context.length)
                 }
+
+                Divider().opacity(0.5).padding(.vertical, 4)
+
+                // Nur Treiber: wirkt im Filter, wenn ein Programm eine andere Papiergröße schickt.
+                PrintPrefsRow(.fitToLabel, context: context, note: fitToLabelNote) {
+                    PrintPrefsMenuPicker(selection: context.binding(\.settings.fitToLabel),
+                                         options: LabelFitMode.allCases, width: 240) { tr($0.displayName) }
+                }
             }
+        }
+    }
+
+    private var fitToLabelNote: String {
+        let size = context.length.size(widthMM: editor.draft.widthMM, heightMM: editor.draft.heightMM)
+        switch settings.fitToLabel {
+        case .auto:
+            return tr("A4, Letter & Co. aus Vorschau, Safari usw. landen automatisch auf dem Etikett %@ – im Druckdialog muss nichts eingestellt werden.", size)
+        case .off:
+            return tr("Andere Papiergrößen werden nicht angepasst – im Druckdialog muss dann „%@“ gewählt werden.", size)
         }
     }
 

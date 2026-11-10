@@ -229,6 +229,57 @@ struct QueueDefaultsTests {
         #expect(!difference.needsPPD)
     }
 
+    @Test("Abgleich: cupsd meldet Wahrheitswerte der Warteschlangen-Standards klein (lwRotate180=false)")
+    func differenceBooleanCase() {
+        let plan = QueueDefaults.plan(settings: .default, language: .zpl, removingStale: true, resolution: .dpi203,
+                                      labelSize: size)
+        #expect(plan.expected[CUPSOptionName.rotate180] == "False")
+        #expect(plan.queueDefaults.contains(CUPSOptionName.rotate180))
+        var list: [String: LPOptionsList.Option] = [:]
+        for (name, value) in plan.expected where !plan.queueDefaults.contains(name) {
+            list[name] = LPOptionsList.Option(choices: name == "PageSize" ? ["w288h432", value] : [value], selected: value)
+        }
+        var plain: [String: String] = [:]
+        for name in plan.queueDefaults { plain[name] = plan.expected[name] }
+        plain[CUPSOptionName.rotate180] = "false"
+        let current = QueueDefaults.currentOptions(list: list, plain: plain)
+        let difference = QueueDefaults.difference(plan, current: current, pageSizeChoices: ["w288h432", "w295h216"],
+                                                  basePageSizes: ["w288h432"])
+        #expect(difference.isEmpty, "\(difference)")
+        // Ein wirklich anderer Wert bleibt eine Abweichung.
+        plain[CUPSOptionName.rotate180] = "true"
+        let changed = QueueDefaults.difference(plan, current: QueueDefaults.currentOptions(list: list, plain: plain),
+                                               pageSizeChoices: ["w288h432", "w295h216"], basePageSizes: ["w288h432"])
+        #expect(changed.mismatchedOptions == [CUPSOptionName.rotate180])
+    }
+
+    @Test("lwSpeed: Auswahl der PPD 2 … Modellhöchstwert, sonst nächstliegende Wahl plus exakter Standard")
+    func speedChoices() {
+        #expect(QueueDefaults.ppdSpeedChoices(maxSpeed: 6) == [2, 3, 4, 5, 6])
+        #expect(QueueDefaults.ppdSpeedChoices(maxSpeed: 1) == [1])
+        #expect(QueueDefaults.ppdSpeedChoices(maxSpeed: 20) == Array(2...14))
+        #expect(QueueDefaults.ppdSpeedChoices(maxSpeed: nil) == Array(2...14))
+        var settings = PrintSettings.default
+        settings.speed = 1
+        let slow = QueueDefaults.plan(settings: settings, language: nil, removingStale: true, resolution: .dpi203,
+                                      maxSpeed: 6)
+        #expect(slow.arguments.contains("lwSpeed=2"))
+        #expect(slow.arguments.contains("lwSpeed-default=1"))
+        #expect(slow.approximated == [CUPSOptionName.speed])
+        settings.speed = 10
+        let fast = QueueDefaults.plan(settings: settings, language: nil, removingStale: true, resolution: .dpi203,
+                                      maxSpeed: 6)
+        #expect(fast.arguments.contains("lwSpeed=6"))
+        #expect(fast.arguments.contains("lwSpeed-default=10"))
+        settings.speed = 4
+        let inside = QueueDefaults.plan(settings: settings, language: nil, removingStale: true, resolution: .dpi203,
+                                        maxSpeed: 6)
+        let pairs = stride(from: 0, to: inside.arguments.count - 1, by: 1).map { (inside.arguments[$0], inside.arguments[$0 + 1]) }
+        #expect(pairs.contains { $0 == ("-o", "lwSpeed=4") })
+        #expect(pairs.contains { $0 == ("-R", "lwSpeed-default") })
+        #expect(inside.approximated.isEmpty)
+    }
+
     @Test("Abgleich: alte Warteschlange ohne ergänzte Größe und ohne lwLabelWidth")
     func differenceOldQueue() {
         let plan = QueueDefaults.plan(settings: .default, language: .zpl, removingStale: true, resolution: .dpi203,

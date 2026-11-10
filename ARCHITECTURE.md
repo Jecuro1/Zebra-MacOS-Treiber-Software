@@ -855,7 +855,8 @@ Auftrags für beide), Einstellungen `lwFitToLabel`, `lwLabelWidth` (`lw`), `lwLa
    `Ph` ebenso. Schritt F entfällt, wenn keine feste Seite abweicht: weder `cw > 0 ∧ |Pw − cw| > 200`
    noch `ch > 0 ∧ |Ph − ch| > 200`. Etikett in Punkten: `W = (cw · xdpi + 1270) / 2540`,
    `H = (ch · ydpi + 1270) / 2540` (frei: kein Wert). Schritt F entfällt, wenn eine feste Seite
-   `< 1` oder `> 32000` Punkte ergibt oder `xdpi`/`ydpi` 0 ist.
+   `< 1` oder `> 32000` Punkte ergibt oder `xdpi`/`ydpi` nicht in 1…100000 liegt (der Filter wertet
+   größere `HWResolution` als unbekannt).
 2. **Inhalt.** Ein Punkt ist Inhalt ⇔ `L < 250`. `x0`/`x1` = kleinste/größte Spalte, `y0`/`y1` =
    kleinste/größte Zeile mit Inhalt; `bw = x1 − x0 + 1`, `bh = y1 − y0 + 1`. Ohne Inhalt (leere Seite)
    wird das Ergebnis ein weißes Etikett `W × H` (`L = 255`; freie Seite = 1 Punkt) – weiter mit dem
@@ -1071,10 +1072,115 @@ setzt die App als serverseitige Vorgaben mit `lpadmin -p <queue> -o lwLabelTop-d
 (entfernen: `-R lwLabelTop-default`); CUPS übergibt sie jedem Auftrag als `lwLabelTop=37` in
 `argv[5]`. Die Kurzform `-o lwLabelTop=37` speichert CUPS nur für PPD-Optionen mit gültiger Auswahl
 und verwirft andere Werte (z. B. `lwStartCmd`, Ganzzahlen außerhalb der Auswahl) stillschweigend.
+`QueueDefaults.plan` setzt solche Ganzzahlen deshalb als nächstliegende PPD-Wahl plus exakten
+Warteschlangen-Standard – auch `lwSpeed`, dessen Auswahl vom Modell abhängt (2 … Höchstwert bei der
+Auflösung wie `ppd_speeds`; `1` und gespeicherte Werte über dem Höchstwert werden angenähert).
 Boolesche Werte: `True/False/yes/no/on/off/1/0`.
 
 Zusätzliche PPD-Attribute, die der Filter liest:
 `*lwModel: "zd421t"`, `*lwMaxPrintWidthDots: "832"`, `*lwDefaultGapDots: "24"`.
+
+### Etikettengröße der Warteschlange
+
+Wie beim Windows-Treiber wird die Etikettengröße **einmal** festgelegt (Assistent, manuelles
+Hinzufügen, „Druckeinstellungen“, `lwctl install --stock|--size`) und gilt dann für jedes Programm,
+ohne Auswahl im macOS-Druckdialog. Dazu trägt jede LabelWerk-Warteschlange drei Dinge:
+
+1. **Benannte Standard-Papiergröße.** Schlüsselwort `w<pt>h<pt>` wie `LabelStock.ppdKeyword`
+   (`mm / 25,4 · 72`, kaufmännisch gerundet; 104 × 76,2 mm → `w295h216`), Texte „Label 104 x 76.2 mm“
+   / „Etikett 104 × 76,2 mm“ (`QueueLabelSize`, Maße auf 0,01 mm, ohne Nullen am Ende). Ob die Größe
+   schon in der Modell-PPD steht, entscheidet `PPDPageSizes` (LabelWerkCore) – exakt wie
+   `page_sizes_for`/`build_generic_target` in `generate_ppds.py` (Breite ≤ Druckbreite + 2 mm, Länge ≤
+   größte Etikettenlänge, Standardformat immer, gleiche Schlüsselwörter zusammengeführt; generische
+   PPDs mit den größten Werten der Sprache). Ein Test vergleicht beide für jede erzeugte PPD.
+   * Steht sie drin: `lpadmin -p <queue> -o PageSize=<schlüsselwort>`.
+   * Sonst ergänzt `QueuePPD.patched` eine Kopie der installierten Modell-PPD (`.ppd.gz` wird über
+     zlib gelesen, `PPDFiles`) mit der Syntax des Generators und installiert sie mit
+     `lpadmin -p <queue> -P <kopie>` – `lpadmin -o PageSize=…` verwirft unbekannte Größen
+     stillschweigend (`cupsMarkOptions`). Je Anker steht der Eintrag direkt nach der Standardzeile, die
+     auf ihn zeigt (im Druckdialog oben):
+     ```
+     *lwModel: "zd421t"
+     *% LabelWerk: Etikettengroesse dieser Warteschlange (von LabelWerk ergaenzt)
+     *lwLabelPageSize: "w295h216"
+     *DefaultPageSize: w295h216
+     *PageSize w295h216/Label 104 x 76.2 mm: "<</PageSize[294.803 216]/ImagingBBox null>>setpagedevice"
+     *de.Translation PageSize/Etikettenformat: ""   ← danach *de.PageSize w295h216/Etikett 104 × 76,2 mm: ""
+     *DefaultPageRegion: w295h216                   ← danach *PageRegion w295h216/… (wie *PageSize)
+     *de.Translation PageRegion/…                   ← danach *de.PageRegion w295h216/Etikett 104 × 76,2 mm: ""
+     *DefaultImageableArea: w295h216                ← danach *ImageableArea w295h216/…: "0 0 294.803 216"
+     *DefaultPaperDimension: w295h216               ← danach *PaperDimension w295h216/…: "294.803 216"
+     ```
+     Zahlen wie `format_number` (drei Nachkommastellen ohne Nullen am Ende), Texte wie
+     `sanitize_text`. `*lwLabelPageSize` markiert die ergänzte Größe: Erneutes Ergänzen ersetzt sie,
+     der Abgleich erkennt veraltete Größen, und der postinstall übernimmt sie beim Update. Die Kopie
+     besteht `cupstestppd -W translations` (Test unter Linux, `ci_macos.sh` auf macOS).
+2. **`lwLabelWidth`/`lwLabelHeight`** in 1/100 mm als Warteschlangen-Standard
+   (`-o lwLabelWidth-default=10400 -o lwLabelHeight-default=7620`, nicht in der PPD, §9-Tabelle) für
+   „An Etikett anpassen“ (§8 „F“). Endlosmaterial: keine Länge (`-R lwLabelHeight-default`).
+3. **`lwFitToLabel`** (PPD-Option, Standard `Auto`; App: „Druckeinstellungen › Seite einrichten“).
+
+`lpadmin -P` ersetzt die PPD und damit ihre `*Default…`-Werte: Jeder Aufruf mit `-P` setzt im selben
+Aufruf alle Standardwerte erneut (`-o name=wert` schreibt lpadmin in die neue PPD). Die
+Warteschlangen-Standards `name-default` (printers.conf) bleiben dagegen erhalten – cupsd
+(`scheduler/ipp.c`, `add_printer`) kopiert nur die PPD und lässt `printer->options` unverändert.
+
+**Wer setzt das?**
+* App (`CUPSService`): `installQueue` (Assistent, manuelles Hinzufügen, „Treiber“) und `apply` mit dem
+  Soll-Zustand `QueueConfiguration` (Einstellungen, Format, Sprache, Auflösung, Modell →
+  `QueueDefaults.plan`). `QueueSyncService` hält jede verknüpfte Warteschlange (`SavedPrinter.cupsQueueName`)
+  automatisch aktuell: sofort bei „OK“/„Übernehmen“ in „Druckeinstellungen“ (mit Passwortabfrage,
+  falls nötig), 1,5 s nach jeder Änderung an `PrinterSession.saved` oder an eigenen Formaten (egal aus
+  welchem Bereich der App; ein Fingerabdruck aus Warteschlange und Soll-Zustand verhindert doppelte
+  Läufe) und einmal 2 s nach dem Start (auch für Warteschlangen älterer Versionen). Automatische
+  Abgleiche vergleichen erst (`lpoptions -p <queue> -l` und `lpoptions -p <queue>`,
+  `QueueDefaults.difference`) und rufen `lpadmin` nur bei Abweichungen auf, nie mit Passwortabfrage
+  (Administratoren gehören zu `_lpadmin`); Fehler → ein Hinweis mit „Erneut versuchen“. In macOS
+  entfernte Warteschlangen werden nicht neu angelegt. Nur Warteschlangen mit LabelWerk-Treiber (PPD mit
+  `*lwModel`, sonst `printer-make-and-model` mit „LabelWerk“) werden abgeglichen: Eine verknüpfte
+  fremde Warteschlange (Zebras oder CUPS' eigene PPD) bleibt unverändert – automatische Abgleiche
+  überspringen sie still, „Druckeinstellungen“ meldet `notLabelWerkQueue`; umstellen kann sie nur eine
+  ausdrückliche Einrichtung (`installQueue`). Die Seitengrößen der Modell-PPD (fehlende bzw. veraltete
+  Größe) stammen aus der installierten Datei (`PPDFiles.installedPageSizes`), nur ohne lesbare Datei
+  aus dem Katalog der App (`PPDPageSizes`) – App und Treiber können verschiedene Versionen haben.
+* `lwctl install`: `--stock <id>` oder `--size 104x76.2mm` (mm oder in) – Größe, `lwLabelWidth`/
+  `lwLabelHeight`, ggf. die ergänzte Kopie. Ohne beides bleibt eine früher ergänzte Größe erhalten;
+  fehlen `lwLabelWidth`/`lwLabelHeight` (neue Warteschlange, ältere Version), gelten die Maße der
+  Standard-Seitengröße, die die Warteschlange danach hat.
+* Treiber-Update (postinstall, `refresh_queues`): übernimmt eine ergänzte Größe mit `awk` in eine
+  Kopie der neuen Modell-PPD (gleiches Ergebnis wie `QueuePPD.patched`, Test) und setzt fehlende
+  `lwLabelWidth`/`lwLabelHeight` aus der Standard-Seitengröße der Warteschlange
+  (`⌊pt · 2540 / 72 + 0,5⌋`); `lwFitToLabel` kommt als `Auto` aus der neuen PPD bzw. als übernommener Wert.
+
+**Abgleich** (`QueueDefaults.difference`): Abweichend ist eine Option des Plans, deren Wert `lpoptions`
+anders meldet – ohne Groß-/Kleinschreibung, denn cupsd speichert `-o lwRotate180-default=False` als
+IPP-Wahrheitswert und meldet `lwRotate180=false` (PPD-Optionen, die die PPD der Warteschlange nicht kennt, zählen nicht; fehlende
+Warteschlangen-Standards und `PageSize` schon), ein gesetzter Wert einer zu leerenden Option, eine
+Seitengröße, die in `PageSize` von `lpoptions -l` fehlt (→ neue PPD), und eine ergänzte Größe, die
+weder in der Modell-PPD steht noch gewünscht ist (→ neue PPD).
+
+**Größe vom Drucker** (`PrinterClient.readMediaSize()`, nur ZPL mit Rückkanal): Breite = Druckbreite
+`ezpl.print_width` (wie ZDesigner: 832 Punkte = 104 mm beim ZD421 mit 203 dpi), sonst die der
+Identifikation bzw. des Katalogmodells; Länge = `zpl.label_length`, sonst Feld `dddd` von `~HS`;
+Medientyp aus `ezpl.media_type` (bzw. `media.type`/`media.sense_mode`). Punkte → mm
+(`LabelSizing.millimeters`): unter ganzen mm, Vielfachen von 0,05 Zoll und halben mm der Kandidat mit
+der kleinsten Abweichung (8/12/24 Punkte je mm bzw. dpi/25,4), höchstens ein Punkt; bei Gleichstand
+ganze mm vor Zoll vor halben mm (609 → 76,2; 832 → 104). Zuordnung zu einem Format
+(`LabelSizing.matchingStock`): ± 0,6 mm je Maß mit passendem Medientyp, eigene Formate vor dem
+Katalog, sonst ein neues eigenes Format „Benutzerdefiniert B × H mm“ (`LabelStockLibrary` in der App,
+dieselbe Logik wie „Druckeinstellungen“).
+
+**Auswahl „Etikett“ im Assistenten und beim manuellen Hinzufügen** (`LabelStockChoice`,
+`LabelSizeEntry` in LabelWerkCore; Ansicht `LabelStockChooser`): über den Formaten stehen „Vom
+Drucker: 104 × 76,2 mm“ (bzw. das passende vorhandene Format mit „vom Drucker erkannt“) und
+„Benutzerdefiniert …“ (Breite/Höhe in mm mit Komma oder Punkt, Grenzen `LabelSizing.Limits` des
+Modells, Medientyp). Die gemeldete Größe kommt aus der Erkennung (`PrinterDetection.media`) und wird
+vorausgewählt, solange der Benutzer die Auswahl nicht geändert hat (`LabelStockChoice.preselection`);
+ein schon in LabelWerk eingerichteter Drucker bringt sein Format als eigene Wahl mit. „Vom Drucker
+übernehmen“ liest neu und gibt der Meldung wieder Vorrang. Die Auswahl legt nichts an: Erst
+„Installieren“ bzw. „Drucker hinzufügen“ macht daraus ein echtes Format (`LabelStockLibrary.resolveStock`)
+– vor dem Installationsauftrag, sodass die Warteschlange es als benannte Seitengröße erhält und ein
+schon eingerichteter Drucker es übernimmt (`PrinterInstallService.register`).
 
 ## 10. Treiber & Installation (macOS)
 

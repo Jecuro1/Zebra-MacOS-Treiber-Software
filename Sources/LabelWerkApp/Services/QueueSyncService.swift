@@ -21,7 +21,8 @@ import LabelWerkKit
 /// Abgeglichen wird mit ``CUPSService/apply(_:to:force:allowAdminPrompt:)``: `lpadmin` läuft nur bei
 /// Abweichungen laut `lpoptions`. Automatische Abgleiche fragen nie nach einem Passwort (Administratoren
 /// gehören auf macOS zur Gruppe `_lpadmin`), sind bei Erfolg still und melden Fehler mit einem Hinweis
-/// „Erneut versuchen“. Eine in macOS entfernte Warteschlange wird nicht neu angelegt. Alle
+/// „Erneut versuchen“. Eine in macOS entfernte Warteschlange wird nicht neu angelegt, eine verknüpfte
+/// Warteschlange mit fremdem Treiber nicht umgestellt (``CUPSService/CUPSError/notLabelWerkQueue``). Alle
 /// `lpadmin`-Aufrufe laufen nacheinander.
 @MainActor
 final class QueueSyncService {
@@ -40,6 +41,9 @@ final class QueueSyncService {
     private weak var model: AppModel?
     /// Zuletzt erfolgreich abgeglichener (bzw. als aktuell geprüfter) Stand je Drucker.
     private var synced: [UUID: Fingerprint] = [:]
+    /// Zuletzt automatisch versuchter Stand je Drucker (auch fehlgeschlagen): Andere Änderungen am
+    /// Drucker (Favorit, Farbe …) lösen so keinen weiteren Versuch samt Hinweis aus.
+    private var attempted: [UUID: Fingerprint] = [:]
     /// Geplante Abgleiche nach Änderungen.
     private var pending: [UUID: Task<Void, Never>] = [:]
     /// Letzter laufender Abgleich: Abgleiche laufen nacheinander.
@@ -74,7 +78,7 @@ final class QueueSyncService {
             pending.removeValue(forKey: session.id)?.cancel()
             return
         }
-        guard synced[session.id] != fingerprint else {
+        guard synced[session.id] != fingerprint, attempted[session.id] != fingerprint else {
             pending.removeValue(forKey: session.id)?.cancel()
             return
         }
@@ -132,15 +136,20 @@ final class QueueSyncService {
     private func syncInBackground(_ sessions: [PrinterSession], reason: Reason) async {
         guard CUPSService.isDriverInstalled else { return }
         let candidates = sessions.compactMap { session in fingerprint(for: session).map { (session, $0) } }
-            .filter { reason == .launch || synced[$0.0.id] != $0.1 }
+            .filter { reason == .launch || (synced[$0.0.id] != $0.1 && attempted[$0.0.id] != $0.1) }
         guard !candidates.isEmpty else { return }
-        let existing = Set(await CUPSService.queues().map(\.name))
+        let queues = await CUPSService.queues()
+        let existing = Set(queues.map(\.name))
+        // Nur Warteschlangen mit LabelWerk-Treiber: Eine verknüpfte fremde Warteschlange (Zebras oder
+        // CUPS' eigene PPD) stellt nur eine ausdrückliche Einrichtung unter „Treiber“ um.
+        let labelWerk = await DriverQueueClassifier.labelWerkQueueNames(in: queues)
         var failures: [(session: PrinterSession, error: Error)] = []
         for (session, fingerprint) in candidates {
             // In macOS entfernte Warteschlangen nicht neu anlegen (DriverView zeigt die Verknüpfung).
-            guard existing.contains(fingerprint.queue) else { continue }
+            guard existing.contains(fingerprint.queue), labelWerk.contains(fingerprint.queue) else { continue }
             // Inzwischen erneut geändert: der nächste geplante Abgleich übernimmt.
             guard self.fingerprint(for: session) == fingerprint else { continue }
+            attempted[session.id] = fingerprint
             do {
                 _ = try await serialized {
                     try await CUPSService.apply(fingerprint.configuration, to: fingerprint.queue, force: false,
@@ -148,6 +157,8 @@ final class QueueSyncService {
                 }
                 synced[session.id] = fingerprint
             } catch CUPSService.CUPSError.queueMissing {
+                continue
+            } catch CUPSService.CUPSError.notLabelWerkQueue {
                 continue
             } catch {
                 failures.append((session, error))

@@ -240,7 +240,15 @@ struct SetupOptionsStep: View {
                 VStack(spacing: 0) {
                     KeyValueRow(tr("Verbindung"), wizard.currentDescriptor?.displayString ?? "–")
                     KeyValueRow(tr("Auflösung"), wizard.resolution.displayName)
-                    KeyValueRow(tr("Etikett"), stock?.name ?? "–")
+                    KeyValueRow(tr("Etikett"), wizard.stockSummary)
+                }
+                if stock != nil {
+                    // Die Größe wird Standard-Papiergröße des macOS-Druckers – kein Einstellen im Druckdialog.
+                    Text(tr("Alle Programme drucken auf dieses Etikett – im Druckdialog muss nichts eingestellt werden."))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

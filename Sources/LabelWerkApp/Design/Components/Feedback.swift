@@ -176,6 +176,16 @@ private struct ToastView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(4)
                 }
+                if let action = toast.action {
+                    // z. B. „Erneut versuchen“ (QueueSyncService): ausführen und den Hinweis schließen.
+                    Button(action.title) {
+                        action.perform()
+                        dismiss()
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.top, 2)
+                }
             }
             Spacer(minLength: 4)
             Button(action: dismiss) {

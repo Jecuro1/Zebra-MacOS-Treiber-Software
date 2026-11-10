@@ -998,7 +998,7 @@ def fit_plan(s: Settings, width: int, height: int, page_size: Optional[Tuple[flo
     else:
         cw, ch = s.label_width, length
     differs = (cw > 0 and abs(page_w - cw) > FIT_TOLERANCE) or (ch > 0 and abs(page_h - ch) > FIT_TOLERANCE)
-    if not differs or xdpi <= 0 or ydpi <= 0:
+    if not differs or not (1 <= xdpi <= 100000 and 1 <= ydpi <= 100000):
         return None
     target_w = (cw * xdpi + 1270) // 2540 if cw > 0 else None
     target_h = (ch * ydpi + 1270) // 2540 if ch > 0 else None

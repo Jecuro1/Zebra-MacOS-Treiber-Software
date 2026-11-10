@@ -137,7 +137,8 @@ enum CommandCatalog {
             Modell-PPD, erhält die Warteschlange eine Kopie der PPD mit dieser Seitengröße. Zusätzlich
             gehen lwLabelWidth/lwLabelHeight (1/100 mm) als Warteschlangen-Standard an den Filter, der
             Seiten anderer Größe (A4, Letter …) automatisch an das Etikett anpasst. Eine früher
-            ergänzte Größe bleibt bei einer Aktualisierung ohne --stock/--size erhalten.
+            ergänzte Größe bleibt bei einer Aktualisierung ohne --stock/--size erhalten; fehlen
+            lwLabelWidth/lwLabelHeight, gelten die Maße der Standard-Seitengröße der Warteschlange.
             """,
             options: [
                 OptionSpec("model", short: "m", value: "auto|id|generic",

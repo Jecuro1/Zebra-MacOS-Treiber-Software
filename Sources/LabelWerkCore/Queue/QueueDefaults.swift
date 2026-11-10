@@ -41,9 +41,24 @@ public enum QueueDefaults {
         CUPSOptionName.stopOffset: ([0, 1, 2, 3, 5, 10], 0...32_000),
     ]
 
+    /// Kleinste Geschwindigkeit der PPD (Driver/ppd/generate_ppds.py `MIN_PPD_SPEED_IPS`).
+    public static let ppdMinSpeed = 2
+    /// Obergrenze der Geschwindigkeit (`MAX_SPEED_IPS`, ``PrintSettings/clamped()``).
+    public static let ppdMaxSpeed = 14
+
+    /// Auswahl von `lwSpeed` in der PPD eines Modells mit Höchstgeschwindigkeit `maxSpeed` (Zoll/s)
+    /// wie `ppd_speeds` im Generator: 2 … Höchstwert (bei Höchstwert 1 nur dieser). Unbekanntes
+    /// Modell (`nil`): 2 … 14 – dann wird nur 1 angenähert.
+    public static func ppdSpeedChoices(maxSpeed: Int?) -> [Int] {
+        let top = max(1, min(maxSpeed ?? ppdMaxSpeed, ppdMaxSpeed))
+        return Array(min(ppdMinSpeed, top)...top)
+    }
+
     /// Auswahl einer ganzzahligen PPD-Option für die Auflösung (`nil` = keine Ganzzahl-Option bzw.
-    /// Auflösung unbekannt bei auflösungsabhängigen Optionen).
-    public static func ppdChoices(_ name: String, resolution: Resolution?) -> [Int]? {
+    /// Auflösung unbekannt bei auflösungsabhängigen Optionen). `lwSpeed` hängt vom Modell ab
+    /// (`maxSpeed`, ``ppdSpeedChoices(maxSpeed:)``).
+    public static func ppdChoices(_ name: String, resolution: Resolution?, maxSpeed: Int? = nil) -> [Int]? {
+        if name == CUPSOptionName.speed { return ppdSpeedChoices(maxSpeed: maxSpeed) }
         if let fixed = ppdIntegerChoices[name] { return fixed }
         guard let resolution, let spec = ppdMillimetreChoices[name] else { return nil }
         var seen = Set<Int>()
@@ -96,8 +111,12 @@ public enum QueueDefaults {
     ///
     /// `resolution` bestimmt die Auswahl der Millimeter-Optionen (`lwMarkOffset`, `lwStopOffset`); ohne
     /// Auflösung werden deren Zahlenwerte stets exakt als Warteschlangen-Standard gesetzt.
+    ///
+    /// `maxSpeed` ist die Höchstgeschwindigkeit des Modells bei dieser Auflösung (Auswahl von
+    /// `lwSpeed` in der PPD, ``ppdSpeedChoices(maxSpeed:)``).
     public static func plan(settings: PrintSettings, language: PrinterLanguage?, removingStale: Bool,
-                            resolution: Resolution? = nil, labelSize: QueueLabelSize? = nil) -> Plan {
+                            resolution: Resolution? = nil, labelSize: QueueLabelSize? = nil,
+                            maxSpeed: Int? = nil) -> Plan {
         var plan = Plan()
         var effective = settings
         if let labelSize, effective.labelWidthHundredthsMM <= 0 {
@@ -120,7 +139,7 @@ public enum QueueDefaults {
                 // Auswahl der PPD unbekannt: exakter Wert als Warteschlangen-Standard.
                 plan.arguments += ["-o", "\(name)-default=\(value)"]
                 plan.queueDefaults.insert(name)
-            } else if let choices = ppdChoices(name, resolution: resolution), !choices.isEmpty,
+            } else if let choices = ppdChoices(name, resolution: resolution, maxSpeed: maxSpeed), !choices.isEmpty,
                       let number = Int(value), !choices.contains(number) {
                 let nearest = choices.min { abs($0 - number) < abs($1 - number) } ?? number
                 plan.arguments += ["-o", "\(name)=\(nearest)", "-o", "\(name)-default=\(value)"]
@@ -129,7 +148,7 @@ public enum QueueDefaults {
             } else {
                 plan.arguments += ["-o", "\(name)=\(value)"]
                 // Ein früher gesetzter exakter Wert würde die PPD-Wahl sonst überdecken.
-                if removingStale, ppdIntegerChoices[name] != nil || dependsOnResolution {
+                if removingStale, ppdIntegerChoices[name] != nil || dependsOnResolution || name == CUPSOptionName.speed {
                     plan.arguments += ["-R", "\(name)-default"]
                 }
             }
@@ -175,20 +194,23 @@ public enum QueueDefaults {
     /// PPD-Optionen, die die PPD der Warteschlange nicht kennt (z. B. `lwCutEvery` ohne Schneider,
     /// neue Optionen bei einer PPD älterer Treiber), werden nicht gemeldet; Warteschlangen-Standards
     /// müssen vorhanden sein. Liefert `lpoptions` gar nichts (`current` leer), gelten die
-    /// Warteschlangen-Standards und die Seitengröße als abweichend (Stand unbekannt).
+    /// Warteschlangen-Standards und die Seitengröße als abweichend (Stand unbekannt). Werte werden ohne
+    /// Groß-/Kleinschreibung verglichen: cupsd meldet als Wahrheitswert gespeicherte
+    /// Warteschlangen-Standards klein (`lwRotate180-default=False` → `lwRotate180=false`).
     public static func difference(_ plan: Plan, current: [String: String], pageSizeChoices: [String] = [],
                                   basePageSizes: [String]? = nil) -> Difference {
         var difference = Difference()
         var mismatched: [String] = []
         for (name, value) in plan.expected.sorted(by: { $0.key < $1.key }) {
             if let actual = current[name] {
-                if actual != value { mismatched.append(name) }
+                if actual.caseInsensitiveCompare(value) != .orderedSame { mismatched.append(name) }
             } else if plan.queueDefaults.contains(name) || name == pageSizeOption {
                 mismatched.append(name)
             }
         }
         for name in plan.cleared.sorted() {
-            if let actual = current[name], !actual.isEmpty, actual != "None", actual != CUPSOptionName.defaultValue {
+            if let actual = current[name], !actual.isEmpty,
+               !["none", "false", CUPSOptionName.defaultValue.lowercased()].contains(actual.lowercased()) {
                 mismatched.append(name)
             }
         }

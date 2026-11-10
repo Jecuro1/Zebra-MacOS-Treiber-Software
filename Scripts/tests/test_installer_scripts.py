@@ -857,14 +857,17 @@ def shell_functions(script: Path, *names: str) -> str:
 
 
 def run_refresh_queues(lpadmin: str, cups_ppd_dir: Path, ppd_dir: Path,
-                       env: Optional[Dict[str, str]] = None) -> subprocess.CompletedProcess:
+                       env: Optional[Dict[str, str]] = None,
+                       lpoptions: str = "/nonexistent/lpoptions") -> subprocess.CompletedProcess:
     """Führt refresh_queues() aus dem driver-postinstall mit eigenen Pfaden aus."""
     script = "set -euo pipefail\n" \
              "log() { printf 'LabelWerk postinstall: %s\\n' \"$*\"; }\n" \
              f"LPADMIN={shlex.quote(lpadmin)}\n" \
+             f"LPOPTIONS={shlex.quote(lpoptions)}\n" \
              f"CUPS_PPD_DIR={shlex.quote(str(cups_ppd_dir))}\n" \
              f"PPD_DIR={shlex.quote(str(ppd_dir))}\n" \
-             + shell_functions(DRIVER_POSTINSTALL, "queue_defaults", "carried_defaults", "refresh_queues") \
+             + shell_functions(DRIVER_POSTINSTALL, "queue_defaults", "carried_defaults", "added_page_size",
+                               "patch_added_size", "label_size_defaults", "has_label_size", "refresh_queues") \
              + "\nrefresh_queues\n"
     return run([SYSTEM_BASH, "-c", script], env=env)
 
@@ -990,6 +993,185 @@ printf -- '--\\n' >> "{self.calls}"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("konnte nicht aktualisiert werden", result.stdout)
         self.assertIn("0 Warteschlangen aktualisiert, 1 unverändert.", result.stdout)
+
+
+# Neue Modell-PPD im Aufbau des Generators (Ausschnitt): 4 × 6 Zoll, ohne 104 × 76,2 mm.
+MODEL_PPD = """*PPD-Adobe: "4.3"
+*FileVersion: "1.1.0"
+*lwModel: "zd421t"
+*OpenUI *PageSize/Media Size: PickOne
+*DefaultPageSize: w288h432
+*PageSize w288h432/4 x 6 in (Shipping): "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageSize
+*de.Translation PageSize/Etikettenformat: ""
+*de.PageSize w288h432/4 × 6 Zoll (Versand): ""
+*OpenUI *PageRegion/Media Size: PickOne
+*DefaultPageRegion: w288h432
+*PageRegion w288h432/4 x 6 in (Shipping): "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageRegion
+*de.Translation PageRegion/Etikettenformat: ""
+*de.PageRegion w288h432/4 × 6 Zoll (Versand): ""
+*DefaultImageableArea: w288h432
+*ImageableArea w288h432/4 x 6 in (Shipping): "0 0 288 432"
+*DefaultPaperDimension: w288h432
+*PaperDimension w288h432/4 x 6 in (Shipping): "288 432"
+*OpenUI *Resolution/Resolution: PickOne
+*DefaultResolution: 203dpi
+*CloseUI: *Resolution
+"""
+
+# Von LabelWerk ergänzte Einträge für „Etikett 104 × 76,2 mm“ (Syntax von QueuePPD.patched).
+ADDED_ENTRIES = {
+    "PageSize": '*PageSize w295h216/Label 104 x 76.2 mm: "<</PageSize[294.803 216]/ImagingBBox null>>setpagedevice"',
+    "PageRegion": '*PageRegion w295h216/Label 104 x 76.2 mm: "<</PageSize[294.803 216]/ImagingBBox null>>setpagedevice"',
+    "ImageableArea": '*ImageableArea w295h216/Label 104 x 76.2 mm: "0 0 294.803 216"',
+    "PaperDimension": '*PaperDimension w295h216/Label 104 x 76.2 mm: "294.803 216"',
+    "de.PageSize": '*de.PageSize w295h216/Etikett 104 × 76,2 mm: ""',
+    "de.PageRegion": '*de.PageRegion w295h216/Etikett 104 × 76,2 mm: ""',
+}
+ADDED_MARKER = ['*% LabelWerk: Etikettengroesse dieser Warteschlange (von LabelWerk ergaenzt)',
+                '*lwLabelPageSize: "w295h216"']
+
+
+def with_added_size(text: str) -> str:
+    """Erwartetes Ergebnis von QueuePPD.patched(text, 104 × 76,2 mm) für MODEL_PPD-artige Texte."""
+    out: List[str] = []
+    for line in text.rstrip("\n").split("\n"):
+        for main in ("PageSize", "PageRegion", "ImageableArea", "PaperDimension"):
+            if line.startswith(f"*Default{main}:"):
+                out += [f"*Default{main}: w295h216", ADDED_ENTRIES[main]]
+                break
+        else:
+            out.append(line)
+            for main in ("PageSize", "PageRegion"):
+                if line.startswith(f"*de.Translation {main}/"):
+                    out.append(ADDED_ENTRIES["de." + main])
+            if line.startswith("*lwModel:"):
+                out += ADDED_MARKER
+    return "\n".join(out) + "\n"
+
+
+class AddedLabelSizeRefreshTests(unittest.TestCase):
+    """refresh_queues(): Eine ergänzte Etikettengröße und lwLabelWidth/lwLabelHeight bleiben erhalten."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-refresh-size-"))
+        self.cups_ppd = self.tmp / "etc-cups-ppd"
+        self.cups_ppd.mkdir()
+        self.ppds = self.tmp / "PPDs"
+        self.ppds.mkdir()
+        self.new_ppd = self.ppds / "LabelWerk-zd421t-203dpi.ppd.gz"
+        self.new_ppd.write_bytes(gzip.compress(MODEL_PPD.encode("utf-8")))
+        self.calls = self.tmp / "lpadmin.log"
+        self.copies = self.tmp / "copies"
+        self.copies.mkdir()
+        # lpadmin-Attrappe: protokolliert die Argumente und kopiert die PPD von -P.
+        self.lpadmin = write_executable(self.tmp / "lpadmin", f'''#!/bin/sh
+previous=""
+for argument in "$@"; do
+    printf '%s\\n' "$argument" >> "{self.calls}"
+    if [ "$previous" = "-P" ]; then cp "$argument" "{self.copies}/$2.ppd"; fi
+    previous="$argument"
+done
+printf -- '--\\n' >> "{self.calls}"
+''')
+        self.options = self.tmp / "lpoptions-out"
+        self.options.mkdir()
+        self.lpoptions = write_executable(self.tmp / "lpoptions", f'''#!/bin/sh
+[ "$1" = "-p" ] && [ -f "{self.options}/$2" ] && cat "{self.options}/$2"
+exit 0
+''')
+        self.env = clean_env()
+        self.env["TMPDIR"] = str(self.tmp / "tmp")
+        (self.tmp / "tmp").mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def refresh(self) -> subprocess.CompletedProcess:
+        result = run_refresh_queues(str(self.lpadmin), self.cups_ppd, self.ppds, env=self.env,
+                                    lpoptions=str(self.lpoptions))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def lpadmin_calls(self) -> Dict[str, List[str]]:
+        calls: Dict[str, List[str]] = {}
+        current: List[str] = []
+        for line in self.calls.read_text(encoding="utf-8").splitlines():
+            if line == "--":
+                calls[current[1]] = current
+                current = []
+            else:
+                current.append(line)
+        return calls
+
+    def queue_ppd(self, name: str, text: str, crlf: bool = False) -> None:
+        if crlf:
+            text = text.replace("\n", "\r\n")
+        (self.cups_ppd / f"{name}.ppd").write_bytes(text.encode("utf-8"))
+
+    def test_added_size_is_carried_into_copy_of_new_ppd(self):
+        # Alte Warteschlange: ältere Modell-PPD mit ergänzter Größe (CRLF wie nach manchem Editor).
+        old = with_added_size(MODEL_PPD.replace('"1.1.0"', '"1.0.0"'))
+        self.queue_ppd("Versand", old, crlf=True)
+        result = self.refresh()
+        call = self.lpadmin_calls()["Versand"]
+        install_ppd = call[call.index("-P") + 1]
+        self.assertNotEqual(install_ppd, str(self.new_ppd))
+        self.assertFalse(Path(install_ppd).exists(), "Kopie wird nach lpadmin entfernt")
+        self.assertEqual(list((self.tmp / "tmp").iterdir()), [])
+        self.assertEqual((self.copies / "Versand.ppd").read_text(encoding="utf-8"), with_added_size(MODEL_PPD))
+        # Übernommene Standardwerte (PageSize der ergänzten Größe) und – ohne lwLabelWidth – die Größe.
+        self.assertEqual(call[call.index("-P") + 2:], [
+            "-o", "PageSize=w295h216", "-o", "PageRegion=w295h216", "-o", "Resolution=203dpi",
+            "-o", "lwLabelWidth-default=10400", "-o", "lwLabelHeight-default=7620",
+        ])
+        self.assertIn("„Versand“ auf LabelWerk-zd421t-203dpi.ppd.gz aktualisiert (3 Standardwerte übernommen, "
+                      "Etikettengröße w295h216 beibehalten)", result.stdout)
+
+    def test_existing_label_size_defaults_are_kept(self):
+        self.queue_ppd("Versand", with_added_size(MODEL_PPD))
+        (self.options / "Versand").write_text("printer-info=Versand lwLabelWidth=10400 lwLabelHeight=7620\n",
+                                              encoding="utf-8")
+        self.refresh()
+        call = self.lpadmin_calls()["Versand"]
+        self.assertFalse(any(argument.startswith("lwLabel") for argument in call), call)
+
+    def test_old_queue_without_added_size_gets_label_size(self):
+        # Warteschlange einer älteren Version: Katalogformat, keine lwLabelWidth; Endlosmaterial ohne Länge.
+        self.queue_ppd("Lager", MODEL_PPD)
+        self.queue_ppd("Beleg", MODEL_PPD.replace(
+            "*OpenUI *Resolution", "*OpenUI *lwMediaTracking/Media Tracking: PickOne\n"
+            "*DefaultlwMediaTracking: Continuous\n*CloseUI: *lwMediaTracking\n*OpenUI *Resolution"))
+        self.refresh()
+        calls = self.lpadmin_calls()
+        self.assertEqual(calls["Lager"], ["-p", "Lager", "-P", str(self.new_ppd), "-o", "PageSize=w288h432",
+                                          "-o", "PageRegion=w288h432", "-o", "Resolution=203dpi",
+                                          "-o", "lwLabelWidth-default=10160", "-o", "lwLabelHeight-default=15240"])
+        self.assertIn("lwLabelWidth-default=10160", calls["Beleg"])
+        self.assertFalse(any(argument.startswith("lwLabelHeight") for argument in calls["Beleg"]))
+
+    def test_new_ppd_that_already_contains_the_size(self):
+        newer = with_added_size(MODEL_PPD)
+        newer = "\n".join(line for line in newer.split("\n") if not line.startswith(("*%", "*lwLabelPageSize")))
+        newer = newer.replace("*DefaultPageSize: w295h216", "*DefaultPageSize: w288h432")
+        self.new_ppd.write_bytes(gzip.compress(newer.encode("utf-8")))
+        self.queue_ppd("Versand", with_added_size(MODEL_PPD))
+        self.refresh()
+        copy = (self.copies / "Versand.ppd").read_text(encoding="utf-8")
+        self.assertEqual(copy.count("*PageSize w295h216/"), 1)
+        self.assertIn("*DefaultPageSize: w295h216\n", copy)
+        self.assertNotIn("*lwLabelPageSize", copy)
+
+    def test_damaged_marker_falls_back_to_new_ppd(self):
+        damaged = "\n".join(line for line in with_added_size(MODEL_PPD).split("\n")
+                             if not line.startswith("*PaperDimension w295h216"))
+        self.queue_ppd("Versand", damaged)
+        result = self.refresh()
+        call = self.lpadmin_calls()["Versand"]
+        self.assertEqual(call[:4], ["-p", "Versand", "-P", str(self.new_ppd)])
+        self.assertIn("ergänzte Etikettengröße w295h216 nicht lesbar", result.stdout)
+        self.assertEqual(list((self.tmp / "tmp").iterdir()), [])
 
 
 # ------------------------------------------------------------------------------------------------

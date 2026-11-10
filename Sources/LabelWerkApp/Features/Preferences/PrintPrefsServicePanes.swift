@@ -318,7 +318,10 @@ enum PrintPrefsQueueDefaults {
             return true
         } catch {
             model.toast(tr("macOS-Standard konnte nicht gesetzt werden"),
-                        message: PrinterSession.describe(error), style: .error)
+                        message: PrinterSession.describe(error), style: .error,
+                        action: ToastAction(title: tr("Erneut versuchen")) {
+                            Task { await PrintPrefsQueueDefaults.apply(queue: queue, session: session, model: model) }
+                        })
             return false
         }
     }

@@ -397,25 +397,29 @@ struct SetupModelStep: View {
                     .labelsHidden()
                 }
                 field(tr("Etikett")) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Picker(tr("Etikett"), selection: $wizard.stockID) {
-                            ForEach(wizard.availableStocks) { stock in
-                                Text(stock.name).tag(stock.id)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        if let stock = wizard.selectedStock {
-                            Text(stock.sizeDescription)
-                                .font(.system(size: 10.5))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                                .contentTransition(.opacity)
-                        }
-                    }
+                    // Größe vom Drucker (wie in ZDesigner) oder von Hand – die Warteschlange erhält
+                    // sie als benannte Standard-Papiergröße.
+                    LabelStockChooser(choice: stockChoiceBinding, entry: $wizard.customEntry,
+                                      stocks: wizard.stockOptions, detected: wizard.detectedMedia,
+                                      detectedMatch: wizard.detectedMatch, limits: wizard.stockLimits,
+                                      isReadingMedia: wizard.isReadingMedia, note: wizard.mediaNote,
+                                      onReadFromPrinter: readFromPrinterAction,
+                                      reduceMotion: reduceMotion)
                 }
             }
         }
+    }
+
+    /// „Vom Drucker übernehmen“ – nur, wenn der Drucker gefragt werden darf (ZPL, erreichbar).
+    private var readFromPrinterAction: (() -> Void)? {
+        guard wizard.canReadMedia else { return nil }
+        let wizard = self.wizard
+        return { wizard.rereadMedia() }
+    }
+
+    private var stockChoiceBinding: Binding<LabelStockChoice> {
+        let wizard = self.wizard
+        return Binding(get: { wizard.stockChoice }, set: { wizard.selectStockChoice($0) })
     }
 
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

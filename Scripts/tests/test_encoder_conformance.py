@@ -538,6 +538,8 @@ def fit_cases(add) -> None:
     add("anpassen_aus", [sized(A4, 203, "text", 4, corner)], max_width=832, fit_to_label="Off",
         same_as_unfitted=True, **label)
     add("anpassen_ohne_etikett", [sized(A4, 203, "text", 4, corner)], max_width=832, same_as_unfitted=True)
+    add("anpassen_breite_unbekannt", [sized(A4, 203, "text", 4, corner)], max_width=832, label_width=0,
+        label_height=7620, same_as_unfitted=True)
     add("anpassen_gemischt_sortiert", [sized(LABEL_PAGE, 203, "text", 7), sized(A4, 203, "text", 4, corner),
                                        sized(LETTER, 203, "checker", 0, (300, 200, 900, 900))],
         copies=2, max_width=832, compression="Z64", **label)
@@ -869,7 +871,7 @@ def lwctl_arguments(case: Case, s, files: Sequence[Path], output: Path,
         args += ["--fixed-time", str(case.fixed_time), "--time-zone", case.time_zone]
         if case.time_step:
             args += ["--time-step", str(case.time_step)]
-    if s.label_width or s.label_height:
+    if s.label_width:   # Breite 0 = unbekannt: keine Anpassung in allen drei Encodern
         args += ["--label-size", "%d.%02dx%d.%02dmm" % (s.label_width // 100, s.label_width % 100,
                                                         s.label_height // 100, s.label_height % 100)]
         args += ["--page-size", ",".join("%rx%r" % size for size in page_sizes)]

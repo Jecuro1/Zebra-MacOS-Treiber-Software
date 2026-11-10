@@ -93,8 +93,10 @@ Einfach das neuere Paket installieren. Vor der Installation entfernt das Paket d
 Treiberversion vollständig (auch PPDs inzwischen entfallener Modelle). Bereits eingerichtete
 LabelWerk-Warteschlangen bleiben erhalten und werden anschließend automatisch auf die neuen
 PPD-Dateien umgestellt; die gewählten Standardoptionen (Schwärzung, Geschwindigkeit,
-Etikettenformat …) übernimmt das Paket dabei aus der bisherigen PPD der Warteschlange. Nur ein
-Wert, den die neue Treiberversion nicht mehr anbietet, fällt auf deren Standard zurück.
+Etikettenformat …) übernimmt das Paket dabei aus der bisherigen PPD der Warteschlange – auch eine
+eigene Etikettengröße wie „Etikett 104 × 76,2 mm“ – und ergänzt bei Warteschlangen älterer
+Versionen die Etikettengröße für „An Etikett anpassen“. Nur ein Wert, den die neue Treiberversion
+nicht mehr anbietet, fällt auf deren Standard zurück.
 
 Unter **Treiber & Warteschlangen** zeigt die App, ob der installierte Treiber zur App passt, und
 bietet **„Auf <Version> aktualisieren“** bzw. **„Erneut installieren“** (repariert Dateien und
@@ -162,6 +164,7 @@ Für IT, Skripte und Softwareverteilung (MDM, Jamf, Munki …) – ohne Fenster 
 lwctl install --printer tcp://192.168.1.50                      # Modell erkennen, Warteschlange anlegen
 lwctl install -p tcp://192.168.1.51 --name Versand --location "Lager, Tor 3" \
     --stock w4h6in --default --test-page
+lwctl install -p tcp://192.168.1.52 --size 104x76.2mm             # eigene Etikettengröße wie in ZDesigner
 lwctl install -p tcp://etiketten-3.local --model zt410 --dpi 300 --dry-run   # nur anzeigen
 lwctl queues --labelwerk                                        # eingerichtete LabelWerk-Drucker
 lwctl uninstall-queue Versand                                   # Warteschlange wieder entfernen
@@ -186,11 +189,22 @@ $ /usr/sbin/lpadmin -p Zebra_ZD421t_192.168.1.50 -E -v socket://192.168.1.50:910
 | `--replace` | vorhandene Warteschlange gleichen Namens ersetzen, auch wenn sie einen anderen Treiber oder ein anderes Gerät verwendet |
 | `--location TEXT` | Standort |
 | `-s`, `--stock ID` | Etikettenformat als Standard-Papiergröße; muss auf den Drucker passen (`lwctl stocks --model <id>`) |
+| `--size BxH(mm\|in)` | eigene Etikettengröße statt `--stock`, z. B. `104x76.2mm`, `104x76,2mm` oder `4x3in` (ohne Einheit mm; mindestens 10 × 5 mm, höchstens Druckbreite + 2 mm × größte Etikettenlänge) |
 | `--default` | als Standarddrucker festlegen |
 | `--test-page` | danach eine Testseite über die neue Warteschlange drucken |
 | `--ppd-dir DIR` | anderer PPD-Ordner (Standard: `/Library/Printers/PPDs/Contents/Resources`, unter Linux `/usr/share/ppd/labelwerk`) |
 | `--dry-run` | nur anzeigen, nichts einrichten |
 | `--json` | Ergebnis als JSON (Warteschlange, Modell, PPD, ausgeführte Befehle, vorhandene Warteschlange und beibehaltene Einstellungen, Hinweise) |
+
+**Etikettengröße.** `--stock` oder `--size` wird die *benannte* Standard-Papiergröße der
+Warteschlange – im Druckdialog steht sie als „Etikett 104 × 76,2 mm“ und ist vorausgewählt. Steht die
+Größe nicht in der Modell-PPD (wie 104 × 76,2 mm beim ZD421t), richtet `lwctl install` die
+Warteschlange mit einer Kopie der PPD ein, die diese Größe enthält (`lpadmin -P <kopie>`; die Zeile
+„Kopie“ bzw. `queuePPD` im JSON nennt sie). Zusätzlich setzt es `lwLabelWidth`/`lwLabelHeight`
+(Etikettengröße in 1/100 mm) als Warteschlangen-Standard: Schickt ein Programm trotzdem A4, Letter
+oder eine andere Größe, legt der Treiber den Seiteninhalt automatisch auf das Etikett („An Etikett
+anpassen“). Ohne `--stock`/`--size` gilt die Standardgröße der PPD bzw. bleibt die bisherige Größe
+einer vorhandenen Warteschlange erhalten – auch eine eigene Größe, auch nach einem Treiber-Update.
 
 **Vorhandene Warteschlangen.** `lwctl install` prüft vorher – auch mit `--dry-run` –, welche
 Warteschlangen es schon gibt (CUPS unterscheidet bei Namen keine Groß-/Kleinschreibung):
@@ -203,7 +217,7 @@ Warteschlangen es schon gibt (CUPS unterscheidet bei Namen keine Groß-/Kleinsch
   in LabelWerk (**Druckeinstellungen** › „OK“/„Übernehmen“) oder mit `lpadmin -o` gewählt wurden
   (Temperatur, Geschwindigkeit, Etikettenformat, Medientyp, Bedienermodus, Versatz …), Standort,
   Beschreibung und Freigabe. Neu
-  gesetzt werden nur die Werte dieses Aufrufs (`--stock`, `--language`, `--location`, `--name`) und
+  gesetzt werden nur die Werte dieses Aufrufs (`--stock`, `--size`, `--language`, `--location`, `--name`) und
   die Auflösung der gewählten PPD. Die veraltete Option `lwRotate180=True` älterer PPDs wird dabei
   (wie beim Update per Installationspaket) als `lwRotation=180` übernommen.
 * Eine Warteschlange gleichen Namens, die einen anderen Treiber verwendet oder auf ein anderes Gerät
@@ -333,9 +347,39 @@ macOS unterstützt PPD-Treiber weiterhin vollständig.
 
 ## Drucken aus anderen Programmen
 
-* **Papiergröße = Etikett:** Im Druckdialog als Papiergröße das eingelegte Etikettenformat wählen
-  (z. B. „4 × 6 Zoll“ oder „100 × 150 mm“).
-* **Skalierung 100 %** statt „An Seite anpassen“ – nur so werden Barcodes maßhaltig und scannbar.
+### Drucken aus Vorschau, Safari & Co.
+
+**Im Druckdialog muss nichts eingestellt werden.** Wie beim Windows-Treiber ZDesigner wird die
+Etikettengröße einmal festgelegt – danach druckt jedes Programm auf das Etikett:
+
+1. **Etikettengröße einmal festlegen.** Der Installationsassistent liest sie beim Einrichten aus dem
+   Drucker (z. B. **„Vom Drucker: 104 × 76,2 mm“** beim ZD421t mit 203 dpi – dieselben Werte, die
+   ZDesigner anzeigt) und wählt sie vor; **„Benutzerdefiniert …“** erlaubt Breite und Höhe in mm
+   (z. B. `104` × `76,2`) samt Medientyp, **„Vom Drucker übernehmen“** liest die Größe erneut.
+   Später lässt sie sich in **Druckeinstellungen › Seite einrichten** ändern; `lwctl install
+   --size 104x76.2mm` macht dasselbe im Terminal.
+2. **LabelWerk überträgt sie automatisch.** Die macOS-Warteschlange erhält das Etikett als *benannte*
+   Standard-Papiergröße – im Druckdialog steht unter „Papierformat“ z. B. **„Etikett 104 × 76,2 mm“**
+   und ist vorausgewählt. Jede Änderung in LabelWerk (Druckeinstellungen, Etiketten, Designer …)
+   gleicht LabelWerk kurz danach selbst mit der Warteschlange ab, ebenso einmal beim Start für
+   Warteschlangen älterer Versionen – ohne Passwortabfrage und ohne Meldung, solange alles klappt;
+   nur ein Fehler erscheint als Hinweis mit **„Erneut versuchen“**.
+3. **Andere Papiergrößen passt der Treiber an.** Viele Mac-Programme schicken trotzdem A4, Letter
+   oder die Seitengröße des Dokuments („Andere 210 x 297 mm“). Dann legt der Treiber den Inhalt der
+   Seite automatisch mittig auf das Etikett (**„An Etikett anpassen: Automatisch“**, Standard): Der
+   leere Rand wird abgeschnitten, ein Etikett-PDF auf einem A4-Blatt kommt in Originalgröße auf das
+   Etikett, zu große Inhalte werden verkleinert – vergrößert wird nie. Seiten, die schon
+   Etikettengröße haben, druckt der Treiber unverändert. Ein A4-Auftrag läuft also nicht mehr über
+   mehrere Etiketten.
+
+**Optional:** Wer will, wählt im Druckdialog trotzdem das Etikettenformat als Papierformat und
+„Skalierung 100 %“ bzw. sichert beides als Voreinstellung – nötig ist das nicht. Soll eine Seite
+ausnahmsweise unverändert gedruckt werden, „An Etikett anpassen“ im Druckdialog unter
+**„Druckerfunktionen“ › Seite einrichten** auf **„Aus“** stellen (bzw. dauerhaft in den
+Druckeinstellungen der App).
+
+### Weitere Einstellungen
+
 * Weitere Einstellungen stehen im Druckdialog unter **„Druckerfunktionen“** – gegliedert wie im
   Windows-Treiber in „Seite einrichten“, „Druckoptionen“, „Bedienermodus“, „Grafik Optionen“ und
   „Erweitert“ (siehe [Druckeinstellungen wie unter Windows](#druckeinstellungen-wie-unter-windows))
@@ -362,6 +406,7 @@ Die wichtigsten Optionen (vollständig in ARCHITECTURE.md §9):
 | `lwCompression` | `Z64`, `ACS`, `Hex` | Grafikkompression |
 | `lwMirror`, `lwNegative`, `lwSkipBlank` | `True`, `False` | Bildbearbeitung |
 | `lwRotation` | `0`, `90`, `180`, `270` | Drehung im Uhrzeigersinn (ersetzt das veraltete `lwRotate180`) |
+| `lwFitToLabel` | `Auto`, `Off` | Seiten anderer Größe (A4, Letter …) automatisch auf das Etikett legen |
 
 `Default` bedeutet: Der Drucker behält seinen eigenen Wert.
 
@@ -419,6 +464,7 @@ dieser Stelle nicht vorhanden.
 | Spiegeln | Spiegeln | Seite einrichten › Spiegeln | `lwMirror=True` (`^PMY`) |
 | Invers | Invers | Seite einrichten › Invers | `lwNegative=True` |
 | Bei letztem Element stoppen, Stoppversatz (mm, nur Endlosmaterial) | Bei letztem Element stoppen, Stoppversatz – nur bei „Endlosmaterial“ aktiv | Seite einrichten › Bei letztem Element stoppen, Stoppversatz (0 … 10 mm) | `lwStopAtLast=True`, `lwStopOffset`: 0 … 32000 Punkte |
+| – (der Treiber legt jede Seite auf das Etikett) | An Etikett anpassen: Automatisch, Aus – nur Treiber | Seite einrichten › An Etikett anpassen | `lwFitToLabel`: `Auto`, `Off` (Etikettengröße aus `lwLabelWidth`/`lwLabelHeight`, 1/100 mm) |
 
 **Druckoptionen**
 

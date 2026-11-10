@@ -625,7 +625,7 @@ final class PrinterInstallService {
                 return .unsupportedConnection()
             case .ambiguousUSBDevice:
                 return .ambiguousUSB()
-            case .invalidQueueName, .optionsNotApplied, .notAuthorized, .queueMissing:
+            case .invalidQueueName, .optionsNotApplied, .notAuthorized, .queueMissing, .notLabelWerkQueue:
                 return .queueFailed(message)
             }
         }
@@ -639,8 +639,15 @@ final class PrinterInstallService {
         if let session = model.sessions.first(where: { $0.saved.descriptor.refersToSameDevice(as: request.descriptor) }) {
             var saved = session.saved
             saved.cupsQueueName = queueName
-            if saved.modelID == nil, let modelID = request.modelID { saved.modelID = modelID }
+            // Modell, Auflösung und Sprache der eben eingerichteten Warteschlange (PPD, `lwLanguage`)
+            // gelten auch in LabelWerk – sonst glich `QueueSyncService` sie auf die alten Werte zurück.
+            if let modelID = request.modelID { saved.modelID = modelID }
+            saved.resolution = request.resolution
+            saved.language = request.language
             if saved.location.isEmpty, !request.location.isEmpty { saved.location = request.location }
+            // Im Assistenten gewähltes Etikett (z. B. „Vom Drucker: 104 × 76,2 mm“) gilt auch in
+            // LabelWerk – sonst glich `QueueSyncService` die Warteschlange auf das alte Format zurück.
+            if model.stock(id: request.stockID) != nil { saved.stockID = request.stockID }
             session.saved = saved
             update(.register, .done(tr("„%@“ verwendet jetzt diesen macOS-Drucker.", session.displayName)))
             return session.id
@@ -719,6 +726,7 @@ final class PrinterInstallService {
                 detection.modelID = known
                 detection.source = .printer
             }
+            detection.media = await readMediaSize(of: session)
             return detection
         }
 
@@ -749,8 +757,9 @@ final class PrinterInstallService {
             return detection
         }
         do {
-            let identity = try await queryIdentity(descriptor: descriptor)
+            let (identity, media) = try await queryIdentity(descriptor: descriptor)
             PrinterSetupPlanning.apply(identity: identity, to: &detection)
+            detection.media = media
         } catch is CancellationError {
             return detection
         } catch {
@@ -818,8 +827,11 @@ final class PrinterInstallService {
         }.value
     }
 
-    /// Fragt Modell, Auflösung und Sprachen beim Drucker ab (`~HI` + SGD), höchstens 15 Sekunden.
-    private static func queryIdentity(descriptor: ConnectionDescriptor) async throws -> PrinterIdentity {
+    /// Fragt Modell, Auflösung und Sprachen beim Drucker ab (`~HI` + SGD), dazu bei ZPL-Druckern die
+    /// eingestellte Etikettengröße (`readMediaSize`, Breite = Druckbreite wie in ZDesigner) – in
+    /// derselben Verbindung, zusammen höchstens 15 Sekunden.
+    private static func queryIdentity(descriptor: ConnectionDescriptor) async throws
+        -> (identity: PrinterIdentity, media: DetectedMedia?) {
         let connection: any PrinterConnection
         if case .tcp(let host, let port) = descriptor {
             connection = TCPConnection(host: host, port: port, connectTimeout: .seconds(4))
@@ -827,20 +839,23 @@ final class PrinterInstallService {
             connection = try ConnectionFactory.make(descriptor)
         }
         let client = PrinterClient(connection: connection, language: .zpl)
-        return try await withThrowingTaskGroup(of: PrinterIdentity?.self) { group in
+        return try await withThrowingTaskGroup(of: (identity: PrinterIdentity, media: DetectedMedia?)?.self) { group in
             group.addTask {
                 defer { Task { await client.disconnect() } }
                 try await client.connect()
                 let identity = try await client.identify()
+                // EPL/CPCL-Drucker melden keine Größe (readMediaSize liefert nur bei ZPL einen Wert).
+                let media = identity.languages.isEmpty || identity.languages.contains(.zpl)
+                    ? await client.readMediaSize() : nil
                 await client.disconnect()
-                return identity
+                return (identity, media)
             }
             group.addTask {
                 try await Task.sleep(for: .seconds(15))
                 return nil
             }
             defer { group.cancelAll() }
-            guard let first = try await group.next(), let identity = first else {
+            guard let first = try await group.next(), let result = first else {
                 // Zeitlimit: Abfrage abbrechen und die Verbindung direkt schließen. Das lässt die
                 // laufende Anfrage sofort scheitern – `client.disconnect()` müsste dagegen erst auf
                 // die Sperre warten, die `identify()` bis zu seinem Ende hält.
@@ -848,8 +863,65 @@ final class PrinterInstallService {
                 await connection.close()
                 throw PrinterClientError.noResponse(tr("Drucker identifizieren"))
             }
-            return identity
+            return result
         }
+    }
+
+    // MARK: Etikettengröße vom Drucker
+
+    /// Liest die eingestellte Etikettengröße eines Druckers erneut („Vom Drucker übernehmen“ im
+    /// Assistenten bzw. beim manuellen Hinzufügen): über die Verbindung eines eingerichteten,
+    /// verbundenen Druckers, sonst über eine eigene kurze Verbindung (höchstens 10 Sekunden).
+    ///
+    /// Nur aufrufen, wenn beim Gerät nachgefragt werden darf (`PrinterDetection.mayQueryPrinter`
+    /// oder ausdrückliche Zustimmung) – die Abfrage geht als ZPL/SGD an Port 9100.
+    /// - Returns: `nil` bei EPL/CPCL, ohne Antwort oder ohne eingestellte Etikettenlänge.
+    static func readMediaSize(descriptor: ConnectionDescriptor, model: AppModel) async -> DetectedMedia? {
+        if let session = model.sessions.first(where: { $0.saved.descriptor.refersToSameDevice(as: descriptor) }),
+           session.connectionState.isConnected {
+            return await readMediaSize(of: session)
+        }
+        let connection: any PrinterConnection
+        switch descriptor {
+        case .tcp(let host, let port):
+            connection = TCPConnection(host: host, port: port, connectTimeout: .seconds(4))
+        case .usb:
+            guard let made = try? ConnectionFactory.make(descriptor) else { return nil }
+            connection = made
+        case .bluetooth, .ble, .cupsQueue, .virtual:
+            return nil
+        }
+        let client = PrinterClient(connection: connection, language: .zpl)
+        return await withTaskGroup(of: DetectedMedia??.self) { group in
+            group.addTask {
+                defer { Task { await client.disconnect() } }
+                guard (try? await client.connect()) != nil else { return .some(nil) }
+                let media = await client.readMediaSize()
+                await client.disconnect()
+                return .some(media)
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(10))
+                return nil
+            }
+            defer { group.cancelAll() }
+            let first = await group.next() ?? nil
+            guard let result = first else {
+                // Zeitlimit: Verbindung direkt schließen (siehe queryIdentity).
+                group.cancelAll()
+                await connection.close()
+                return nil
+            }
+            return result
+        }
+    }
+
+    /// Etikettengröße über die Verbindung eines verbundenen Druckers (still, ohne Hinweis bei Fehlern).
+    static func readMediaSize(of session: PrinterSession) async -> DetectedMedia? {
+        guard session.saved.language == .zpl else { return nil }
+        return await session.withClient(tr("Etikettengröße wird gelesen …"), quiet: true) { client in
+            await client.readMediaSize()
+        } ?? nil
     }
 
     /// Vorhandene Warteschlangen, die zu diesem Gerät führen (LabelWerk-Treiber zuerst).

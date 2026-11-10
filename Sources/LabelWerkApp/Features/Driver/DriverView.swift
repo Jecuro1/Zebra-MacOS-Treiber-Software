@@ -621,7 +621,7 @@ struct DriverView: View {
                     helpTile("arrow.up.left.and.arrow.down.right", tr("Skalierung 100 %"),
                              tr("100 % statt „An Seite anpassen“ verwenden, damit Barcodes exakt und scannbar gedruckt werden."))
                     helpTile("slider.horizontal.3", tr("Einstellungen"),
-                             tr("Schwärzung, Tempo und Medien stammen aus LabelWerk. „Synchronisieren“ überträgt Änderungen in die Warteschlange; im Druckdialog lassen sie sich pro Auftrag anpassen."))
+                             tr("Schwärzung, Tempo, Medien und Etikettengröße stammen aus LabelWerk und werden automatisch in die Warteschlange übernommen – im Druckdialog muss nichts eingestellt werden."))
                 }
             }
         }
@@ -831,8 +831,11 @@ struct DriverView: View {
         let settings = session.saved.settings
         let stock = session.stock
         let language = session.saved.language
+        let resolution = session.saved.resolution
+        let modelID = session.saved.modelID
         performQueueAction(queue, title: tr("Einstellungen synchronisieren"), success: tr("Einstellungen übernommen")) {
-            try await CUPSService.setDefaults(queue: queue, settings: settings, stock: stock, language: language)
+            try await CUPSService.setDefaults(queue: queue, settings: settings, stock: stock, language: language,
+                                              resolution: resolution, modelID: modelID)
         }
     }
 
@@ -841,7 +844,8 @@ struct DriverView: View {
         for session in linkedQueueSessions {
             guard let queue = session.saved.cupsQueueName else { continue }
             targets.append(DriverSyncTarget(queue: queue, settings: session.saved.settings,
-                                            stock: session.stock, language: session.saved.language))
+                                            stock: session.stock, language: session.saved.language,
+                                            resolution: session.saved.resolution, modelID: session.saved.modelID))
         }
         guard !targets.isEmpty else { return }
         isSyncingAll = true
@@ -851,7 +855,8 @@ struct DriverView: View {
             for target in targets {
                 do {
                     try await CUPSService.setDefaults(queue: target.queue, settings: target.settings,
-                                                      stock: target.stock, language: target.language)
+                                                      stock: target.stock, language: target.language,
+                                                      resolution: target.resolution, modelID: target.modelID)
                 } catch {
                     failures.append(target.queue)
                 }
@@ -899,7 +904,9 @@ struct DriverView: View {
         busyPrinters.insert(session.id)
         Task {
             do {
-                let name = try await CUPSService.installQueue(for: saved, queueName: requestedName)
+                // Etikettenformat des Druckers (auch ein eigenes) als benannte Standard-Papiergröße.
+                let name = try await CUPSService.installQueue(for: saved, queueName: requestedName,
+                                                              stock: session.stock)
                 withAnimation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion)) {
                     session.saved.cupsQueueName = name
                 }
@@ -958,6 +965,8 @@ private struct DriverSyncTarget {
     let settings: PrintSettings
     let stock: LabelStock
     let language: PrinterLanguage
+    var resolution: Resolution?
+    var modelID: String?
 }
 
 // MARK: - Diagnosezeile

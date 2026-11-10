@@ -488,6 +488,7 @@
 "Drucker öffnen" = "Drucker öffnen";
 "Drucker hinzufügen" = "Drucker hinzufügen";
 "Drucker hinzufügen (⌘↩)" = "Drucker hinzufügen (⌘↩)";
+"Bitte Breite und Höhe des Etiketts prüfen." = "Bitte Breite und Höhe des Etiketts prüfen.";
 "Bitte IP-Adresse oder Hostnamen des Druckers eingeben." = "Bitte IP-Adresse oder Hostnamen des Druckers eingeben.";
 "Bitte eine macOS-Warteschlange auswählen." = "Bitte eine macOS-Warteschlange auswählen.";
 "Bitte einen gefundenen USB-Drucker auswählen." = "Bitte einen gefundenen USB-Drucker auswählen.";
@@ -729,7 +730,7 @@
 "Als Papiergröße das eingelegte Etikettenformat wählen, z. B. „4 × 6 Zoll“ oder „100 × 150 mm“." = "Als Papiergröße das eingelegte Etikettenformat wählen, z. B. „4 × 6 Zoll“ oder „100 × 150 mm“.";
 "Skalierung 100 %" = "Skalierung 100 %";
 "100 % statt „An Seite anpassen“ verwenden, damit Barcodes exakt und scannbar gedruckt werden." = "100 % statt „An Seite anpassen“ verwenden, damit Barcodes exakt und scannbar gedruckt werden.";
-"Schwärzung, Tempo und Medien stammen aus LabelWerk. „Synchronisieren“ überträgt Änderungen in die Warteschlange; im Druckdialog lassen sie sich pro Auftrag anpassen." = "Schwärzung, Tempo und Medien stammen aus LabelWerk. „Synchronisieren“ überträgt Änderungen in die Warteschlange; im Druckdialog lassen sie sich pro Auftrag anpassen.";
+"Schwärzung, Tempo, Medien und Etikettengröße stammen aus LabelWerk und werden automatisch in die Warteschlange übernommen – im Druckdialog muss nichts eingestellt werden." = "Schwärzung, Tempo, Medien und Etikettengröße stammen aus LabelWerk und werden automatisch in die Warteschlange übernommen – im Druckdialog muss nichts eingestellt werden.";
 "Treiber nicht installiert" = "Treiber nicht installiert";
 "Treiberpaket fehlt" = "Treiberpaket fehlt";
 "Treiber ist aktuell" = "Treiber ist aktuell";
@@ -1693,6 +1694,7 @@
 "Druckt invers: Schwarz und Weiß werden vertauscht." = "Druckt invers: Schwarz und Weiß werden vertauscht.";
 "Nur bei Endlosmaterial: Das Etikett endet nach dem letzten bedruckten Element statt nach der vollen Seitenlänge – das spart Material." = "Nur bei Endlosmaterial: Das Etikett endet nach dem letzten bedruckten Element statt nach der vollen Seitenlänge – das spart Material.";
 "Zusätzlicher Vorschub nach dem letzten Element, wenn „Bei letztem Element stoppen“ aktiv ist (0 bis 32 000 Punkte)." = "Zusätzlicher Vorschub nach dem letzten Element, wenn „Bei letztem Element stoppen“ aktiv ist (0 bis 32 000 Punkte).";
+"Schickt ein Programm eine andere Papiergröße als das Etikett (z. B. A4 aus Vorschau), legt der Treiber den Inhalt der Seite mittig auf das Etikett: zu große Inhalte werden verkleinert, nie vergrößert. Seiten in Etikettengröße bleiben unverändert. „Aus“ druckt die Seite wie geliefert (nur auf die Druckbreite abgeschnitten)." = "Schickt ein Programm eine andere Papiergröße als das Etikett (z. B. A4 aus Vorschau), legt der Treiber den Inhalt der Seite mittig auf das Etikett: zu große Inhalte werden verkleinert, nie vergrößert. Seiten in Etikettengröße bleiben unverändert. „Aus“ druckt die Seite wie geliefert (nur auf die Druckbreite abgeschnitten).";
 "Druckgeschwindigkeit (^PR) in mm/s bis zum Höchstwert des Modells (51 mm/s = 2 Zoll/s). Langsamer druckt sauberer, schneller erhöht den Durchsatz." = "Druckgeschwindigkeit (^PR) in mm/s bis zum Höchstwert des Modells (51 mm/s = 2 Zoll/s). Langsamer druckt sauberer, schneller erhöht den Durchsatz.";
 "Temperatur des Druckkopfs bzw. Schwärzung (~SD) von 1 bis 30. Höhere Werte drucken dunkler, lassen den Druckkopf aber schneller altern." = "Temperatur des Druckkopfs bzw. Schwärzung (~SD) von 1 bis 30. Höhere Werte drucken dunkler, lassen den Druckkopf aber schneller altern.";
 "Thermotransfer druckt mit Farbband (^MTT), Thermo-Direkt auf wärmeempfindliches Papier ohne Farbband (^MTD)." = "Thermotransfer druckt mit Farbband (^MTT), Thermo-Direkt auf wärmeempfindliches Papier ohne Farbband (^MTD).";
@@ -1767,6 +1769,7 @@
 "Markierung Versatz" = "Markierung Versatz";
 "Bei letztem Element stoppen" = "Bei letztem Element stoppen";
 "Stoppversatz" = "Stoppversatz";
+"An Etikett anpassen" = "An Etikett anpassen";
 "Temperatur" = "Temperatur";
 "Oben" = "Oben";
 "Links" = "Links";
@@ -1796,7 +1799,6 @@
 "Verzögerung nach dem Abbrechen" = "Verzögerung nach dem Abbrechen";
 "Schneiden alle N Etiketten" = "Schneiden alle N Etiketten";
 "%d mm/s" = "%d mm/s";
-"Benutzerdefiniert %@ × %@ mm" = "Benutzerdefiniert %@ × %@ mm";
 "Wert nicht verfügbar" = "Wert nicht verfügbar";
 "Der Drucker meldet „%@“ nicht." = "Der Drucker meldet „%@“ nicht.";
 "Keine verwertbaren Werte" = "Keine verwertbaren Werte";
@@ -1914,8 +1916,7 @@
 "Sprache %@ wird von diesem Modell nicht unterstützt" = "Sprache %@ wird von diesem Modell nicht unterstützt";
 "Profil importiert" = "Profil importiert";
 "Mit „OK“ oder „Übernehmen“ speichern." = "Mit „OK“ oder „Übernehmen“ speichern.";
-"Alle Programme drucken auf „%@“ mit diesen Einstellungen. Eigene Etikettenformate im Druckdialog als Papiergröße wählen." = "Alle Programme drucken auf „%@“ mit diesen Einstellungen. Eigene Etikettenformate im Druckdialog als Papiergröße wählen.";
-"Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen." = "Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen.";
+"Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen und dem Etikett %@ – ohne Auswahl im Druckdialog." = "Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen und dem Etikett %@ – ohne Auswahl im Druckdialog.";
 "Im macOS-Druckdialog steht für %@ nur der nächstliegende Wert zur Auswahl." = "Im macOS-Druckdialog steht für %@ nur der nächstliegende Wert zur Auswahl.";
 "macOS-Standard aktualisiert" = "macOS-Standard aktualisiert";
 "macOS-Standard konnte nicht gesetzt werden" = "macOS-Standard konnte nicht gesetzt werden";
@@ -1938,6 +1939,8 @@
 "Horizontal gespiegelt" = "Horizontal gespiegelt";
 "Nur bei „Endlosmaterial“." = "Nur bei „Endlosmaterial“.";
 "Etikett endet nach dem letzten Element" = "Etikett endet nach dem letzten Element";
+"A4, Letter & Co. aus Vorschau, Safari usw. landen automatisch auf dem Etikett %@ – im Druckdialog muss nichts eingestellt werden." = "A4, Letter & Co. aus Vorschau, Safari usw. landen automatisch auf dem Etikett %@ – im Druckdialog muss nichts eingestellt werden.";
+"Andere Papiergrößen werden nicht angepasst – im Druckdialog muss dann „%@“ gewählt werden." = "Andere Papiergrößen werden nicht angepasst – im Druckdialog muss dann „%@“ gewählt werden.";
 "Breiter als die Druckbreite von %@ (%@) – rechts wird abgeschnitten." = "Breiter als die Druckbreite von %@ (%@) – rechts wird abgeschnitten.";
 "Die Vorlage „%@“ ist als „%@“ hinterlegt." = "Die Vorlage „%@“ ist als „%@“ hinterlegt.";
 "Druckeinstellungen" = "Druckeinstellungen";
@@ -2343,6 +2346,23 @@
 "Moderner Treiber und Steuerzentrale für Zebra®-Etikettendrucker auf dem Mac." = "Moderner Treiber und Steuerzentrale für Zebra®-Etikettendrucker auf dem Mac.";
 "Zebra ist eine Marke der Zebra Technologies Corp. LabelWerk ist ein unabhängiges Projekt und steht in keiner Verbindung zu Zebra Technologies." = "Zebra ist eine Marke der Zebra Technologies Corp. LabelWerk ist ein unabhängiges Projekt und steht in keiner Verbindung zu Zebra Technologies.";
 
+/* MARK: Features/Setup/LabelStockChooser.swift */
+"%@ – vom Drucker erkannt" = "%@ – vom Drucker erkannt";
+"Vom Drucker: %@" = "Vom Drucker: %@";
+"Benutzerdefiniert …" = "Benutzerdefiniert …";
+"Vom Drucker übernehmen" = "Vom Drucker übernehmen";
+"Liest die im Drucker eingestellte Etikettengröße erneut und übernimmt sie." = "Liest die im Drucker eingestellte Etikettengröße erneut und übernimmt sie.";
+"Vom Drucker erkannt" = "Vom Drucker erkannt";
+"%d × %d Punkte bei %d dpi" = "%d × %d Punkte bei %d dpi";
+"Breite %@–%@ mm, Höhe %@–%@ mm" = "Breite %@–%@ mm, Höhe %@–%@ mm";
+"%@ in mm" = "%@ in mm";
+"Breite in mm eingeben" = "Breite in mm eingeben";
+"Höhe in mm eingeben" = "Höhe in mm eingeben";
+"Breite mindestens %@ mm" = "Breite mindestens %@ mm";
+"Breite höchstens %@ mm" = "Breite höchstens %@ mm";
+"Höhe mindestens %@ mm" = "Höhe mindestens %@ mm";
+"Höhe höchstens %@ mm" = "Höhe höchstens %@ mm";
+
 /* MARK: Features/Setup/NetworkPrinterInstallWizard.swift */
 "Drucker installieren" = "Drucker installieren";
 "Schritt %d von %d: %@" = "Schritt %d von %d: %@";
@@ -2432,6 +2452,7 @@
 "Verwendet bereits den LabelWerk-Treiber – Name, Modell und Einstellungen werden erneuert." = "Verwendet bereits den LabelWerk-Treiber – Name, Modell und Einstellungen werden erneuert.";
 "Gleiche Adresse über ein anderes Protokoll (%@) – wird auf den LabelWerk-Treiber umgestellt." = "Gleiche Adresse über ein anderes Protokoll (%@) – wird auf den LabelWerk-Treiber umgestellt.";
 "Verwendet einen anderen Treiber (%@) – wird auf den LabelWerk-Treiber umgestellt." = "Verwendet einen anderen Treiber (%@) – wird auf den LabelWerk-Treiber umgestellt.";
+"Alle Programme drucken auf dieses Etikett – im Druckdialog muss nichts eingestellt werden." = "Alle Programme drucken auf dieses Etikett – im Druckdialog muss nichts eingestellt werden.";
 "LabelWerk-Treiber installiert" = "LabelWerk-Treiber installiert";
 "Der LabelWerk-Treiber wird bei der Installation mit eingerichtet – macOS fragt dafür einmal nach einem Administratorpasswort." = "Der LabelWerk-Treiber wird bei der Installation mit eingerichtet – macOS fragt dafür einmal nach einem Administratorpasswort.";
 "Der LabelWerk-Treiber fehlt, und diese App enthält kein Treiberpaket. Bitte LabelWerk mit dem Installationspaket installieren." = "Der LabelWerk-Treiber fehlt, und diese App enthält kein Treiberpaket. Bitte LabelWerk mit dem Installationspaket installieren.";
@@ -2451,6 +2472,9 @@
 "LabelWerk richtet den Drucker als macOS-Drucker ein." = "LabelWerk richtet den Drucker als macOS-Drucker ein.";
 "%@ liegt nicht im Netz dieses Macs. Das funktioniert nur, wenn ein Router zwischen den Netzen vermittelt – sonst die IP-Adresse am Drucker prüfen." = "%@ liegt nicht im Netz dieses Macs. Das funktioniert nur, wenn ein Router zwischen den Netzen vermittelt – sonst die IP-Adresse am Drucker prüfen.";
 "Nicht als Zebra-Drucker erkannt · %@" = "Nicht als Zebra-Drucker erkannt · %@";
+"vom Drucker erkannt" = "vom Drucker erkannt";
+"Der Drucker hat keine Etikettengröße gemeldet. Bitte unter „Benutzerdefiniert …“ eingeben." = "Der Drucker hat keine Etikettengröße gemeldet. Bitte unter „Benutzerdefiniert …“ eingeben.";
+"In LabelWerk war bisher „%@“ eingestellt." = "In LabelWerk war bisher „%@“ eingestellt.";
 
 /* MARK: Features/Stocks/StockLibraryComponents.swift */
 "Millimeter" = "Millimeter";
@@ -2488,7 +2512,6 @@
 "Markenhöhe" = "Markenhöhe";
 "Medienerkennung" = "Medienerkennung";
 "Keine Vorgabe" = "Keine Vorgabe";
-"%d × %d Punkte bei %d dpi" = "%d × %d Punkte bei %d dpi";
 "Druckbreite %@" = "Druckbreite %@";
 "Passt auf den %@." = "Passt auf den %@.";
 "Entspricht dem vorhandenen Format „%@“." = "Entspricht dem vorhandenen Format „%@“.";
@@ -2523,7 +2546,6 @@
 "Marke %@ mm" = "Marke %@ mm";
 "Lücke %@ mm" = "Lücke %@ mm";
 "Etikettenlänge und Sensor neu einmessen (~JC)" = "Etikettenlänge und Sensor neu einmessen (~JC)";
-"Vom Drucker übernehmen" = "Vom Drucker übernehmen";
 "Format aus gemeldeter Druckbreite und gemessener Etikettenlänge anlegen" = "Format aus gemeldeter Druckbreite und gemessener Etikettenlänge anlegen";
 "Diese Verbindung kann keine Messwerte lesen (nur Senden)." = "Diese Verbindung kann keine Messwerte lesen (nur Senden).";
 "Neues Format …" = "Neues Format …";
@@ -2829,6 +2851,9 @@
 "mm" = "mm";
 "Verbindung fehlgeschlagen" = "Verbindung fehlgeschlagen";
 
+/* MARK: Model/LabelStockLibrary.swift */
+"Benutzerdefiniert %@ × %@ mm" = "Benutzerdefiniert %@ × %@ mm";
+
 /* MARK: Model/Navigation.swift */
 "Übersicht" = "Übersicht";
 "Dateien & Schriften" = "Dateien & Schriften";
@@ -2868,10 +2893,14 @@
 "Mehrere Zebra-Drucker sind per USB angeschlossen, und dieser lässt sich keinem eindeutig zuordnen. Bitte nur den gewünschten Drucker anschließen und erneut versuchen." = "Mehrere Zebra-Drucker sind per USB angeschlossen, und dieser lässt sich keinem eindeutig zuordnen. Bitte nur den gewünschten Drucker anschließen und erneut versuchen.";
 "Ungültiger Warteschlangenname." = "Ungültiger Warteschlangenname.";
 "Die Warteschlange hat diese Einstellungen nicht übernommen: %@" = "Die Warteschlange hat diese Einstellungen nicht übernommen: %@";
+"macOS erlaubt diesem Benutzer nicht, Drucker zu ändern. Ein Administrator kann die Einstellungen unter „Druckeinstellungen“ erneut übertragen." = "macOS erlaubt diesem Benutzer nicht, Drucker zu ändern. Ein Administrator kann die Einstellungen unter „Druckeinstellungen“ erneut übertragen.";
+"Die macOS-Warteschlange „%@“ ist nicht eingerichtet." = "Die macOS-Warteschlange „%@“ ist nicht eingerichtet.";
+"Die Warteschlange „%@“ verwendet nicht den LabelWerk-Treiber – bitte unter „Treiber“ neu einrichten." = "Die Warteschlange „%@“ verwendet nicht den LabelWerk-Treiber – bitte unter „Treiber“ neu einrichten.";
 "Oberer Versatz (^LT)" = "Oberer Versatz (^LT)";
 "Linker Versatz (^LS)" = "Linker Versatz (^LS)";
 "Abreißposition (~TA)" = "Abreißposition (~TA)";
 "Schneiden nach je" = "Schneiden nach je";
+"Etikettengröße" = "Etikettengröße";
 "LabelWerk möchte eine Druckerwarteschlange einrichten." = "LabelWerk möchte eine Druckerwarteschlange einrichten.";
 
 /* MARK: Services/ImageImport.swift */
@@ -2937,6 +2966,7 @@
 "Nicht gewünscht – nur als macOS-Drucker eingerichtet." = "Nicht gewünscht – nur als macOS-Drucker eingerichtet.";
 "Live-Status, Werkzeuge und Mitteilungen sind aktiv." = "Live-Status, Werkzeuge und Mitteilungen sind aktiv.";
 "Drucker identifizieren" = "Drucker identifizieren";
+"Etikettengröße wird gelesen …" = "Etikettengröße wird gelesen …";
 "macOS-Drucker wird eingerichtet …" = "macOS-Drucker wird eingerichtet …";
 "„%@“ erscheint jetzt in jedem Druckdialog und in „Drucker & Scanner“." = "„%@“ erscheint jetzt in jedem Druckdialog und in „Drucker & Scanner“.";
 "Als macOS-Drucker installiert" = "Als macOS-Drucker installiert";
@@ -2946,6 +2976,13 @@
 /* MARK: Services/ProcessRunner.swift */
 "Programm konnte nicht gestartet werden: %@" = "Programm konnte nicht gestartet werden: %@";
 "„%@“ ist fehlgeschlagen (Code %d): %@" = "„%@“ ist fehlgeschlagen (Code %d): %@";
+
+/* MARK: Services/QueueSyncService.swift */
+"„%@“ übernimmt die Einstellungen aus LabelWerk nicht: %@" = "„%@“ übernimmt die Einstellungen aus LabelWerk nicht: %@";
+"%@ übernehmen die Einstellungen aus LabelWerk nicht: %@" = "%@ übernehmen die Einstellungen aus LabelWerk nicht: %@";
+"macOS-Drucker nicht aktualisiert" = "macOS-Drucker nicht aktualisiert";
+"macOS-Drucker aktualisiert" = "macOS-Drucker aktualisiert";
+"Alle Programme drucken auf „%@“ mit den Einstellungen aus LabelWerk." = "Alle Programme drucken auf „%@“ mit den Einstellungen aus LabelWerk.";
 
 /* MARK: Dynamisch: LabelWerkCore/Commands/PrinterAction.swift (displayName, detail) */
 "Berichte & Testdrucke" = "Berichte & Testdrucke";
@@ -3011,6 +3048,7 @@
 "Druckzeit starten" = "Druckzeit starten";
 "Jedes Etikett" = "Jedes Etikett";
 "Jede Minute" = "Jede Minute";
+"Automatisch" = "Automatisch";
 "Länge messen" = "Länge messen";
 "Keine Bewegung" = "Keine Bewegung";
 "Kurzkalibrierung" = "Kurzkalibrierung";

@@ -13,6 +13,8 @@ enum CUPSQueues {
         var info: CUPSQueueInfo
         /// Beschreibung (`printer-info`), falls gesetzt.
         var description: String?
+        /// Alle Werte aus `lpoptions -p <name>`, auch Warteschlangen-Standards wie `lwLabelWidth`.
+        var options: [String: String] = [:]
 
         var name: String { info.name }
         var deviceURI: String { info.deviceURI }
@@ -73,7 +75,8 @@ enum CUPSQueues {
             }
             let info = CUPSQueueInfo(name: entry.name, deviceURI: entry.uri, isDefault: entry.name == defaultName,
                                      makeAndModel: options["printer-make-and-model"].flatMap { $0.isEmpty ? nil : $0 })
-            queues.append(Queue(info: info, description: options["printer-info"].flatMap { $0.isEmpty ? nil : $0 }))
+            queues.append(Queue(info: info, description: options["printer-info"].flatMap { $0.isEmpty ? nil : $0 },
+                                options: options))
         }
         return queues
     }

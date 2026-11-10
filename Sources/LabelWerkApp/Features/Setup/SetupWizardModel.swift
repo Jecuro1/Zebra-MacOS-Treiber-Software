@@ -118,7 +118,22 @@ final class PrinterSetupWizardModel {
     private(set) var modelChosenManually = false
     var resolution: Resolution = .dpi203
     var language: PrinterLanguage = .zpl
-    var stockID: String = "w4h6in"
+    /// Zuletzt gewähltes vorhandenes Format (bei „Vom Drucker“/„Benutzerdefiniert …“ der Rückfall).
+    private(set) var stockID: String = "w4h6in"
+    /// Auswahl „Etikett“: vorhandenes Format, „Vom Drucker“ oder „Benutzerdefiniert …“
+    /// (``LabelStockChoice``). Ändern über ``selectStockChoice(_:)``.
+    private(set) var stockChoice: LabelStockChoice = .stock("w4h6in")
+    /// Eingabe „Benutzerdefiniert …“ (Breite, Höhe, Medientyp).
+    var customEntry = LabelSizeEntry()
+    /// Vom Drucker gemeldete Etikettengröße (`PrinterDetection.media` bzw. „Vom Drucker übernehmen“).
+    private(set) var detectedMedia: DetectedMedia?
+    private(set) var isReadingMedia = false
+    /// Hinweis unter der Etikettenauswahl (z. B. keine Größe gemeldet).
+    private(set) var mediaNote: String?
+    /// Der Benutzer hat die Etikettenauswahl selbst geändert – dann gilt die gemeldete Größe nicht
+    /// mehr automatisch (bis „Vom Drucker übernehmen“). Ein bereits in LabelWerk eingerichteter
+    /// Drucker bringt seine Auswahl mit.
+    private(set) var stockChoiceTouched = false
     var modelSearch = ""
 
     // MARK: Schritt 3 – Name & Optionen
@@ -147,6 +162,8 @@ final class PrinterSetupWizardModel {
     @ObservationIgnored private var detectTask: Task<Void, Never>?
     @ObservationIgnored private var probeTask: Task<Void, Never>?
     @ObservationIgnored private var installTask: Task<Void, Never>?
+    @ObservationIgnored private var mediaTask: Task<Void, Never>?
+    @ObservationIgnored private var mediaGeneration = 0
     @ObservationIgnored private var detectionGeneration = 0
     @ObservationIgnored private var matchGeneration = 0
     @ObservationIgnored private var started = false
@@ -177,9 +194,12 @@ final class PrinterSetupWizardModel {
         discovery.stop()
         detectTask?.cancel()
         probeTask?.cancel()
+        mediaTask?.cancel()
         detectTask = nil
         probeTask = nil
+        mediaTask = nil
         isDetecting = false
+        isReadingMedia = false
     }
 
     func rescan() {
@@ -426,10 +446,23 @@ final class PrinterSetupWizardModel {
             reuseQueueName = nil
             queueMatches = []
             queueMatchesLoaded = false
+            // Etikettengröße des vorigen Druckers verwerfen.
+            mediaGeneration += 1
+            mediaTask?.cancel()
+            isReadingMedia = false
+            mediaNote = nil
+            detectedMedia = nil
+            customEntry = LabelSizeEntry()
+            // „Benutzerdefiniert …“/„Vom Drucker“ verlieren ihre Daten: zurück zum letzten echten Etikett.
+            if stockChoice.stockID == nil { setStockChoice(.stock(stockID)) }
+            // Die vom Drucker gemeldete Größe hat Vorrang, auch bei einem schon in LabelWerk
+            // eingerichteten Drucker (dort stand womöglich nur die nächstliegende Vorlage).
+            stockChoiceTouched = false
             if let session {
-                // Bereits in LabelWerk eingerichtet: dessen Etikett, Auflösung und Sprache übernehmen,
-                // damit der macOS-Drucker dieselben Standardwerte erhält wie in LabelWerk.
-                stockID = session.saved.stockID
+                // Bereits in LabelWerk eingerichtet: dessen Etikett (solange der Drucker keine Größe
+                // meldet), Auflösung und Sprache übernehmen, damit der macOS-Drucker dieselben
+                // Standardwerte erhält wie in LabelWerk.
+                setStockChoice(.stock(session.saved.stockID))
                 resolution = session.saved.resolution
                 language = session.saved.language
                 if result.modelID == nil, let known = session.saved.modelID {
@@ -448,6 +481,8 @@ final class PrinterSetupWizardModel {
             monitorInLabelWerk = result.zebraCheck == .confirmed
         }
         detection = result
+        // Größe vom Drucker (ZPL): eine erneute Erkennung ohne Meldung behält die vorige.
+        if let media = result.media { detectedMedia = media }
         if !modelChosenManually { modelID = result.modelID }
         var preferredLanguages = result.languages
         if deviceChanged, let session,
@@ -483,7 +518,151 @@ final class PrinterSetupWizardModel {
         return supported.isEmpty ? PrinterLanguage.allCases : supported
     }
 
-    var selectedStock: LabelStock? { allStocks.first { $0.id == stockID } }
+    // MARK: Schritt 2 – Etikett
+
+    /// Erlaubte Größe für „Benutzerdefiniert …“: Breite 10 mm … Druckbreite + 2 mm, Höhe 5 mm …
+    /// größte Etikettenlänge des Modells.
+    var stockLimits: LabelSizing.Limits { LabelSizing.Limits(model: selectedModel) }
+
+    /// Vorhandenes Format zur gemeldeten Größe (eigene vor Katalog, ± 0,6 mm).
+    var detectedMatch: LabelStock? {
+        guard let media = detectedMedia, let app else { return nil }
+        return LabelStockLibrary.matchingStock(for: media, model: app)
+    }
+
+    /// Formate der Auswahl: passend zum Modell, dazu das gewählte und das vom Drucker erkannte.
+    var stockOptions: [LabelStock] {
+        var list = availableStocks
+        for id in [stockChoice.stockID, detectedMatch?.id].compactMap({ $0 }) where !list.contains(where: { $0.id == id }) {
+            if let stock = allStocks.first(where: { $0.id == id }) { list.append(stock) }
+        }
+        return list
+    }
+
+    /// Das Etikett, das installiert wird – bei „Vom Drucker“ und „Benutzerdefiniert …“ eine Vorschau,
+    /// die erst beim Installieren ein echtes Format wird (`nil` = Eingabe ungültig).
+    var selectedStock: LabelStock? {
+        switch stockChoice {
+        case .stock(let id):
+            return allStocks.first { $0.id == id }
+        case .printer:
+            guard let media = detectedMedia else { return nil }
+            return detectedMatch ?? LabelStock(id: "detected", name: tr("Vom Drucker: %@", media.sizeText),
+                                               widthMM: media.widthMM, heightMM: media.heightMM,
+                                               tracking: media.tracking ?? .gap, mediaType: media.mediaType)
+        case .custom:
+            guard let size = customEntry.size(in: stockLimits) else { return nil }
+            return LabelStock(id: "custom-entry",
+                              name: LabelStockLibrary.customStockName(widthMM: size.widthMM, heightMM: size.heightMM),
+                              widthMM: size.widthMM, heightMM: size.heightMM, tracking: customEntry.tracking)
+        }
+    }
+
+    /// „Benutzerdefiniert 104 × 76,2 mm“, „4 × 6 Zoll · 101,6 × 152,4 mm · vom Drucker erkannt“ (Zusammenfassung).
+    var stockSummary: String {
+        guard let stock = selectedStock else { return "–" }
+        let size = LabelSizing.sizeText(widthMM: stock.widthMM, heightMM: stock.heightMM)
+        var text = stock.name.contains(size) ? stock.name : "\(stock.name) · \(size)"
+        if let id = stockChoice.stockID, id == detectedMatch?.id {
+            text += " · " + tr("vom Drucker erkannt")
+        }
+        return text
+    }
+
+    /// Darf die Etikettengröße beim Drucker (erneut) gelesen werden? Nur bei erreichbaren, als Zebra
+    /// bestätigten bzw. bereits abgefragten Druckern über Netzwerk oder USB, die ZPL sprechen.
+    var canReadMedia: Bool {
+        guard let detection, detection.reachable, !continuesOffline, !detection.queryWithheld,
+              detection.mayQueryPrinter || detection.source == .printer else { return false }
+        switch detection.descriptor.kind {
+        case .tcp, .usb: break
+        default: return false
+        }
+        return languageOptions.contains(.zpl)
+    }
+
+    /// Auswahl im Etikett-Menü (Benutzer).
+    func selectStockChoice(_ choice: LabelStockChoice) {
+        guard choice != stockChoice else { return }
+        stockChoiceTouched = true
+        if choice == .custom, customEntry.isEmpty {
+            // Mit der gemeldeten bzw. bisherigen Größe vorbelegen – meist ist nur noch anzupassen.
+            if let media = detectedMedia {
+                customEntry = LabelSizeEntry(widthMM: media.widthMM, heightMM: media.heightMM,
+                                             tracking: media.tracking ?? .gap)
+            } else if let stock = selectedStock {
+                customEntry = LabelSizeEntry(widthMM: stock.widthMM, heightMM: stock.heightMM, tracking: stock.tracking)
+            }
+        }
+        animate(Motion.snappy) { setStockChoice(choice) }
+    }
+
+    /// „Vom Drucker übernehmen“: liest die eingestellte Etikettengröße erneut und wählt sie aus.
+    func rereadMedia() {
+        guard canReadMedia, let descriptor = detection?.descriptor, let app else { return }
+        mediaTask?.cancel()
+        mediaGeneration += 1
+        let generation = mediaGeneration
+        animate(Motion.snappy) {
+            isReadingMedia = true
+            mediaNote = nil
+        }
+        mediaTask = Task { [weak self] in
+            let media = await PrinterInstallService.readMediaSize(descriptor: descriptor, model: app)
+            guard let self, generation == self.mediaGeneration, !Task.isCancelled else { return }
+            self.animate(Motion.spring) {
+                self.isReadingMedia = false
+                if let media {
+                    self.detectedMedia = media
+                    self.stockChoiceTouched = false
+                    self.applyMediaPreselection()
+                } else {
+                    self.mediaNote = tr("Der Drucker hat keine Etikettengröße gemeldet. Bitte unter „Benutzerdefiniert …“ eingeben.")
+                }
+            }
+        }
+    }
+
+    private func setStockChoice(_ choice: LabelStockChoice) {
+        stockChoice = choice
+        if let id = choice.stockID { stockID = id }
+    }
+
+    /// Wählt die gemeldete Größe, solange der Benutzer die Auswahl nicht geändert hat.
+    private func applyMediaPreselection() {
+        let choice = LabelStockChoice.preselection(current: stockChoice, touched: stockChoiceTouched,
+                                                   hasDetectedSize: detectedMedia != nil,
+                                                   matchingStockID: detectedMatch?.id, fallbackStockID: stockID)
+        // Ersetzt die gemeldete Größe das in LabelWerk gespeicherte Etikett, darauf hinweisen.
+        if !stockChoiceTouched, detectedMedia != nil, choice != stockChoice,
+           let session = detection.flatMap({ existingSession(for: $0.descriptor) }),
+           choice != .stock(session.saved.stockID), stockChoice == .stock(session.saved.stockID),
+           let saved = allStocks.first(where: { $0.id == session.saved.stockID }) {
+            mediaNote = tr("In LabelWerk war bisher „%@“ eingestellt.", saved.name)
+        }
+        setStockChoice(choice)
+    }
+
+    /// Macht „Vom Drucker“ bzw. „Benutzerdefiniert …“ vor dem Installationsauftrag zu einem echten
+    /// Format (vorhandenes passendes oder neues eigenes, `LabelStockLibrary.resolveStock`).
+    /// - Returns: `false`, wenn die Auswahl ungültig ist.
+    private func materializeStockChoice() -> Bool {
+        guard let app else { return false }
+        switch stockChoice {
+        case .stock:
+            return true
+        case .printer:
+            guard let media = detectedMedia else { return false }
+            setStockChoice(.stock(LabelStockLibrary.resolveStock(for: media, model: app).id))
+        case .custom:
+            guard let size = customEntry.size(in: stockLimits) else { return false }
+            let stock = LabelStockLibrary.resolveStock(widthMM: size.widthMM, heightMM: size.heightMM,
+                                                       tracking: customEntry.tracking,
+                                                       mediaType: detectedMedia?.mediaType, model: app)
+            setStockChoice(.stock(stock.id))
+        }
+        return true
+    }
 
     func chooseModel(_ printerModel: PrinterModel?) {
         animate(Motion.spring) {
@@ -508,6 +687,11 @@ final class PrinterSetupWizardModel {
         resolution = PrinterSetupPlanning.resolution(preferred: preferredResolution, current: resolution, model: printerModel)
         language = PrinterSetupPlanning.language(preferred: preferredLanguages, current: language, model: printerModel)
         stockID = PrinterSetupPlanning.preferredStockID(current: stockID, model: printerModel, stocks: allStocks)
+        if stockChoice.stockID != nil, stockChoice != .stock(stockID) {
+            // Das gewählte Format passt nicht zum Modell: auf das passende wechseln.
+            setStockChoice(.stock(stockID))
+        }
+        applyMediaPreselection()
     }
 
     /// Modellgruppen für die Katalogauswahl (gefiltert nach `modelSearch`).
@@ -561,7 +745,7 @@ final class PrinterSetupWizardModel {
     /// (sonst entstünde womöglich ein doppelter).
     var canInstall: Bool {
         currentDescriptor != nil && !effectiveName.isEmpty && (driverInstalled || driverInstallable)
-            && !service.isRunning && !isDetecting && !isLoadingQueueMatches
+            && !service.isRunning && !isDetecting && !isLoadingQueueMatches && selectedStock != nil
     }
 
     func loadQueueMatches() {
@@ -627,7 +811,9 @@ final class PrinterSetupWizardModel {
     }
 
     func startInstall() {
-        guard canInstall, let request = makeRequest() else { return }
+        // „Vom Drucker“ bzw. „Benutzerdefiniert …“ wird vor dem Auftrag ein echtes Format: Die
+        // Warteschlange erhält es als benannte Standard-Papiergröße, LabelWerk speichert es am Drucker.
+        guard canInstall, materializeStockChoice(), let request = makeRequest() else { return }
         lastRequest = request
         go(to: .install)
         run(request)
@@ -661,7 +847,14 @@ final class PrinterSetupWizardModel {
         guard !service.isRunning else { return }
         detectTask?.cancel()
         probeTask?.cancel()
+        mediaTask?.cancel()
         detectionGeneration += 1
+        mediaGeneration += 1
+        isReadingMedia = false
+        mediaNote = nil
+        detectedMedia = nil
+        customEntry = LabelSizeEntry()
+        stockChoiceTouched = false
         service.reset()
         candidate = nil
         manualHost = ""

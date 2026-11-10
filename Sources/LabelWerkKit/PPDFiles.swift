@@ -40,14 +40,21 @@ public enum PPDFiles {
 
     /// Steht die Etikettengröße schon als Seitengröße in der Modell-PPD?
     ///
-    /// Entscheidet nach dem Dateinamen (``PPDPageSizes``, wie der Generator); bei unbekannten Namen
-    /// nach dem Inhalt der Datei.
+    /// Entscheidet nach dem Inhalt der Datei – die installierte PPD kann aus einer anderen Version als
+    /// der Katalog der App stammen (``installedPageSizes(basePPD:)``).
     public static func containsPageSize(_ size: QueueLabelSize, basePPD path: String) -> Bool {
-        if let keywords = PPDPageSizes.keywords(forPPDNamed: path) {
-            return keywords.contains(size.keyword)
+        installedPageSizes(basePPD: path)?.contains(size.keyword) ?? false
+    }
+
+    /// Seitengrößen einer Modell-PPD: aus der Datei, wenn sie lesbar ist und Seitengrößen enthält;
+    /// sonst (z. B. `lwctl install --dry-run` ohne installierten Treiber) nach dem Dateinamen
+    /// (``PPDPageSizes``, wie der Generator). `nil` = unbekannt.
+    public static func installedPageSizes(basePPD path: String) -> [String]? {
+        if let text = try? read(path) {
+            let keywords = QueuePPD.pageSizeKeywords(in: text)
+            if !keywords.isEmpty { return keywords }
         }
-        guard let text = try? read(path) else { return false }
-        return QueuePPD.pageSizeKeywords(in: text).contains(size.keyword)
+        return PPDPageSizes.keywords(forPPDNamed: path)
     }
 
     /// Text einer Kopie der Modell-PPD `path`, die `size` als benannte Standard-Seitengröße enthält

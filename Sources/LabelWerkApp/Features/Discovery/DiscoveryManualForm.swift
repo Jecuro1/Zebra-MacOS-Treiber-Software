@@ -484,8 +484,7 @@ struct DiscoveryManualForm: View {
 
     private var previewCard: some View {
         let accent = DiscoveryAccentPalette.color(draft.accentHue)
-        let stock = model.stock(id: draft.stockID)
-        let aspect = stock.map { CGFloat($0.heightMM / max($0.widthMM, 1)) } ?? 1.5
+        let aspect = labelAspect
         return GlassCard(padding: 14, tint: accent) {
             VStack(spacing: 10) {
                 PrinterIllustration(state: .ready, isPrinting: false, accent: accent,
@@ -557,21 +556,10 @@ struct DiscoveryManualForm: View {
                     .labelsHidden()
                 }
                 field(tr("Etikett")) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Picker(tr("Etikett"), selection: $draft.stockID) {
-                            ForEach(availableStocks) { stock in
-                                Text(stock.name).tag(stock.id)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        if let stock = model.stock(id: draft.stockID) {
-                            Text(stock.sizeDescription)
-                                .font(.system(size: 10.5))
-                                .foregroundStyle(.secondary)
-                                .contentTransition(.opacity)
-                        }
-                    }
+                    // Vorhandenes Format oder „Benutzerdefiniert …“ (z. B. 104 × 76,2 mm) – wird beim
+                    // Hinzufügen ein eigenes Format und Standard-Papiergröße des macOS-Druckers.
+                    LabelStockChooser(choice: stockChoiceBinding, entry: $draft.customSize,
+                                      stocks: stockOptions, limits: stockLimits, reduceMotion: reduceMotion)
                 }
                 field(tr("Farbe")) {
                     DiscoveryFlowLayout(spacing: 5) {
@@ -651,7 +639,7 @@ struct DiscoveryManualForm: View {
                 }
                 .buttonStyle(.labelWerkPrimary)
                 .controlSize(.large)
-                .disabled(currentDescriptor == nil)
+                .disabled(currentDescriptor == nil || !isStockValid)
                 .keyboardShortcut(.return, modifiers: [.command])
                 .help(tr("Drucker hinzufügen (⌘↩)"))
                 if let message = validationMessage {
@@ -705,6 +693,59 @@ struct DiscoveryManualForm: View {
     }
 
     private var availableStocks: [LabelStock] { stocks(for: selectedModel) }
+
+    /// Formate der Auswahl (passend zum Modell und das gewählte).
+    private var stockOptions: [LabelStock] {
+        var list = availableStocks
+        if !list.contains(where: { $0.id == draft.stockID }), let stock = model.stock(id: draft.stockID) {
+            list.append(stock)
+        }
+        return list
+    }
+
+    /// Erlaubte Größe für „Benutzerdefiniert …“ (Modell).
+    private var stockLimits: LabelSizing.Limits { LabelSizing.Limits(model: selectedModel) }
+
+    /// Eingegebene Größe, falls „Benutzerdefiniert …“ gewählt und gültig.
+    private var customSize: (widthMM: Double, heightMM: Double)? {
+        draft.usesCustomSize ? draft.customSize.size(in: stockLimits) : nil
+    }
+
+    /// Ist das Etikett gültig (vorhandenes Format oder gültige eigene Größe)?
+    private var isStockValid: Bool {
+        draft.usesCustomSize ? customSize != nil : model.stock(id: draft.stockID) != nil
+    }
+
+    /// Seitenverhältnis des Etiketts für die Vorschau.
+    private var labelAspect: CGFloat {
+        if let size = customSize { return CGFloat(size.heightMM / max(size.widthMM, 1)) }
+        guard !draft.usesCustomSize, let stock = model.stock(id: draft.stockID) else { return 1.5 }
+        return CGFloat(stock.heightMM / max(stock.widthMM, 1))
+    }
+
+    private var stockChoiceBinding: Binding<LabelStockChoice> {
+        Binding(
+            get: { draft.usesCustomSize ? .custom : .stock(draft.stockID) },
+            set: { choice in
+                withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) {
+                    switch choice {
+                    case .custom:
+                        if draft.customSize.isEmpty, let stock = model.stock(id: draft.stockID) {
+                            // Mit dem bisherigen Format vorbelegen – meist ist nur noch anzupassen.
+                            draft.customSize = LabelSizeEntry(widthMM: stock.widthMM, heightMM: stock.heightMM,
+                                                              tracking: stock.tracking)
+                        }
+                        draft.usesCustomSize = true
+                    case .stock(let id):
+                        draft.usesCustomSize = false
+                        draft.stockID = id
+                    case .printer:
+                        break
+                    }
+                }
+            }
+        )
+    }
 
     private var knownDevices: [DiscoveredPrinter] {
         var seen = Set<String>()
@@ -775,7 +816,9 @@ struct DiscoveryManualForm: View {
     }
 
     private var validationMessage: String? {
-        guard currentDescriptor == nil else { return nil }
+        guard currentDescriptor == nil else {
+            return isStockValid ? nil : tr("Bitte Breite und Höhe des Etiketts prüfen.")
+        }
         switch draft.connection {
         case .network: return tr("Bitte IP-Adresse oder Hostnamen des Druckers eingeben.")
         case .queue: return tr("Bitte eine macOS-Warteschlange auswählen.")
@@ -971,13 +1014,20 @@ struct DiscoveryManualForm: View {
             onComplete(existing)
             return
         }
+        var stockID = draft.stockID
+        if draft.usesCustomSize {
+            // „Benutzerdefiniert …“ wird jetzt ein echtes Format (vorhandenes passendes oder neues eigenes).
+            guard let size = customSize else { return }
+            stockID = LabelStockLibrary.resolveStock(widthMM: size.widthMM, heightMM: size.heightMM,
+                                                     tracking: draft.customSize.tracking, model: model).id
+        }
         let saved = SavedPrinter(
             name: effectiveName,
             descriptor: descriptor,
             modelID: draft.modelID,
             resolution: draft.resolution,
             language: draft.language,
-            stockID: draft.stockID,
+            stockID: stockID,
             accentHue: draft.accentHue,
             location: draft.location.trimmingCharacters(in: .whitespacesAndNewlines)
         )

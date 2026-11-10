@@ -125,6 +125,12 @@ APP="${LW_REPO_ROOT}/build/${APP_NAME}.app"
 PKG="${LW_REPO_ROOT}/dist/${APP_NAME}-${VERSION}.pkg"
 TEST_QUEUE="LabelWerkCI"
 TEST_PORT="${LW_E2E_PORT:-19100}"
+# Eigene Etikettengröße der Testwarteschlange wie beim Anwender (ZD421t, 104 × 76,2 mm, nicht im
+# Katalog): benannte Seitengröße w295h216 in einer Kopie der PPD, lwLabelWidth/lwLabelHeight in 1/100 mm.
+TEST_SIZE="104x76.2mm"
+TEST_SIZE_KEYWORD="w295h216"
+TEST_LABEL_WIDTH="10400"
+TEST_LABEL_HEIGHT="7620"
 INSTALLED_DRIVER="/Library/Printers/LabelWerk"
 INSTALLED_PPDS="/Library/Printers/PPDs/Contents/Resources"
 # Legt „install-test“ an, unmittelbar bevor es den Installer startet; nur dann räumt der Ablauf
@@ -330,16 +336,55 @@ step_install_test() {
     if command -v cupstestppd >/dev/null 2>&1; then
         lw_run cupstestppd -W translations "${ppd}" || lw_die "cupstestppd lehnt $(basename "${ppd}") ab."
     fi
-    # Warteschlange mit unserer PPD anlegen – cupsd prüft dabei Filterpfad und Rechte.
+    # Warteschlange mit unserer PPD anlegen – cupsd prüft dabei Filterpfad und Rechte. Angelegt wird
+    # mit dem installierten lwctl und einer eigenen Etikettengröße (derselbe Code wie in der App:
+    # PPDFiles/QueuePPD ergänzen die Größe in einer Kopie der Modell-PPD, lpadmin -P).
     # Geräte-URI ohne Abfrage: Das socket-Backend schließt nach dem Auftrag seine Senderichtung
     # (Standard waiteof=true), der Test-„Drucker“ liest bis dahin und schließt dann selbst. Eine
     # Abfrage bräuchte „/“ vor „?“ (socket://host:port/?waiteof=false) – CUPS (httpSeparateURI)
     # verlangt nach einer Portnummer einen Pfad und weist „…:port?…“ mit „Bad device-uri“ ab.
-    lw_run sudo lpadmin -p "${TEST_QUEUE}" -E -v "socket://127.0.0.1:${TEST_PORT}" -P "${ppd}" ||
+    lw_run sudo /usr/local/bin/lwctl install -p "tcp://127.0.0.1:${TEST_PORT}" -m zd421t --dpi 203 \
+        --name "${TEST_QUEUE}" --size "${TEST_SIZE}" ||
         lw_die "Warteschlange ${TEST_QUEUE} konnte nicht angelegt werden."
     lpstat -p "${TEST_QUEUE}" >&2 || lw_die "Warteschlange ${TEST_QUEUE} fehlt."
     lpoptions -p "${TEST_QUEUE}" -l | grep -q '^lwDarkness' || lw_die "Warteschlange kennt die LabelWerk-Optionen nicht."
-    lw_ok "Warteschlange ${TEST_QUEUE} mit $(basename "${ppd}") eingerichtet"
+    check_queue_label_size "nach lwctl install --size"
+    lw_ok "Warteschlange ${TEST_QUEUE} mit $(basename "${ppd}") und Etikett ${TEST_SIZE} eingerichtet"
+
+    # Treiber-Update: Der postinstall ersetzt die PPD der Warteschlange durch die neue Modell-PPD –
+    # die ergänzte Etikettengröße und lwLabelWidth/lwLabelHeight müssen dabei erhalten bleiben.
+    lw_run sudo installer -pkg "${PKG}" -target / -verboseR
+    check_queue_label_size "nach dem Treiber-Update (postinstall)"
+    lw_ok "Treiber-Update behält die Etikettengröße von ${TEST_QUEUE}"
+}
+
+# Prüft, dass die Testwarteschlange das Etikett TEST_SIZE als benannte Standard-Papiergröße hat
+# (lpoptions -l markiert sie mit „*“), lwLabelWidth/lwLabelHeight trägt und ihre PPD gültig ist.
+check_queue_label_size() {
+    local when="$1" queue_ppd="/etc/cups/ppd/${TEST_QUEUE}.ppd" page_sizes plain
+    page_sizes="$(LC_ALL=C lpoptions -p "${TEST_QUEUE}" -l | grep '^PageSize' || true)"
+    printf '%s\n' "${page_sizes}" >&2
+    case " ${page_sizes} " in
+        *" *${TEST_SIZE_KEYWORD} "*) ;;
+        *) lw_die "PageSize-Standard von ${TEST_QUEUE} ist nicht ${TEST_SIZE_KEYWORD} (${when})." ;;
+    esac
+    plain="$(LC_ALL=C lpoptions -p "${TEST_QUEUE}")"
+    case " ${plain} " in
+        *" lwLabelWidth=${TEST_LABEL_WIDTH} "*) ;;
+        *) lw_die "lwLabelWidth=${TEST_LABEL_WIDTH} fehlt in den Standards von ${TEST_QUEUE} (${when}): ${plain}" ;;
+    esac
+    case " ${plain} " in
+        *" lwLabelHeight=${TEST_LABEL_HEIGHT} "*) ;;
+        *) lw_die "lwLabelHeight=${TEST_LABEL_HEIGHT} fehlt in den Standards von ${TEST_QUEUE} (${when}): ${plain}" ;;
+    esac
+    sudo grep -q "^\\*lwLabelPageSize: \"${TEST_SIZE_KEYWORD}\"" "${queue_ppd}" ||
+        lw_die "${queue_ppd} enthält die ergänzte Etikettengröße nicht (${when})."
+    sudo grep -q '^\*de\.PageSize '"${TEST_SIZE_KEYWORD}"'/Etikett 104 × 76,2 mm:' "${queue_ppd}" ||
+        lw_die "${queue_ppd}: deutscher Name „Etikett 104 × 76,2 mm“ fehlt (${when})."
+    if command -v cupstestppd >/dev/null 2>&1; then
+        lw_run sudo cupstestppd -W translations "${queue_ppd}" || lw_die "cupstestppd lehnt ${queue_ppd} ab (${when})."
+    fi
+    lw_ok "${TEST_QUEUE}: Standard-Papiergröße ${TEST_SIZE_KEYWORD} (Etikett 104 × 76,2 mm), lwLabelWidth/lwLabelHeight (${when})"
 }
 
 # Minimales einseitiges PDF (4 × 6 Zoll) mit Rahmen und gefülltem Balken.
@@ -391,15 +436,27 @@ step_e2e_print() {
 }
 
 # Teil von „e2e-print“ (eigener Prozess): druckt ein PDF über die Testwarteschlange an einen
-# lokalen TCP-„Drucker“ und prüft das empfangene ZPL.
+# lokalen TCP-„Drucker“ und prüft das empfangene ZPL – einmal ohne Seitengröße (es gilt die
+# benannte Standardgröße der Warteschlange, 104 × 76,2 mm), einmal mit 4 × 6 Zoll wie ein
+# Programm, das seine eigene Seitengröße schickt: „An Etikett anpassen“ legt sie auf das Etikett.
+# In beiden Fällen muss das Etikett 76,2 mm lang sein (^LL um 609 Punkte bei 203 dpi).
 step_e2e_print_job() {
     local work="${CI_TMP}/e2e"
     rm -rf "${work}"
     mkdir -p "${work}"
     write_test_pdf "${work}/label.pdf"
+    print_and_check "${work}" default
+    print_and_check "${work}" w288h432 -o PageSize=w288h432
+}
+
+# Druckt label.pdf aus $1 (Name $2, weitere lp-Argumente danach) und prüft das empfangene ZPL.
+print_and_check() {
+    local work="$1" name="$2"
+    shift 2
+    local received="${work}/received-${name}.bin"
 
     # Lokaler „Drucker“: nimmt eine Verbindung an und speichert alles bis zum Verbindungsende.
-    "${PYTHON}" - "${TEST_PORT}" "${work}/received.bin" <<'PY' &
+    "${PYTHON}" - "${TEST_PORT}" "${received}" <<'PY' &
 import socket, sys
 port, target = int(sys.argv[1]), sys.argv[2]
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -424,7 +481,7 @@ connection.close()
 PY
     local listener=$!
     sleep 1
-    lw_run lp -d "${TEST_QUEUE}" -o lwDarkness=20 -t "LabelWerk CI" "${work}/label.pdf"
+    lw_run lp -d "${TEST_QUEUE}" -o lwDarkness=20 "$@" -t "LabelWerk CI ${name}" "${work}/label.pdf"
     local waited=0
     while kill -0 "${listener}" 2>/dev/null && (( waited < 120 )); do
         sleep 2
@@ -435,16 +492,22 @@ PY
     fi
     wait "${listener}" 2>/dev/null || true
 
-    [[ -s "${work}/received.bin" ]] || lw_die "Der Testdrucker hat keine Daten empfangen."
-    local bytes marker
-    bytes="$(wc -c < "${work}/received.bin" | tr -d ' ')"
+    [[ -s "${received}" ]] || lw_die "Der Testdrucker hat keine Daten empfangen (${name})."
+    local bytes marker length
+    bytes="$(wc -c < "${received}" | tr -d ' ')"
     for marker in '^XA' '^GFA' '^PQ' '^XZ' '~SD20'; do
-        if ! LC_ALL=C grep -aqF -- "${marker}" "${work}/received.bin"; then
-            head -c 600 "${work}/received.bin" | LC_ALL=C cat -v >&2
-            lw_die "Empfangener Auftrag enthält „${marker}“ nicht."
+        if ! LC_ALL=C grep -aqF -- "${marker}" "${received}"; then
+            head -c 600 "${received}" | LC_ALL=C cat -v >&2
+            lw_die "Empfangener Auftrag (${name}) enthält „${marker}“ nicht."
         fi
     done
-    lw_ok "PDF → CUPS → rastertolabelwerk → ZPL: ${bytes} Bytes, ^XA … ^GFA … ^XZ, ~SD20"
+    # Etikettenlänge: 76,2 mm bei 203 dpi = 609,6 Punkte (ohne Anpassung hätte 4 × 6 Zoll 1218).
+    length="$(LC_ALL=C grep -aoE '\^LL[0-9]+' "${received}" | head -n 1 | tr -dc '0-9')"
+    if [[ -z "${length}" ]] || (( length < 600 || length > 620 )); then
+        head -c 600 "${received}" | LC_ALL=C cat -v >&2
+        lw_die "Etikettenlänge ^LL${length:-?} (${name}) passt nicht zu 76,2 mm."
+    fi
+    lw_ok "PDF (${name}) → CUPS → rastertolabelwerk → ZPL: ${bytes} Bytes, ^XA … ^GFA … ^XZ, ~SD20, ^LL${length}"
 }
 
 # Räumt nach „install-test“ auf (nur wenn dessen Installer gestartet wurde, siehe Ablauf).

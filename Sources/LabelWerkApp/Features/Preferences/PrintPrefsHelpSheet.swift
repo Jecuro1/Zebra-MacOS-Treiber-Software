@@ -25,6 +25,8 @@ extension PrintPrefsSetting {
             return tr("Nur bei Endlosmaterial: Das Etikett endet nach dem letzten bedruckten Element statt nach der vollen Seitenlänge – das spart Material.")
         case .stopOffset:
             return tr("Zusätzlicher Vorschub nach dem letzten Element, wenn „Bei letztem Element stoppen“ aktiv ist (0 bis 32 000 Punkte).")
+        case .fitToLabel:
+            return tr("Schickt ein Programm eine andere Papiergröße als das Etikett (z. B. A4 aus Vorschau), legt der Treiber den Inhalt der Seite mittig auf das Etikett: zu große Inhalte werden verkleinert, nie vergrößert. Seiten in Etikettengröße bleiben unverändert. „Aus“ druckt die Seite wie geliefert (nur auf die Druckbreite abgeschnitten).")
         case .speed:
             return tr("Druckgeschwindigkeit (^PR) in mm/s bis zum Höchstwert des Modells (51 mm/s = 2 Zoll/s). Langsamer druckt sauberer, schneller erhöht den Durchsatz.")
         case .darkness:

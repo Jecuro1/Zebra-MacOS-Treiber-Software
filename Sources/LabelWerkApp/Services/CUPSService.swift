@@ -35,6 +35,9 @@ enum CUPSService {
         case notAuthorized
         /// Die Warteschlange ist nicht (mehr) eingerichtet.
         case queueMissing(String)
+        /// Die Warteschlange verwendet nicht den LabelWerk-Treiber (fremde PPD): LabelWerk ändert sie
+        /// nur bei einer ausdrücklichen Neueinrichtung.
+        case notLabelWerkQueue(String)
 
         var errorDescription: String? {
             switch self {
@@ -54,6 +57,8 @@ enum CUPSService {
                 return tr("macOS erlaubt diesem Benutzer nicht, Drucker zu ändern. Ein Administrator kann die Einstellungen unter „Druckeinstellungen“ erneut übertragen.")
             case .queueMissing(let queue):
                 return tr("Die macOS-Warteschlange „%@“ ist nicht eingerichtet.", queue)
+            case .notLabelWerkQueue(let queue):
+                return tr("Die Warteschlange „%@“ verwendet nicht den LabelWerk-Treiber – bitte unter „Treiber“ neu einrichten.", queue)
             }
         }
     }
@@ -273,11 +278,18 @@ enum CUPSService {
         /// Benannte Seitengröße der Warteschlange.
         var labelSize: QueueLabelSize? { stock.map(QueueLabelSize.init(stock:)) }
 
+        /// Höchstgeschwindigkeit des Modells bei der Auflösung (Auswahl von `lwSpeed` in der PPD).
+        var maxSpeed: Int? {
+            guard let modelID, let model = ModelCatalog.shared.model(id: modelID) else { return nil }
+            return model.maxSpeed(resolution ?? .dpi203)
+        }
+
         /// `lpadmin`-Plan: Einstellungen mit `lwLabelWidth`/`lwLabelHeight` aus dem Format
         /// (Endlosmaterial: Länge 0) und `PageSize`.
         func plan(removingStale: Bool) -> QueueDefaults.Plan {
             QueueDefaults.plan(settings: settings.withLabelSize(of: stock), language: language,
-                               removingStale: removingStale, resolution: resolution, labelSize: labelSize)
+                               removingStale: removingStale, resolution: resolution, labelSize: labelSize,
+                               maxSpeed: maxSpeed)
         }
     }
 
@@ -289,8 +301,16 @@ enum CUPSService {
         var pageSizeChoices: [String] = []
         /// Inhalt von `/etc/cups/ppd/<queue>.ppd` (falls lesbar).
         var ppdText: String?
+        /// `printer-make-and-model` laut `lpoptions -p <queue>` (falls gemeldet).
+        var makeAndModel: String?
         /// `lpoptions` hat geantwortet (die Warteschlange existiert).
         var isKnown: Bool { !options.isEmpty || !pageSizeChoices.isEmpty }
+        /// Verwendet die Warteschlange den LabelWerk-Treiber? Nach der PPD (`*lwModel`), ist sie nicht
+        /// lesbar, nach `printer-make-and-model` (wie ``DriverQueueClassifier``).
+        var isLabelWerk: Bool {
+            if let ppdText { return ppdText.contains("*lwModel:") }
+            return makeAndModel?.contains("LabelWerk") == true
+        }
     }
 
     /// Ergebnis eines Abgleichs.
@@ -317,6 +337,7 @@ enum CUPSService {
             if let result = try? await ProcessRunner.run(lpoptions, ["-p", queue], environment: environment),
                result.succeeded {
                 plain = CUPSQueueLister.parseLpoptions(result.stdout)
+                state.makeAndModel = plain["printer-make-and-model"]
             }
             state.options = QueueDefaults.currentOptions(list: parsed, plain: plain)
         }
@@ -333,14 +354,20 @@ enum CUPSService {
     /// Modell-PPD, aus der die PPD einer Warteschlange stammt (`*lwModel` + Auflösung), sonst die PPD
     /// für Modell, Auflösung und Sprache der Einstellungen.
     static func basePPD(queuePPD text: String?, configuration: QueueConfiguration) -> URL? {
-        if let text, let stem = QueuePPD.baseStem(of: text) {
-            for ext in ["ppd.gz", "ppd"] {
-                let url = ppdDirectory.appendingPathComponent("\(stem).\(ext)")
-                if FileManager.default.fileExists(atPath: url.path) { return url }
-            }
+        if let text, let stem = QueuePPD.baseStem(of: text), let url = installedPPD(stem: stem) {
+            return url
         }
         return ppdURL(modelID: configuration.modelID, resolution: configuration.resolution ?? .dpi203,
                       language: configuration.language ?? .zpl)
+    }
+
+    /// Installierte Modell-PPD zu einem Namensstamm (`LabelWerk-zd421t-203dpi` → `.ppd.gz` bzw. `.ppd`).
+    static func installedPPD(stem: String) -> URL? {
+        for ext in ["ppd.gz", "ppd"] {
+            let url = ppdDirectory.appendingPathComponent("\(stem).\(ext)")
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        return nil
     }
 
     /// Vergleicht Soll und Ist einer Warteschlange, ohne etwas zu ändern.
@@ -348,8 +375,11 @@ enum CUPSService {
         async -> (plan: QueueDefaults.Plan, difference: QueueDefaults.Difference, state: QueueState) {
         let plan = configuration.plan(removingStale: true)
         let state = await queueState(queue)
-        // Veraltete ergänzte Größen nur mit bekannter Modell-PPD der Warteschlange erkennen.
-        let base = state.ppdText.flatMap { QueuePPD.baseStem(of: $0) }.flatMap { PPDPageSizes.keywords(forPPDNamed: $0) }
+        // Veraltete ergänzte Größen nur mit bekannter Modell-PPD der Warteschlange erkennen – nach der
+        // installierten Datei (Treiber und App können verschiedene Versionen haben), sonst nach dem Katalog.
+        let base = state.ppdText.flatMap { QueuePPD.baseStem(of: $0) }.flatMap { stem -> [String]? in
+            PPDFiles.installedPageSizes(basePPD: installedPPD(stem: stem)?.path ?? stem)
+        }
         let difference = QueueDefaults.difference(plan, current: state.options, pageSizeChoices: state.pageSizeChoices,
                                                   basePageSizes: base)
         return (plan, difference, state)
@@ -362,14 +392,19 @@ enum CUPSService {
     ///
     /// - Parameter allowAdminPrompt: Bei fehlenden Rechten nach dem Administratorpasswort fragen
     ///   (nur bei Aktionen des Benutzers); sonst `CUPSError.notAuthorized`.
+    /// Warteschlangen mit fremdem Treiber (PPD ohne `*lwModel`, z. B. Zebras eigene oder die
+    /// CUPS-PPD „Zebra ZPL Label Printer“) bleiben unverändert: Nur eine ausdrückliche Einrichtung
+    /// (``installQueue(for:queueName:stock:)``) stellt eine Warteschlange auf LabelWerk um.
+    ///
     /// - Throws: `CUPSError.optionsNotApplied` (Abweichungen nach dem Abgleich), `noPPD`, `notAuthorized`,
-    ///   Fehler von `lpadmin`.
+    ///   `queueMissing`, `notLabelWerkQueue`, Fehler von `lpadmin`.
     @discardableResult
     static func apply(_ configuration: QueueConfiguration, to queue: String, force: Bool,
                       allowAdminPrompt: Bool) async throws -> QueueApplyOutcome {
         let (plan, difference, state) = await check(configuration, queue: queue)
         // `lpadmin -p` legte eine fehlende Warteschlange (ohne Geräte-URI) neu an.
         guard state.isKnown else { throw CUPSError.queueMissing(queue) }
+        guard state.isLabelWerk else { throw CUPSError.notLabelWerkQueue(queue) }
         guard force || !difference.isEmpty else {
             return QueueApplyOutcome(changed: false, replacedPPD: false, approximated: plan.approximated,
                                      difference: difference)

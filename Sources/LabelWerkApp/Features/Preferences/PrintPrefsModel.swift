@@ -102,7 +102,7 @@ struct PrintPrefsDraft: Equatable {
 /// „Druckerwert verwenden“ / „Vom Drucker lesen“), die Änderungsmarken und die Hilfe.
 enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
     // Seite einrichten
-    case template, size, tracking, rotation, markOffset, mirror, negative, stopAtLast, stopOffset
+    case template, size, tracking, rotation, markOffset, mirror, negative, stopAtLast, stopOffset, fitToLabel
     // Druckoptionen
     case speed, darkness, mediaType, labelTop, labelLeft, backfeed, pauseEvery, controlCharacters, rtcUpdate
     case calibrateBeforeJob, saveToPrinter, language, cancelJobs, cancelDelay
@@ -129,6 +129,7 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         case .negative: return tr("Invers")
         case .stopAtLast: return tr("Bei letztem Element stoppen")
         case .stopOffset: return tr("Stoppversatz")
+        case .fitToLabel: return tr("An Etikett anpassen")
         case .speed: return tr("Geschwindigkeit")
         case .darkness: return tr("Temperatur")
         case .mediaType: return tr("Druckmodus")
@@ -175,7 +176,8 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
 
     var pane: PrintPrefsPane {
         switch self {
-        case .template, .size, .tracking, .rotation, .markOffset, .mirror, .negative, .stopAtLast, .stopOffset:
+        case .template, .size, .tracking, .rotation, .markOffset, .mirror, .negative, .stopAtLast, .stopOffset,
+             .fitToLabel:
             return .page
         case .speed, .darkness, .mediaType, .labelTop, .labelLeft, .backfeed, .pauseEvery, .controlCharacters,
              .rtcUpdate, .calibrateBeforeJob, .saveToPrinter, .language, .cancelJobs, .cancelDelay:
@@ -312,6 +314,7 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         case .negative: d.settings.negative = base.negative
         case .stopAtLast: d.settings.stopAtLastElement = base.stopAtLastElement
         case .stopOffset: d.settings.stopOffset = base.stopOffset
+        case .fitToLabel: d.settings.fitToLabel = base.fitToLabel
         case .pauseEvery: d.settings.pauseEvery = base.pauseEvery
         case .controlCharacters: d.settings.controlCharacters = base.controlCharacters
         case .calibrateBeforeJob: d.settings.calibrateBeforeJob = base.calibrateBeforeJob
@@ -381,6 +384,7 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         case .negative: return x.negative == y.negative
         case .stopAtLast: return x.stopAtLastElement == y.stopAtLastElement
         case .stopOffset: return x.stopOffset == y.stopOffset
+        case .fitToLabel: return x.fitToLabel == y.fitToLabel
         case .speed: return x.speed == y.speed
         case .darkness: return x.darkness == y.darkness
         case .mediaType: return x.mediaType == y.mediaType
@@ -429,6 +433,7 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         case .negative: t.settings.negative = s.settings.negative
         case .stopAtLast: t.settings.stopAtLastElement = s.settings.stopAtLastElement
         case .stopOffset: t.settings.stopOffset = s.settings.stopOffset
+        case .fitToLabel: t.settings.fitToLabel = s.settings.fitToLabel
         case .speed: t.settings.speed = s.settings.speed
         case .darkness: t.settings.darkness = s.settings.darkness
         case .mediaType: t.settings.mediaType = s.settings.mediaType

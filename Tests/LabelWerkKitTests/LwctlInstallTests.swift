@@ -90,6 +90,8 @@ struct LwctlInstallTests {
         var info: String
         /// Inhalt von `$CUPS_SERVERROOT/ppd/<name>.ppd` (`nil`: keine Datei).
         var ppd: String?
+        /// Weitere Ausgabe von `lpoptions -p <name>`, z. B. Warteschlangen-Standards `lwLabelWidth=10400`.
+        var options: String = ""
     }
 
     /// Attrappen der CUPS-Werkzeuge in `directory/bin` (in `$PATH` vor den Systemwerkzeugen):
@@ -142,7 +144,8 @@ struct LwctlInstallTests {
             exit 0
             """)
         for queue in queues {
-            try Data("printer-info='\(queue.info)' printer-make-and-model='\(queue.makeAndModel)'\n".utf8)
+            let extra = queue.options.isEmpty ? "" : " " + queue.options
+            try Data("printer-info='\(queue.info)' printer-make-and-model='\(queue.makeAndModel)'\(extra)\n".utf8)
                 .write(to: options.appendingPathComponent(queue.name))
             if let ppd = queue.ppd {
                 try Data(ppd.utf8).write(to: serverRoot.appendingPathComponent("ppd/\(queue.name).ppd"))
@@ -692,8 +695,11 @@ struct LwctlInstallTests {
         defer { try? FileManager.default.removeItem(at: ppds) }
         let size = QueueLabelSize(widthMM: 104, heightMM: 76.2)
         let queuePPD = try QueuePPD.patched(QueuePPDSample.text, adding: size)
-        let (environment, _) = try stubCUPS(in: directory, queues: [
-            StubQueue(name: "Etiketten", uri: "socket://192.0.2.10:9100", makeAndModel: "", info: "Etiketten", ppd: queuePPD),
+        // lwLabelWidth/lwLabelHeight sind Warteschlangen-Standards: Sie überstehen „lpadmin -P“ und bleiben.
+        let (environment, log) = try stubCUPS(in: directory, queues: [
+            StubQueue(name: "Etiketten", uri: "socket://192.0.2.10:9100", makeAndModel: "", info: "Etiketten", ppd: queuePPD,
+                      options: "lwLabelWidth=10400 lwLabelHeight=7620"),
+            StubQueue(name: "Alt", uri: "socket://192.0.2.30:9100", makeAndModel: "", info: "Alt", ppd: queuePPD),
         ])
         let result = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--ppd-dir", ppds.path,
                                               "--json"], environment: environment)
@@ -702,8 +708,47 @@ struct LwctlInstallTests {
         #expect(plan.existing && plan.reused && plan.addedPageSize)
         #expect(plan.pageSize == "w295h216" && plan.labelWidth == nil)
         #expect(plan.keptSettings.contains("PageSize=w295h216"))
+        #expect(try loggedCalls(log).first?.contains { $0.hasPrefix("lwLabelWidth") } == false)
         let copy = try String(contentsOf: directory.appendingPathComponent("lpadmin-P.ppd"), encoding: .utf8)
         #expect(QueuePPD.addedPageSize(in: copy) == "w295h216")
+
+        // Ohne lwLabelWidth (Warteschlange einer älteren Version): aus der übernommenen Seitengröße gesetzt.
+        let old = try await CLIRunner.run(["install", "-p", "tcp://192.0.2.30", "-m", "zd421t", "--ppd-dir", ppds.path,
+                                           "--dry-run", "--json"], environment: environment)
+        #expect(old.status == 0, "\(old.errors)")
+        let oldPlan = try decodePlan(old)
+        #expect(oldPlan.queue == "Alt" && oldPlan.labelWidth == 10400 && oldPlan.labelHeight == 7620)
+        #expect(oldPlan.commands.first.map { Array($0.suffix(4)) } == [
+            "-o", "lwLabelWidth-default=10400", "-o", "lwLabelHeight-default=7620",
+        ])
+    }
+
+    @Test("Neue Warteschlange ohne --stock/--size: lwLabelWidth/lwLabelHeight aus der Standard-Seitengröße der PPD")
+    func labelSizeFromPPDDefault() async throws {
+        let ppds = try patchablePPDDirectory()
+        defer { try? FileManager.default.removeItem(at: ppds) }
+        let result = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--ppd-dir", ppds.path,
+                                              "--dry-run", "--json"])
+        #expect(result.status == 0, "\(result.errors)")
+        let plan = try decodePlan(result)
+        #expect(!plan.addedPageSize && plan.pageSize == nil)
+        // QueuePPDSample: *DefaultPageSize w288h432 (4 × 6 Zoll).
+        #expect(plan.labelWidth == 10160 && plan.labelHeight == 15240)
+        #expect(plan.commands.first.map { Array($0.suffix(4)) } == [
+            "-o", "lwLabelWidth-default=10160", "-o", "lwLabelHeight-default=15240",
+        ])
+
+        // Endlosmaterial (--stock): keine Etikettenlänge – der Treiber passt nur die Breite an.
+        guard let continuous = ModelCatalog.shared.stocks.first(where: {
+            $0.isContinuous && $0.widthMM <= 106 && PPDPageSizes.fits($0, printWidthMM: 104, maxLabelLengthMM: 991)
+        }) else { return }
+        let receipt = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--stock", continuous.id,
+                                               "--ppd-dir", ppds.path, "--dry-run", "--json"])
+        #expect(receipt.status == 0, "\(receipt.errors)")
+        let receiptPlan = try decodePlan(receipt)
+        #expect(receiptPlan.labelWidth == LabelSizing.hundredthsOfMillimeter(continuous.widthMM))
+        #expect(receiptPlan.labelHeight == 0)
+        #expect(receiptPlan.commands.first?.contains { $0.hasPrefix("lwLabelHeight") } == false)
     }
 
     @Test("--size: Fehler bei ungültiger, zu großer oder doppelter Angabe")

@@ -79,6 +79,9 @@ struct PrinterDetection: Equatable, Sendable {
     var identifyError: String?
     /// Beim Drucker wurde nicht nachgefragt, weil er nicht als Zebra-Drucker bestätigt ist.
     var queryWithheld = false
+    /// Eingestellte Etikettengröße laut Drucker (`PrinterClient.readMediaSize()`, nur ZPL), z. B.
+    /// 104 × 76,2 mm wie in ZDesigner; `nil` = nicht gemeldet bzw. nicht abgefragt.
+    var media: DetectedMedia?
 
     /// Das Modell darf beim Drucker abgefragt werden (ohne Rückfrage).
     var mayQueryPrinter: Bool { zebraCheck == .confirmed }

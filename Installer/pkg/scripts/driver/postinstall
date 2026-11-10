@@ -13,6 +13,11 @@
 #     die Standardwerte der neuen PPD; die bisher gewählten Standardoptionen der Warteschlange
 #     (Schwärzung, Etikettenformat …) werden deshalb aus ihrer alten PPD gelesen und im selben
 #     Aufruf mit „-o“ wieder gesetzt. Werte, die die neue PPD nicht mehr kennt, verwirft lpadmin.
+#     Eine von LabelWerk ergänzte Etikettengröße (*lwLabelPageSize, z. B. „Etikett 104 × 76,2 mm“)
+#     wird in eine Kopie der neuen PPD übernommen – sonst verwürfe lpadmin ihre Seitengröße. Fehlen
+#     der Warteschlange lwLabelWidth/lwLabelHeight (ältere Versionen), werden sie aus ihrer
+#     Standard-Seitengröße gesetzt, damit „An Etikett anpassen“ (lwFitToLabel) greift
+#     (ARCHITECTURE.md §9 „Etikettengröße der Warteschlange“).
 #  4. Nur auf dem Startvolume, nur bei einer Installation mit dem Installationsprogramm
 #     (Doppelklick auf das Paket) und nur, solange noch kein LabelWerk-Drucker eingerichtet ist
 #     (also nicht bei einem Update): LabelWerk für den angemeldeten Benutzer mit „--setup“ öffnen –
@@ -34,6 +39,7 @@ PPD_DIR="${TARGET}/Library/Printers/PPDs/Contents/Resources"
 CUPS_PPD_DIR="${TARGET}/etc/cups/ppd"
 LPADMIN="/usr/sbin/lpadmin"
 LPSTAT="/usr/bin/lpstat"
+LPOPTIONS="/usr/bin/lpoptions"
 
 log() {
     printf 'LabelWerk postinstall: %s\n' "$*"
@@ -158,10 +164,127 @@ carried_defaults() {
     fi
 }
 
+# Gibt die von LabelWerk ergänzte Seitengröße einer Warteschlangen-PPD aus (*lwLabelPageSize,
+# z. B. „w295h216“), sonst nichts.
+added_page_size() {
+    sed -n 's/^\*lwLabelPageSize:[[:space:]]*"\([A-Za-z0-9.]*\)".*/\1/p' "$1" | head -n 1
+}
+
+# Schreibt nach $3 eine Kopie der neuen PPD $2 (.ppd.gz oder .ppd) mit der ergänzten Seitengröße $4
+# aus der Warteschlangen-PPD $1 – dasselbe Ergebnis wie QueuePPD.patched in App und lwctl: Die
+# Einträge (*PageSize, *PageRegion, *ImageableArea, *PaperDimension) stehen direkt nach ihrer
+# *Default…-Zeile, die auf die Größe zeigt, die deutschen Texte nach der Übersetzung der Option, die
+# Markierung nach *lwModel. Kennt die neue PPD die Größe schon, werden nur die *Default…-Zeilen
+# gesetzt. Rückgabewert ≠ 0, wenn der alten PPD Einträge fehlen oder die neue nicht lesbar ist.
+patch_added_size() {
+    local old_ppd="$1" new_ppd="$2" output="$3" keyword="$4" status=0
+    case "${new_ppd}" in
+        *.gz) gzip -dc "${new_ppd}" > "${output}.base" 2>/dev/null || status=1 ;;
+        *) cp "${new_ppd}" "${output}.base" 2>/dev/null || status=1 ;;
+    esac
+    if (( status == 0 )); then
+        LC_ALL=C awk -v keyword="${keyword}" -v old="${old_ppd}" '
+            BEGIN {
+                marker = "*% LabelWerk: Etikettengroesse dieser Warteschlange (von LabelWerk ergaenzt)"
+                split("PageSize PageRegion ImageableArea PaperDimension de.PageSize de.PageRegion", mains, " ")
+                while ((getline line < old) > 0) {
+                    sub(/\r$/, "", line)
+                    for (i = 1; i <= 6; i++) {
+                        prefix = "*" mains[i] " " keyword "/"
+                        if (!(mains[i] in entry) && substr(line, 1, length(prefix)) == prefix) entry[mains[i]] = line
+                    }
+                }
+                close(old)
+                for (i = 1; i <= 4; i++) if (!(mains[i] in entry)) { failed = 1; exit 1 }
+            }
+            {
+                sub(/\r$/, "")
+                text[++lines] = $0
+                prefix = "*PageSize " keyword
+                rest = substr($0, length(prefix) + 1, 1)
+                if (substr($0, 1, length(prefix)) == prefix && (rest == "/" || rest == ":")) present = 1
+            }
+            END {
+                if (failed) exit 1
+                while (lines > 0 && text[lines] == "") lines--
+                for (n = 1; n <= lines; n++) {
+                    line = text[n]
+                    done = 0
+                    for (i = 1; i <= 4; i++) {
+                        anchor = "*Default" mains[i] ":"
+                        if (!(anchor in seen) && substr(line, 1, length(anchor)) == anchor) {
+                            seen[anchor] = 1
+                            print anchor " " keyword
+                            if (!present) print entry[mains[i]]
+                            done = 1
+                        }
+                    }
+                    if (done) continue
+                    print line
+                    if (present) continue
+                    for (i = 5; i <= 6; i++) {
+                        anchor = "*de.Translation " substr(mains[i], 4) "/"
+                        if (!(anchor in seen) && substr(line, 1, length(anchor)) == anchor) {
+                            seen[anchor] = 1
+                            if (mains[i] in entry) print entry[mains[i]]
+                        }
+                    }
+                    if (!("*lwModel:" in seen) && substr(line, 1, 9) == "*lwModel:") {
+                        seen["*lwModel:"] = 1
+                        print marker
+                        print "*lwLabelPageSize: \"" keyword "\""
+                    }
+                }
+                for (i = 1; i <= 4; i++) if (!(("*Default" mains[i] ":") in seen)) exit 1
+            }
+        ' "${output}.base" > "${output}" || status=1
+    fi
+    rm -f "${output}.base"
+    return "${status}"
+}
+
+# Gibt lwLabelWidth-default/lwLabelHeight-default (1/100 mm) aus der Standard-Seitengröße einer
+# Warteschlangen-PPD aus (*DefaultPageSize und ihre *PaperDimension in Punkten, gerundet wie die
+# App: Punkte · 2540 / 72); bei Endlosmaterial (*DefaultlwMediaTracking: Continuous) ohne Länge.
+label_size_defaults() {
+    LC_ALL=C awk '
+        { sub(/\r$/, "") }
+        /^\*DefaultPageSize:/ && size == "" { size = $2 }
+        /^\*DefaultlwMediaTracking:/ && tracking == "" { tracking = $2 }
+        /^\*PaperDimension[ \t]/ { dimension[++count] = $0 }
+        END {
+            if (size == "") exit 0
+            for (i = 1; i <= count; i++) {
+                line = dimension[i]
+                spec = line
+                sub(/^\*PaperDimension[ \t]+/, "", spec)
+                sub(/[\/:].*$/, "", spec)
+                if (spec != size) continue
+                sub(/^[^"]*"/, "", line)
+                sub(/".*$/, "", line)
+                if (split(line, values, " ") != 2) exit 0
+                width = int(values[1] * 2540 / 72 + 0.5)
+                height = int(values[2] * 2540 / 72 + 0.5)
+                if (width <= 0) exit 0
+                print "lwLabelWidth-default=" width
+                if (height > 0 && tracking != "Continuous") print "lwLabelHeight-default=" height
+                exit 0
+            }
+        }
+    ' "$1"
+}
+
+# Hat die Warteschlange schon lwLabelWidth als Standard (lpoptions -p)?
+has_label_size() {
+    "${LPOPTIONS}" -p "$1" 2>/dev/null | grep -Eq '(^|[[:space:]])lwLabelWidth='
+}
+
 # Aktualisiert Warteschlangen, deren PPD von LabelWerk stammt (*lwModel), auf die neue PPD und
-# behält dabei ihre Standardoptionen (siehe oben, veraltete Optionen umgesetzt).
+# behält dabei ihre Standardoptionen (siehe oben, veraltete Optionen umgesetzt), eine ergänzte
+# Etikettengröße und lwLabelWidth/lwLabelHeight.
 refresh_queues() {
     local queue_ppd queue model dpi new_ppd default carried updated=0 skipped=0
+    local added install_ppd work note
     local -a carry
     [[ -d "${CUPS_PPD_DIR}" ]] || return 0
     for queue_ppd in "${CUPS_PPD_DIR}"/*.ppd; do
@@ -182,13 +305,32 @@ refresh_queues() {
             carry+=(-o "${default}")
             carried=$((carried + 1))
         done < <(carried_defaults "${queue_ppd}")
-        if "${LPADMIN}" -p "${queue}" -P "${new_ppd}" ${carry[@]+"${carry[@]}"} >/dev/null 2>&1; then
-            log "Warteschlange „${queue}“ auf $(basename "${new_ppd}") aktualisiert (${carried} Standardwerte übernommen)."
+        install_ppd="${new_ppd}"
+        work=""
+        note=""
+        added="$(added_page_size "${queue_ppd}")"
+        if [[ -n "${added}" ]]; then
+            work="$(mktemp -d "${TMPDIR:-/tmp}/LabelWerk-ppd.XXXXXX")"
+            if patch_added_size "${queue_ppd}" "${new_ppd}" "${work}/${queue}.ppd" "${added}"; then
+                install_ppd="${work}/${queue}.ppd"
+                note=", Etikettengröße ${added} beibehalten"
+            else
+                log "Warteschlange „${queue}“: ergänzte Etikettengröße ${added} nicht lesbar – es gilt die Standardgröße der neuen PPD."
+            fi
+        fi
+        if ! has_label_size "${queue}"; then
+            while IFS= read -r default; do
+                carry+=(-o "${default}")
+            done < <(label_size_defaults "${queue_ppd}")
+        fi
+        if "${LPADMIN}" -p "${queue}" -P "${install_ppd}" ${carry[@]+"${carry[@]}"} >/dev/null 2>&1; then
+            log "Warteschlange „${queue}“ auf $(basename "${new_ppd}") aktualisiert (${carried} Standardwerte übernommen${note})."
             updated=$((updated + 1))
         else
             log "Warteschlange „${queue}“ konnte nicht aktualisiert werden (lpadmin-Fehler) – unverändert."
             skipped=$((skipped + 1))
         fi
+        if [[ -n "${work}" ]]; then rm -rf "${work}"; fi
     done
     log "${updated} Warteschlangen aktualisiert, ${skipped} unverändert."
 }

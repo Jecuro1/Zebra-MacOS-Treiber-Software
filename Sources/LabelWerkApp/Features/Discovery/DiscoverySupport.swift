@@ -382,6 +382,9 @@ struct DiscoveryManualDraft: Equatable {
     var resolution: Resolution = .dpi203
     var language: PrinterLanguage = .zpl
     var stockID: String = "w4h6in"
+    /// „Benutzerdefiniert …“ gewählt: Etikett aus `customSize` (wird beim Hinzufügen ein eigenes Format).
+    var usesCustomSize = false
+    var customSize = LabelSizeEntry()
     var name: String = ""
     var nameEdited = false
     var location: String = ""

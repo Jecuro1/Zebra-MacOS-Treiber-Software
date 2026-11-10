@@ -274,7 +274,8 @@ struct NetworkPrinterInstallWizard: View {
     private var primaryEnabled: Bool {
         switch wizard.step {
         case .choose: return wizard.canContinueFromChoose
-        case .model: return !wizard.isDetecting
+        // Ohne gültiges Etikett (z. B. „Benutzerdefiniert …“ mit fehlender Höhe) geht es nicht weiter.
+        case .model: return !wizard.isDetecting && wizard.selectedStock != nil
         case .options: return wizard.canInstall
         case .install: return !wizard.service.isRunning && wizard.service.phase != .idle
         }

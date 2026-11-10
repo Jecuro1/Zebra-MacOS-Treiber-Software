@@ -303,6 +303,8 @@ enum InstallCommands {
         /// Ohne --stock/--size: eine früher ergänzte Etikettengröße der bisherigen Warteschlange, die
         /// in die neue PPD übernommen wird (sonst verwürfe lpadmin ihre Seitengröße).
         var carriedSize: QueueLabelSize?
+        /// PPD der bisherigen LabelWerk-Warteschlange (für ihre Standard-Seitengröße).
+        var existingPPDText: String?
         if let existing {
             let isLabelWerk = isLabelWerkQueue(existing)
             if !(isLabelWerk && CUPSQueues.isSameDevice(existing.deviceURI, deviceURI)) {
@@ -321,6 +323,7 @@ enum InstallCommands {
             // bleiben außen vor; eine fremde PPD liefert keine passenden Werte.
             if isLabelWerk {
                 if let text = CUPSQueues.ppdText(ofQueue: existing.name), text.contains("*lwModel:") {
+                    existingPPDText = text
                     var excluded: Set<String> = ["Resolution"]
                     if requestedSize != nil { excluded.formUnion(["PageSize", "PageRegion"]) }
                     if requestedSize == nil { carriedSize = PPDFiles.addedLabelSize(inQueuePPD: text) }
@@ -353,6 +356,23 @@ enum InstallCommands {
             queuePPD = url.path
         }
 
+        // lwLabelWidth/lwLabelHeight (1/100 mm, Warteschlangen-Standard): „An Etikett anpassen“ braucht
+        // die Etikettengröße. Mit --stock/--size gilt deren Größe. Sonst bleibt ein vorhandener Wert –
+        // Warteschlangen-Standards übersteht „lpadmin -P“ –, und fehlt er, gilt die Standard-Seitengröße,
+        // die die Warteschlange danach hat (übernommen bzw. die der PPD). Endlosmaterial: keine Länge.
+        var labelDefaults: (width: Int, height: Int)?
+        if let requestedSize {
+            labelDefaults = (requestedSize.widthHundredths, stock?.isContinuous == true ? 0 : requestedSize.heightHundredths)
+        } else if existing?.options[QueueDefaults.labelWidthOption] == nil {
+            let continuous = keptSettings.contains("\(CUPSOptionName.tracking)=\(MediaTracking.continuous.cupsValue)")
+            let effective = carriedSize
+                ?? existingPPDText.flatMap(PPDFiles.defaultLabelSize(in:))
+                ?? (existingPPDText == nil ? (try? PPDFiles.read(ppd.path)).flatMap(PPDFiles.defaultLabelSize(in:)) : nil)
+            if let effective, effective.widthHundredths > 0 {
+                labelDefaults = (effective.widthHundredths, continuous ? 0 : effective.heightHundredths)
+            }
+        }
+
         // 7. Befehle.
         let lpadmin = ToolRunner.locate("lpadmin", fallbacks: lpadminFallbacks)
         var queueArguments = ["-p", queue, "-E", "-v", deviceURI, "-P", queuePPD, "-D", description]
@@ -361,9 +381,16 @@ enum InstallCommands {
         if existing == nil { queueArguments += ["-o", "printer-is-shared=false"] }
         for setting in keptSettings { queueArguments += ["-o", setting] }
         if let requestedSize {
-            queueArguments += ["-o", "\(QueueDefaults.pageSizeOption)=\(requestedSize.keyword)",
-                               "-o", "\(QueueDefaults.labelWidthOption)-default=\(requestedSize.widthHundredths)",
-                               "-o", "\(QueueDefaults.labelHeightOption)-default=\(requestedSize.heightHundredths)"]
+            queueArguments += ["-o", "\(QueueDefaults.pageSizeOption)=\(requestedSize.keyword)"]
+        }
+        if let labelDefaults {
+            queueArguments += ["-o", "\(QueueDefaults.labelWidthOption)-default=\(labelDefaults.width)"]
+            if labelDefaults.height > 0 {
+                queueArguments += ["-o", "\(QueueDefaults.labelHeightOption)-default=\(labelDefaults.height)"]
+            } else if existing != nil {
+                // -R wirkt sofort und nur auf vorhandene Warteschlangen.
+                queueArguments += ["-R", "\(QueueDefaults.labelHeightOption)-default"]
+            }
         }
         if let explicitLanguage, generic == nil { queueArguments += ["-o", "lwLanguage=\(explicitLanguage.cupsValue)"] }
         var commands: [[String]] = [[lpadmin] + queueArguments]
@@ -391,7 +418,7 @@ enum InstallCommands {
             stock: stock?.id, pageSize: labelSize?.keyword,
             labelSize: labelSize.map { LabelSizing.format($0.widthMM, decimalSeparator: ".") + "x"
                 + LabelSizing.format($0.heightMM, decimalSeparator: ".") + "mm" },
-            labelWidth: requestedSize?.widthHundredths, labelHeight: requestedSize?.heightHundredths,
+            labelWidth: labelDefaults?.width, labelHeight: labelDefaults?.height,
             addedPageSize: patchedPPD != nil, queuePPD: queuePPD,
             setDefault: setDefault, testPage: testPage,
             dryRun: dryRun, commands: commands, warnings: warnings, installed: false)
