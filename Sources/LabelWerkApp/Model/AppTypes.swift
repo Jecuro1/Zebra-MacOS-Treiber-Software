@@ -193,6 +193,12 @@ struct AppPreferences: Codable, Equatable {
     var showDemoPrinter: Bool = true
     /// Maßeinheit für Längen in den Druckeinstellungen.
     var measurementUnit: MeasurementUnit = .millimeters
+    /// Automatisch nach Updates suchen (kurz nach dem Start, danach alle 6 Stunden).
+    var autoCheckUpdates: Bool = true
+    /// Gefundene Updates sofort im Hintergrund laden – „Jetzt installieren“ beginnt dann ohne Wartezeit.
+    var autoDownloadUpdates: Bool = true
+    /// Mit „Diese Version überspringen“ ausgeblendetes Update (Release-Tag, z. B. „v1.1.0-b58“).
+    var skippedUpdateTag: String? = nil
 }
 
 // MARK: - Persistenter Gesamtzustand
@@ -234,6 +240,9 @@ extension AppPreferences {
         developerMode = c.value(.developerMode, default: d.developerMode)
         showDemoPrinter = c.value(.showDemoPrinter, default: d.showDemoPrinter)
         measurementUnit = c.value(.measurementUnit, default: d.measurementUnit)
+        autoCheckUpdates = c.value(.autoCheckUpdates, default: d.autoCheckUpdates)
+        autoDownloadUpdates = c.value(.autoDownloadUpdates, default: d.autoDownloadUpdates)
+        skippedUpdateTag = c.optional(String.self, .skippedUpdateTag)
     }
 }
 

@@ -6,7 +6,7 @@ import LabelWerkKit
 struct AppSettingsView: View {
     @Environment(AppModel.self) private var model
 
-    private enum Tab: Hashable { case general, printing, advanced, about }
+    private enum Tab: Hashable { case general, printing, advanced, updates, about }
     @State private var tab: Tab = .general
 
     var body: some View {
@@ -20,6 +20,9 @@ struct AppSettingsView: View {
             AdvancedSettings()
                 .tabItem { Label(tr("Erweitert"), systemImage: "wrench.and.screwdriver") }
                 .tag(Tab.advanced)
+            UpdateSettingsView()
+                .tabItem { Label(tr("Updates"), systemImage: "arrow.triangle.2.circlepath") }
+                .tag(Tab.updates)
             AboutView()
                 .tabItem { Label(tr("Über"), systemImage: "info.circle") }
                 .tag(Tab.about)

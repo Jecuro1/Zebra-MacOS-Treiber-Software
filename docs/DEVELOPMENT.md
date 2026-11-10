@@ -258,6 +258,32 @@ BUILD=58 Scripts/ci_macos.sh --allow-publish release     # wirklich veröffentli
 Außerhalb von GitHub Actions verweigert `release` das Veröffentlichen ohne `--allow-publish`; in
 den Standardschritten von `Scripts/ci_macos.sh` ist es nicht enthalten.
 
+### In der App
+
+Der Update-Dienst der App besteht aus dem testbaren Kern in `Sources/LabelWerkKit/Update/`
+(`AppVersion`, `UpdateManifest`, `UpdateClient`, `UpdateInstaller`, `UpdateSchedule`, SHA-256;
+Tests `Tests/LabelWerkKitTests/Update*Tests.swift`, laufen auch auf Linux) und dem macOS-Teil:
+
+| Datei | Aufgabe |
+|---|---|
+| `Services/UpdateController.swift` | `@Observable` Zustand (`idle`, `checking`, `upToDate`, `available`, `downloading`, `readyToInstall`, `installing`, `failed`), Zeitplan (10 s nach dem Start, dann alle 6 h; nach Netzwerkfehlern nach 30 min), Laden nach `~/Library/Caches/com.labelwerk.app/Updates`, Installation über `osascript` (`do shell script … with administrator privileges`, Abbruch des Passwortdialogs = kein Fehler), Prüfung der installierten Version in `/Applications`, Neustart über einen losgelösten `/bin/sh`-Prozess und `NSApp.terminate` |
+| `Services/UpdateTokenStore.swift` | Zugriffstoken für private Repositorys im Schlüsselbund (generisches Passwort, Dienst `com.labelwerk.app.update`, Account = Repository) |
+| `Features/Updates/UpdateViews.swift` | Hinweis im Hauptfenster (`UpdateBanner`), Details-Sheet mit Änderungen (Markdown) und Fortschritt, Zeile im Menüleisten-Fenster |
+| `Features/Updates/UpdateSettingsView.swift` | Einstellungen › Updates |
+
+`AppModel` besitzt den `UpdateController` (`model.updates`) und startet ihn in `start()`.
+Einstellungen: `AppPreferences.autoCheckUpdates`, `autoDownloadUpdates` (beide Standard an),
+`skippedUpdateTag`. Das Repository kommt aus `LWUpdateRepository` der Info.plist; fehlt es (oder
+läuft die App ohne Bundle, z. B. mit `swift run`), ist der Dienst abgeschaltet und
+Einstellungen › Updates nennt den Grund.
+
+Von Hand ausprobieren (macOS): eine App mit kleiner Build-Nummer bauen und installieren
+(`BUILD=1 make pkg`, Paket installieren) – sie findet das neueste Release der CI als Update.
+Verglichen werden nur `CFBundleShortVersionString`/`CFBundleVersion` der laufenden App mit
+`version`/`build` des Manifests im neuesten Release. Für ein privates Repository den Token unter
+Einstellungen › Updates eintragen. Das Protokoll der letzten Installation steht in
+`~/Library/Logs/LabelWerk/Update.log`.
+
 ### Warum die App beim Update in /Applications landet
 
 Die App-Komponente des Pakets ist **nicht verschiebbar** (`BundleIsRelocatable = NO`): Sonst

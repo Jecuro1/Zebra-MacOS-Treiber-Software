@@ -1,10 +1,10 @@
 # LabelWerk installieren, einrichten und entfernen
 
-Diese Anleitung beschreibt die Installation des Pakets `LabelWerk-<Version>.pkg`, das Installieren
-von Netzwerkdruckern wie mit einem Windows-Treiberinstallationsprogramm, das Einrichten von
-Zebra-Druckern (in der App, mit `lwctl` oder in den macOS-Systemeinstellungen), das Drucken aus
-beliebigen Programmen, die Druckeinstellungen im Vergleich zum Windows-Treiber ZDesigner, das
-Entfernen und die Fehlersuche.
+Diese Anleitung beschreibt die Installation des Pakets `LabelWerk-<Version>.pkg`, die Updates aus
+der App heraus, das Installieren von Netzwerkdruckern wie mit einem
+Windows-Treiberinstallationsprogramm, das Einrichten von Zebra-Druckern (in der App, mit `lwctl`
+oder in den macOS-Systemeinstellungen), das Drucken aus beliebigen Programmen, die
+Druckeinstellungen im Vergleich zum Windows-Treiber ZDesigner, das Entfernen und die Fehlersuche.
 
 ## Voraussetzungen
 
@@ -89,7 +89,9 @@ xcrun stapler validate LabelWerk-1.0.0.pkg            # angeheftetes Notarisieru
 
 ### Aktualisieren
 
-Einfach das neuere Paket installieren. Vor der Installation entfernt das Paket die alte
+Am einfachsten aktualisiert sich LabelWerk selbst – siehe [Updates](#updates): Die App findet neue
+Versionen, lädt sie und installiert sie auf Knopfdruck. Von Hand genügt es, das neuere Paket zu
+installieren; die alte App muss dafür nicht gelöscht werden. Vor der Installation entfernt das Paket die alte
 Treiberversion vollständig (auch PPDs inzwischen entfallener Modelle). Bereits eingerichtete
 LabelWerk-Warteschlangen bleiben erhalten und werden anschließend automatisch auf die neuen
 PPD-Dateien umgestellt; die gewählten Standardoptionen (Schwärzung, Geschwindigkeit,
@@ -103,6 +105,118 @@ bietet **„Auf <Version> aktualisieren“** bzw. **„Erneut installieren“** 
 Rechte) an. Ist bereits ein *neuerer* Treiber installiert als der, den die App mitbringt (etwa nach
 einem Paket einer neueren LabelWerk-Version), ersetzt LabelWerk ihn nur nach ausdrücklicher
 Bestätigung durch die ältere Version – besser ist es dann, die App zu aktualisieren.
+
+## Updates
+
+LabelWerk bringt einen eigenen Update-Dienst mit: Neue Versionen erscheinen direkt in der App und
+lassen sich dort mit einem Klick installieren – ohne Download von GitHub und ohne die alte App
+vorher zu löschen.
+
+### So funktioniert es
+
+1. **Jede Änderung wird ein Update.** Besteht eine Änderung die automatischen Prüfungen (CI auf
+   macOS), veröffentlicht die CI sie als GitHub-Release „LabelWerk 1.1.0 (Build 58)“ mit dem
+   Installationspaket und der Datei `labelwerk-update.json` (Version, Größe, SHA-256-Prüfsumme,
+   Änderungen). Die Build-Nummer steigt mit jedem Lauf; eine höhere Build-Nummer gilt als neuere
+   Version, auch bei gleicher Versionsnummer.
+2. **Suchen.** LabelWerk sucht 10 Sekunden nach dem Start und danach alle 6 Stunden, solange die App
+   läuft (auch nur in der Menüleiste). Von Hand jederzeit über **LabelWerk › Nach Updates
+   suchen …**, das Symbol ⟳ unten im Menüleisten-Fenster, **Einstellungen › Updates › „Jetzt
+   suchen“** oder **Druckeinstellungen › Hilfe und Über**. Eine automatische Suche ohne Ergebnis
+   bleibt still.
+3. **Laden.** Ein gefundenes Update lädt LabelWerk sofort im Hintergrund und prüft Größe und
+   SHA-256-Prüfsumme – „Jetzt installieren“ beginnt dann ohne Wartezeit.
+4. **Hinweis.** Unten rechts im Hauptfenster erscheint **„Update verfügbar: LabelWerk 1.1.0
+   (Build 58)“** mit **Jetzt installieren**, **Details** (Änderungen, Größe, Datum, Fortschritt)
+   und **Später** (blendet den Hinweis bis zum nächsten Start aus). In den Details lässt sich eine
+   Version auch **überspringen**; sie erscheint dann erst wieder bei einer neueren Version oder
+   nach „Nach Updates suchen …“. Ist nur das Menüleisten-Fenster offen, zeigt es das Update mit
+   „Jetzt installieren“.
+5. **Installieren.** Nach **Jetzt installieren** fragt macOS einmal nach dem
+   Administratorpasswort (wie bei jedem Installationspaket). LabelWerk kopiert das Paket in einen
+   nur für das System beschreibbaren Ordner, prüft die Prüfsumme dort erneut und installiert es mit
+   `installer` nach `/Applications/LabelWerk.app` – samt Treiber und `lwctl`. Danach beendet sich
+   LabelWerk und startet in der neuen Version. Wird der Passwortdialog abgebrochen, passiert
+   nichts; das Update bleibt bereit. Solange ein Drucker beschäftigt ist (Druck, Übertragung,
+   Firmware), wartet die Installation.
+
+**Erhalten bleiben** Drucker, Einstellungen, Etikettenformate, Auftragsverlauf und Designer-Inhalt
+(`~/Library/Application Support/LabelWerk`) sowie die macOS-Warteschlangen mit ihren
+Standardoptionen – das Paket stellt sie wie bei jedem Update auf den neuen Treiber um (siehe
+[Aktualisieren](#aktualisieren)).
+
+Einstellungen unter **LabelWerk › Einstellungen … (⌘,) › Updates**:
+
+| Einstellung | Bedeutung |
+|---|---|
+| Automatisch nach Updates suchen | Suche nach dem Start und alle 6 Stunden (Standard: an) |
+| Updates automatisch laden | gefundene Updates sofort im Hintergrund laden (Standard: an); aus = „Jetzt installieren“ lädt erst dann |
+| Übersprungene Version › „Wieder anbieten“ | eine übersprungene Version wieder anzeigen |
+| Zugriff auf privates Repository | Zugriffstoken, solange das GitHub-Repository privat ist (siehe unten) |
+
+Geladene Pakete liegen in `~/Library/Caches/com.labelwerk.app/Updates` (nach dem Update entfernt
+LabelWerk sie wieder), das Protokoll der letzten Installation in
+`~/Library/Logs/LabelWerk/Update.log`.
+
+### Einmalig: die erste Version mit Update-Dienst
+
+Den Update-Dienst gibt es ab LabelWerk 1.1.0. Wer eine ältere Version hat, installiert **einmal**
+das aktuelle Paket von Hand – danach kommen alle weiteren Versionen über die App:
+
+1. Auf GitHub im Repository **Releases** öffnen, beim neuesten Release (oben, „Latest“) unter
+   **Assets** die Datei `LabelWerk-<Version>-<Build>.pkg` laden.
+2. Das Paket doppelklicken und installieren. Die alte App muss nicht gelöscht werden – das Paket
+   ersetzt `/Applications/LabelWerk.app`.
+3. CI-Pakete sind nicht notarisiert: Meldet macOS, dass das Paket nicht geprüft werden kann, unter
+   **Systemeinstellungen › Datenschutz & Sicherheit** „Dennoch öffnen“ wählen (siehe
+   [Gatekeeper](#gatekeeper)). Updates aus der App heraus betrifft das nicht – `installer` prüft
+   nicht über Gatekeeper.
+
+### Privates Repository
+
+Solange das GitHub-Repository **privat** ist, sind die Releases ohne Anmeldung nicht erreichbar;
+LabelWerk meldet dann „Kein veröffentlichtes Update gefunden …“. Zwei Möglichkeiten:
+
+* **Repository öffentlich machen** (dann ist nichts weiter nötig): auf GitHub im Repository
+  **Settings › General › Danger Zone › Change repository visibility › Make public**.
+* **Zugriffstoken in LabelWerk eintragen** – ein *fine-grained personal access token*, der nur
+  dieses eine Repository lesen darf:
+  1. Auf github.com oben rechts auf das Profilbild › **Settings** › **Developer settings** ›
+     **Personal access tokens** › **Fine-grained tokens** › **Generate new token** (direkt:
+     <https://github.com/settings/personal-access-tokens/new>; in LabelWerk führt
+     „Token auf GitHub anlegen …“ dorthin).
+  2. **Token name** z. B. „LabelWerk-Updates“, **Expiration** wählen (z. B. 1 Jahr – danach einen
+     neuen Token eintragen).
+  3. **Resource owner**: das Konto, dem das Repository gehört.
+  4. **Repository access** › **Only select repositories** › das LabelWerk-Repository
+     (`Jecuro1/Zebra-MacOS-Treiber-Software`).
+  5. **Permissions** › **Repository permissions** › **Contents** auf **Read-only** stellen
+     („Metadata: Read-only“ setzt GitHub automatisch). Keine weiteren Rechte vergeben.
+  6. **Generate token** und den Token (beginnt mit `github_pat_`) kopieren – GitHub zeigt ihn nur
+     einmal an.
+  7. In LabelWerk **Einstellungen › Updates › Zugriff auf privates Repository**: Token einfügen,
+     **Speichern**. LabelWerk sucht sofort; der Status zeigt „LabelWerk ist auf dem neuesten
+     Stand.“ oder das gefundene Update.
+
+  Der Token liegt ausschließlich im Schlüsselbund dieses Macs (Eintrag „LabelWerk – GitHub (…)“,
+  Dienst `com.labelwerk.app.update`) und wird nur an `github.com`/`api.github.com` gesendet, nie an
+  die Download-Server, auf die GitHub weiterleitet. **Entfernen** löscht ihn wieder. Jeder Mac
+  braucht einen eigenen Eintrag (derselbe Token darf mehrfach verwendet werden). Weil CI-Builds
+  nur ad hoc signiert sind, kann macOS nach einem Update einmal fragen, ob LabelWerk auf den
+  Schlüsselbund-Eintrag zugreifen darf – mit dem Anmeldepasswort und **Immer erlauben**
+  bestätigen.
+
+### Wenn ein Update nicht klappt
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| „Kein veröffentlichtes Update gefunden …“ | Es gibt noch kein Release mit `labelwerk-update.json`, oder das Repository ist privat und es fehlt ein Token (siehe oben). |
+| „Der Zugriff auf die Updates wurde verweigert …“ | Token abgelaufen, widerrufen oder ohne „Contents: Read-only“ für dieses Repository – neuen Token anlegen und speichern. |
+| „GitHub hat vorübergehend zu viele Anfragen gezählt …“ | GitHub begrenzt die Zahl der Anfragen zeitweise; später erneut suchen (LabelWerk versucht es nach 30 Minuten selbst). |
+| „Das neueste Update benötigt macOS … oder neuer.“ | Das Update setzt eine neuere macOS-Version voraus; es wird nicht angeboten. |
+| „Die geladene Update-Datei ist beschädigt …“ | Prüfsumme falsch (Übertragungsfehler oder veränderte Datei) – die Datei wird verworfen, **Erneut versuchen** lädt neu. |
+| „Das Update konnte nicht installiert werden …“ | Details in `~/Library/Logs/LabelWerk/Update.log`; das Paket lässt sich auch von Hand installieren (`sudo installer -pkg … -target /`). |
+| Hinweis „LabelWerk läuft nicht aus dem Ordner ‚Programme‘“ | Das Update ersetzt immer `/Applications/LabelWerk.app` und startet diese. Eine Kopie an anderer Stelle (Downloads, Build-Ordner) bleibt alt – am besten löschen. |
 
 ## Netzwerkdrucker (LAN) installieren
 
@@ -590,6 +704,9 @@ sudo rm -rf /Library/Printers/LabelWerk /Applications/LabelWerk.app
 sudo rm -f /Library/Printers/PPDs/Contents/Resources/LabelWerk-*.ppd.gz /usr/local/bin/lwctl
 sudo pkgutil --forget com.labelwerk.app.pkg; sudo pkgutil --forget com.labelwerk.app.driver
 sudo launchctl kickstart -k system/org.cups.cupsd
+# Benutzerdaten (optional): Daten, Update-Pakete, Update-Protokoll, Zugriffstoken im Schlüsselbund
+rm -rf ~/Library/Application\ Support/LabelWerk ~/Library/Caches/com.labelwerk.app ~/Library/Logs/LabelWerk
+security delete-generic-password -s com.labelwerk.app.update
 ```
 
 ## Fehlerbehebung

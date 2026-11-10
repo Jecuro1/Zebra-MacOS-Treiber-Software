@@ -47,6 +47,7 @@ druckt. Dazu kommen ein Kommandozeilenwerkzeug (`lwctl`) und ein virtueller Demo
 | Verbindungen | USB, Netzwerk | **USB, Netzwerk (TCP 9100), Bluetooth, Bluetooth LE, macOS-Warteschlangen** + automatische Suche (Bonjour, USB, Subnetz-Scan, CUPS, Bluetooth) |
 | Ausprobieren ohne Drucker | – | ✔ **Demo-Drucker** – vollständig simulierter ZD421t in der App; mit `lwctl virtual-printer` auch als Netzwerkdrucker |
 | Kommandozeile | – | ✔ `lwctl` (macOS & Linux): Status, Drucken, Rendern, SGD, Dateien, Firmware, Terminal, virtueller Drucker |
+| Updates | neues Treiberpaket von Hand laden und installieren | ✔ **eingebauter Update-Dienst:** jede Änderung, die die CI besteht, erscheint als Update in der App („Update verfügbar“), wird im Hintergrund geladen und geprüft (SHA-256) und mit **„Jetzt installieren“** installiert – LabelWerk startet danach neu; Drucker, Einstellungen und Warteschlangen bleiben erhalten, die alte App muss nicht gelöscht werden ([Updates](docs/INSTALLATION.md#updates), auch für private Repositorys) |
 
 ## Die App im Überblick
 
@@ -74,7 +75,8 @@ Netzwerkschnittstelle):
 Dazu kommen der **Etiketten-Designer**, der **Auftragsverlauf**, **Treiber & Warteschlangen**
 (Treiber installieren, aktualisieren, reparieren; macOS-Warteschlangen anlegen, synchronisieren,
 entfernen; Diagnose), die **Druckersuche** mit Radar, ein **Einrichtungsassistent** für den ersten
-Start, das **Menüleisten-Fenster** und Systemmitteilungen. Die Oberfläche ist auf Deutsch und
+Start, das **Menüleisten-Fenster**, Systemmitteilungen und der **Update-Dienst** (LabelWerk ›
+Nach Updates suchen …, Einstellungen › Updates). Die Oberfläche ist auf Deutsch und
 Englisch verfügbar und respektiert „Bewegung reduzieren“.
 
 ## Schnellstart

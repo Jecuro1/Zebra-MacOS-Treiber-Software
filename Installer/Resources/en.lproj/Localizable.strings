@@ -8,6 +8,7 @@
  */
 
 /* MARK: App/LabelWerkApp.swift */
+"Nach Updates suchen …" = "Check for Updates…";
 "Drucker hinzufügen …" = "Add Printer…";
 "Drucker installieren …" = "Install Printer…";
 "Demo-Drucker hinzufügen" = "Add Demo Printer";
@@ -1933,6 +1934,9 @@
 "Über" = "About";
 "Treiber und Steuerzentrale für Zebra-Etikettendrucker" = "Driver and control center for Zebra label printers";
 "App-Version" = "App version";
+"Updates" = "Updates";
+"Nach Updates suchen" = "Check for Updates";
+"Update ansehen" = "View Update";
 
 /* MARK: Features/Preferences/PrintPrefsSetupPanes.swift */
 "Benutzerdefiniert" = "Custom";
@@ -2839,6 +2843,50 @@
 "Über die Warteschlange „%@“." = "Via the queue “%@”.";
 "Testseite fehlgeschlagen" = "Test page failed";
 
+/* MARK: Features/Updates/UpdateSettingsView.swift */
+"Installierte Version" = "Installed version";
+"Update-Quelle" = "Update source";
+"Alle Versionen auf GitHub öffnen" = "Open all versions on GitHub";
+"LabelWerk läuft nicht aus dem Ordner „Programme“. Updates werden als „%@“ installiert und von dort gestartet." = "LabelWerk is not running from the Applications folder. Updates are installed as “%@” and launched from there.";
+"Automatisch" = "Automatic";
+"Automatisch nach Updates suchen" = "Automatically check for updates";
+"Updates automatisch laden" = "Automatically download updates";
+"LabelWerk sucht kurz nach dem Start und danach alle 6 Stunden. Installiert wird erst, wenn du „Jetzt installieren“ wählst – macOS fragt dann nach dem Administratorpasswort, und LabelWerk startet von selbst neu." = "LabelWerk checks shortly after launch and every 6 hours after that. Nothing is installed until you choose “Install Now” – macOS then asks for an administrator password, and LabelWerk restarts by itself.";
+"Details …" = "Details…";
+"Übersprungene Version" = "Skipped version";
+"Wieder anbieten" = "Offer Again";
+"Zugriff auf privates Repository" = "Access to a private repository";
+"Nur nötig, solange das GitHub-Repository privat ist. Dafür auf GitHub einen „Fine-grained personal access token“ nur für dieses Repository mit der Berechtigung „Contents: Read-only“ anlegen und hier einfügen. Der Token liegt ausschließlich im Schlüsselbund dieses Macs." = "Only needed while the GitHub repository is private. Create a “fine-grained personal access token” on GitHub for this repository only, with the permission “Contents: Read-only”, and paste it here. The token is stored only in this Mac’s keychain.";
+"Zugriffstoken" = "Access token";
+"Im Schlüsselbund gespeichert" = "Stored in the keychain";
+"Keiner gespeichert" = "None stored";
+"Token einfügen (github_pat_…)" = "Paste token (github_pat_…)";
+"Token auf GitHub anlegen …" = "Create Token on GitHub…";
+"Zugriffstoken entfernen?" = "Remove access token?";
+"Ohne Token findet LabelWerk keine Updates, solange das Repository privat ist." = "Without a token, LabelWerk cannot find updates while the repository is private.";
+"Zuletzt gesucht: %@" = "Last checked: %@";
+"Jetzt suchen" = "Check Now";
+"Gespeichert. LabelWerk sucht jetzt mit dem Token nach Updates." = "Saved. LabelWerk is now checking for updates with the token.";
+"Der Token wurde aus dem Schlüsselbund entfernt." = "The token was removed from the keychain.";
+
+/* MARK: Features/Updates/UpdateViews.swift */
+"Wird geladen …" = "Downloading…";
+"Wird geladen … %d %%" = "Downloading… %d %%";
+"Geladen und geprüft – die Installation dauert nur einen Moment." = "Downloaded and verified – installation only takes a moment.";
+"Wird installiert … macOS fragt nach dem Administratorpasswort." = "Installing… macOS asks for an administrator password.";
+"Veröffentlicht am %@ · %@" = "Published on %@ · %@";
+"Update verfügbar: LabelWerk %@" = "Update available: LabelWerk %@";
+"Später" = "Later";
+"Neue Version verfügbar" = "New version available";
+"LabelWerk %@" = "LabelWerk %@";
+"Installiert: %@" = "Installed: %@";
+"Drucker, Einstellungen, Etikettenformate, Verlauf und macOS-Warteschlangen bleiben erhalten. LabelWerk startet nach der Installation von selbst neu." = "Printers, settings, label formats, history and macOS queues are kept. LabelWerk restarts by itself after the installation.";
+"Diese App läuft nicht aus dem Ordner „Programme“. Das Update wird als „%@“ installiert und von dort gestartet." = "This app is not running from the Applications folder. The update is installed as “%@” and launched from there.";
+"Laden abbrechen" = "Cancel Download";
+"Diese Version überspringen" = "Skip This Version";
+"Installiert ist Version %@." = "Installed version: %@.";
+"Für diese Version liegen keine Änderungsnotizen vor." = "There are no release notes for this version.";
+
 /* MARK: Model/AppModel.swift */
 "Virtuell" = "Virtual";
 
@@ -2987,6 +3035,43 @@
 "macOS-Drucker aktualisiert" = "macOS printer updated";
 "Alle Programme drucken auf „%@“ mit den Einstellungen aus LabelWerk." = "All apps print to “%@” with the settings from LabelWerk.";
 
+/* MARK: Services/UpdateController.swift */
+"Updates gibt es nur für die installierte App – ohne App-Bundle ist keine Version bekannt." = "Updates are only available for the installed app – without an app bundle, the version is unknown.";
+"In dieser App ist kein Update-Repository hinterlegt (Info.plist: LWUpdateRepository). Der Update-Dienst ist abgeschaltet." = "This app has no update repository configured (Info.plist: LWUpdateRepository). The update service is turned off.";
+"Noch nicht nach Updates gesucht." = "Not checked for updates yet.";
+"Suche nach Updates …" = "Checking for updates…";
+"LabelWerk ist auf dem neuesten Stand." = "LabelWerk is up to date.";
+"LabelWerk %@ wird geladen … %d %%" = "Downloading LabelWerk %@… %d %%";
+"LabelWerk %@ ist geladen und bereit zur Installation." = "LabelWerk %@ is downloaded and ready to install.";
+"LabelWerk %@ wird installiert …" = "Installing LabelWerk %@…";
+"Updates sind nicht verfügbar" = "Updates are not available";
+"Suche nach Updates fehlgeschlagen" = "Checking for updates failed";
+"LabelWerk ist auf dem neuesten Stand" = "LabelWerk is up to date";
+"Update wartet auf einen Drucker" = "Update is waiting for a printer";
+"Ein Drucker ist gerade beschäftigt (Druck, Übertragung oder Firmware). Bitte nach dem Ende erneut „Jetzt installieren“ wählen." = "A printer is busy (printing, transfer or firmware). Please choose “Install Now” again when it has finished.";
+"LabelWerk möchte das Update %@ installieren." = "LabelWerk wants to install the update %@.";
+"Das Update konnte nicht installiert werden: %@" = "The update could not be installed: %@";
+"Das Paket wurde installiert, aber die App wurde nicht unter „%@“ gefunden." = "The package was installed, but the app was not found at “%@”.";
+"Das Paket wurde installiert, aber „%@“ hat weiterhin Version %@. Details stehen im Protokoll %@." = "The package was installed, but “%@” still has version %@. Details are in the log %@.";
+"Bitte LabelWerk beenden und erneut öffnen." = "Please quit LabelWerk and open it again.";
+"Update installiert" = "Update installed";
+"Der Token ist ungültig. Bitte den vollständigen Token von GitHub einfügen (ohne Leerzeichen)." = "The token is invalid. Please paste the complete token from GitHub (without spaces).";
+"Kein veröffentlichtes Update gefunden. Entweder gibt es noch keine Update-Version, oder das Repository ist privat – dann ist unter „Einstellungen › Updates“ ein gültiger Zugriffstoken nötig." = "No published update was found. Either there is no update version yet, or the repository is private – then a valid access token is required in “Settings › Updates”.";
+"Der Zugriff auf die Updates wurde verweigert. Bitte den Zugriffstoken unter „Einstellungen › Updates“ prüfen (Lesezugriff auf die Inhalte des Repositorys)." = "Access to the updates was denied. Please check the access token in “Settings › Updates” (read access to the repository contents).";
+"GitHub hat vorübergehend zu viele Anfragen gezählt. Bitte später erneut nach Updates suchen." = "GitHub has temporarily counted too many requests. Please check for updates again later.";
+"Der Update-Server ist nicht erreichbar: %@" = "The update server cannot be reached: %@";
+"Die Update-Informationen sind ungültig: %@" = "The update information is invalid: %@";
+"Die geladene Update-Datei ist beschädigt (die Prüfsumme stimmt nicht). Bitte erneut laden." = "The downloaded update file is damaged (the checksum does not match). Please download it again.";
+"Die geladene Update-Datei ist unvollständig (die Größe stimmt nicht). Bitte erneut laden." = "The downloaded update file is incomplete (the size does not match). Please download it again.";
+"Das neueste Update benötigt macOS %@ oder neuer." = "The latest update requires macOS %@ or later.";
+"Das Update wurde abgebrochen." = "The update was cancelled.";
+"Das Update konnte nicht installiert werden: Die Update-Datei ließ sich nicht kopieren." = "The update could not be installed: the update file could not be copied.";
+"unbekannter Fehler (Protokoll: %@)" = "unknown error (log: %@)";
+
+/* MARK: Services/UpdateTokenStore.swift */
+"Der Schlüsselbund meldet einen Fehler: %@" = "The keychain reports an error: %@";
+"Zugriffstoken für LabelWerk-Updates" = "Access token for LabelWerk updates";
+
 /* MARK: Dynamisch: LabelWerkCore/Commands/PrinterAction.swift (displayName, detail) */
 "Berichte & Testdrucke" = "Reports & Test Prints";
 "Medien & Sensoren" = "Media & Sensors";
@@ -3051,7 +3136,6 @@
 "Druckzeit starten" = "Job start";
 "Jedes Etikett" = "Every label";
 "Jede Minute" = "Every minute";
-"Automatisch" = "Automatic";
 "Länge messen" = "Measure length";
 "Keine Bewegung" = "No motion";
 "Kurzkalibrierung" = "Short calibration";

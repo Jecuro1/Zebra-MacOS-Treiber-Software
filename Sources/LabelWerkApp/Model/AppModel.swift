@@ -55,6 +55,9 @@ final class AppModel {
     /// Hält die macOS-Warteschlangen der Drucker auf dem Stand der gespeicherten Einstellungen
     /// (Etikettengröße, Treiberoptionen) – nach Änderungen und einmal nach dem Start.
     @ObservationIgnored private(set) var queueSync: QueueSyncService!
+    /// Update-Dienst: sucht, lädt und installiert neue LabelWerk-Versionen aus den GitHub-Releases
+    /// (eigenes `@Observable`-Modell – Ansichten beobachten dessen Zustand direkt).
+    @ObservationIgnored private(set) var updates: UpdateController!
 
     // MARK: Init
 
@@ -62,6 +65,7 @@ final class AppModel {
         VirtualPrinter.registerWithConnectionFactory()
         restore()
         queueSync = QueueSyncService(model: self)
+        updates = UpdateController(model: self)
     }
 
     private func restore() {
@@ -98,6 +102,8 @@ final class AppModel {
         // Warteschlangen älterer Versionen (ohne benannte Etikettengröße, lwLabelWidth …) einmalig
         // abgleichen – still, ohne Passwortabfrage, nur bei Abweichungen.
         queueSync.syncAtLaunch()
+        // Update-Suche: 10 s nach dem Start, danach alle 6 Stunden (abschaltbar in Einstellungen › Updates).
+        updates.start()
         guard preferences.autoConnect else { return }
         for session in sessions {
             Task { await session.connect() }

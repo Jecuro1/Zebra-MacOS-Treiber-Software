@@ -83,6 +83,15 @@ struct LabelWerkCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
+        // App-Menü unter „Über LabelWerk“: Update-Dienst (Details erscheinen im Hauptfenster).
+        CommandGroup(after: .appInfo) {
+            Button(tr("Nach Updates suchen …")) {
+                NSApp.activate(ignoringOtherApps: true)
+                _ = MainWindow.bringToFront()
+                model.updates.checkNow(userInitiated: true)
+            }
+            .disabled(model.updates.isInstalling)
+        }
         // Ersetzt „Neues Fenster“: Es gibt genau ein Hauptfenster (alle Fenster teilten sich sonst
         // dieselben Sheets wie „Drucker hinzufügen“). Die Menüleiste holt es nach vorn.
         CommandGroup(replacing: .newItem) {

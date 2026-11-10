@@ -38,6 +38,8 @@ SwiftUI-App für macOS 14+ (Swift-5-Sprachmodus, Observation-Framework). Quellte
 | `Model/PrinterSession.swift` | `PrinterSession` (Verbindung, Status, alle Geräteoperationen) |
 | `Model/PersistenceStore.swift` | JSON-Persistenz |
 | `Services/ProcessRunner.swift` | Prozesse, Admin-Rechte via osascript |
+| `Services/UpdateController.swift` | Update-Dienst (`model.updates`, `@Observable`): Suchen (10 s nach dem Start, alle 6 h), Laden, Installieren mit Administratorrechten und Neustart; Kern in `LabelWerkKit/Update` |
+| `Services/UpdateTokenStore.swift` | Zugriffstoken für private Repositorys im Schlüsselbund |
 | `Services/CUPSService.swift` | Warteschlangen anlegen/ändern/entfernen, PPD-Suche, Treiberstatus |
 | `Services/NotificationService.swift` | Systembenachrichtigungen, `SoundService` |
 | `Services/ImageImport.swift` | Bild/PDF → `CGImage`/`GrayImage`, Einpassen (`ImageFitMode`), `MonoBitmap`/`GrayImage` → `CGImage`/`NSImage` |
@@ -153,4 +155,5 @@ mit RFID-Option).
 | `Features/Discovery` | `DiscoveryView()`, `AddPrinterView(initialTab: DiscoveryPanelTab = .search)` | Suche (Bonjour, USB, Netzwerk, CUPS, Bluetooth) mit Radar-Animation, manuelles Hinzufügen, Warnung bei Geräten, die sich nicht als Zebra-Drucker zu erkennen geben | ✔ implementiert |
 | `Features/Onboarding` | `OnboardingView()` | Erststart-Assistent (Willkommen → Treiber → Drucker → Mitteilungen → Fertig) | ✔ implementiert |
 | `Features/MenuBar` | `MenuBarView()` | Menüleisten-Fenster: alle Drucker mit Status, Schnellaktionen | ✔ implementiert |
-| `Features/Settings` | `AppSettingsView()` | App-Einstellungen (`AppPreferences`) | ✔ implementiert |
+| `Features/Settings` | `AppSettingsView()` | App-Einstellungen (`AppPreferences`), Tabs Allgemein, Drucken, Erweitert, Updates, Über | ✔ implementiert |
+| `Features/Updates` | `UpdateBanner()`, `UpdateDetailsSheet()`, `UpdateSettingsView()`, `UpdateMenuBarSection(openMain:)` | Update-Dienst: Hinweis „Update verfügbar“ über den Toasts im Hauptfenster, Details-Sheet (Änderungen als Markdown, Fortschritt, Jetzt installieren/Später/Überspringen), Einstellungen › Updates (automatisch suchen/laden, Jetzt suchen, Token für private Repositorys), Zeile im Menüleisten-Fenster; Menü „LabelWerk › Nach Updates suchen …“, Druckeinstellungen › Hilfe und Über | ✔ implementiert |

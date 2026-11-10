@@ -1210,5 +1210,8 @@ Der Filter verarbeitet alle Rasterformate robust (1/8/16 Bit, W/SW/K/RGB → Lum
   (Übersicht, Einstellungen, Etiketten, Werkzeuge, Terminal, Designer, Dateien & Schriften,
   Netzwerk, Firmware, Verlauf, Treiber).
 * Menüleisten-Extra mit Live-Status, Benachrichtigungen bei Fehlern.
+* Update-Dienst: `UpdateController` (`Services/`, Oberfläche in `Features/Updates/`) auf dem Kern
+  `LabelWerkKit/Update` – sucht, lädt und installiert Releases des Repositorys aus
+  `LWUpdateRepository` (Info.plist); Ablauf in `docs/DEVELOPMENT.md` („Release und Updates“).
 * Persistenz: JSON in `~/Library/Application Support/LabelWerk/`.
 * Lokalisierung: `tr("Deutscher Text")` → `Bundle.main` (`en.lproj/Localizable.strings`).

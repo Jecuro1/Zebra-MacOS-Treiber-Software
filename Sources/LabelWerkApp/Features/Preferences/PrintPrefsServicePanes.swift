@@ -414,6 +414,7 @@ struct PrintPrefsUnitsPane: View {
 struct PrintPrefsAboutPane: View {
     let context: PrintPrefsContext
     let onShowHelp: () -> Void
+    @Environment(AppModel.self) private var model
 
     init(context: PrintPrefsContext, onShowHelp: @escaping () -> Void) {
         self.context = context
@@ -450,6 +451,7 @@ struct PrintPrefsAboutPane: View {
                 }
                 .padding(.bottom, 6)
                 KeyValueRow(tr("App-Version"), appVersion, monospaced: true)
+                updateRow
                 KeyValueRow(tr("Treiberversion"), CUPSService.installedDriverVersion ?? tr("Nicht installiert"),
                             monospaced: true)
                 KeyValueRow(tr("Drucker"), session.displayName)
@@ -465,5 +467,25 @@ struct PrintPrefsAboutPane: View {
                 KeyValueRow(tr("macOS-Warteschlange"), session.saved.cupsQueueName ?? tr("Keine"))
             }
         }
+    }
+
+    /// Update-Dienst: Status und „Nach Updates suchen“ (bzw. „Update ansehen“, wenn eins bereitsteht).
+    private var updateRow: some View {
+        let updates: UpdateController = model.updates
+        let hasUpdate = updates.update != nil
+        return PrintPrefsActionRow(title: tr("Updates"),
+                                   detail: updates.statusText,
+                                   systemImage: "arrow.triangle.2.circlepath",
+                                   tint: hasUpdate ? Theme.violet : Theme.teal,
+                                   buttonTitle: hasUpdate ? tr("Update ansehen") : tr("Nach Updates suchen"),
+                                   isBusy: updates.isChecking || updates.isDownloading || updates.isInstalling,
+                                   isEnabled: !updates.isInstalling && (hasUpdate || !updates.isChecking)) {
+            if hasUpdate {
+                updates.showDetails()
+            } else {
+                updates.checkNow(userInitiated: true)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

@@ -9,6 +9,7 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var updates: UpdateController = model.updates
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 230, ideal: Theme.Metrics.sidebarWidth, max: 340)
@@ -18,8 +19,24 @@ struct RootView: View {
         .navigationSplitViewStyle(.balanced)
         .background(MainWindowRegistrar())
         .overlay(alignment: .bottomTrailing) {
-            ToastOverlay()
-                .padding(Theme.Metrics.paddingLarge)
+            VStack(alignment: .trailing, spacing: 10) {
+                // „Update verfügbar“ (Update-Dienst) über den Hinweisen.
+                if updates.showsBanner {
+                    UpdateBanner()
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .opacity.combined(with: .scale(scale: 0.95))
+                        ))
+                }
+                ToastOverlay()
+            }
+            .padding(Theme.Metrics.paddingLarge)
+            .animation(Motion.animation(Motion.spring, reduceMotion: model.reducesMotion), value: updates.showsBanner)
+        }
+        .sheet(isPresented: $updates.isDetailsPresented) {
+            UpdateDetailsSheet()
+                .environment(model)
+                .environment(\.appReduceMotion, model.preferences.reduceMotion)
         }
         .sheet(isPresented: $model.isOnboardingPresented) {
             OnboardingView()

@@ -6,6 +6,17 @@ import LabelWerkKit
 struct MenuBarView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    /// Nach „Nach Updates suchen …“ kurz das Ergebnis zeigen (auch „ist aktuell“).
+    @State private var showsUpdateFeedback = false
+
+    /// Update-Zeile zeigen: gefundenes (nicht übersprungenes) Update oder Rückmeldung zur Suche.
+    private var showsUpdateSection: Bool {
+        let updates: UpdateController = model.updates
+        if let update = updates.update, !updates.isSkipped(update) { return true }
+        return showsUpdateFeedback
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,11 +52,26 @@ struct MenuBarView: View {
                 }
                 .frame(maxHeight: 420)
             }
+            if showsUpdateSection {
+                UpdateMenuBarSection(openMain: openMain)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             Divider().opacity(0.4)
             footer
         }
         .frame(width: 360)
         .background(AnimatedBackground(style: .subtle))
+        .animation(Motion.animation(Motion.spring, reduceMotion: systemReduceMotion || appReduceMotion),
+                   value: showsUpdateSection)
+        .task(id: model.updates.isChecking) {
+            // Ergebnis der Suche einige Sekunden stehen lassen; ein gefundenes Update bleibt sichtbar.
+            guard showsUpdateFeedback, !model.updates.isChecking else { return }
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            showsUpdateFeedback = false
+        }
     }
 
     private var header: some View {
@@ -83,6 +109,16 @@ struct MenuBarView: View {
             }
             .buttonStyle(.labelWerkPlain)
             Spacer()
+            Button {
+                showsUpdateFeedback = true
+                model.updates.checkNow(userInitiated: true, feedback: .inline)
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(.labelWerkPlain)
+            .disabled(model.updates.isChecking || model.updates.isInstalling)
+            .help(tr("Nach Updates suchen …"))
+            .accessibilityLabel(tr("Nach Updates suchen …"))
             SettingsLink {
                 Image(systemName: "gearshape")
             }
