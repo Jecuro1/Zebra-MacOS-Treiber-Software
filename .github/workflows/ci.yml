@@ -21,7 +21,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Manuelle Läufe (macOS) bilden eine eigene Gruppe und werden nicht durch Pushes abgebrochen.
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   # Auf „main“ jeden Lauf zu Ende führen, sonst überholte Läufe abbrechen.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
