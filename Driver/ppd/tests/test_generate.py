@@ -1011,7 +1011,8 @@ class CommandLineTests(unittest.TestCase):
 # Prüfung mit CUPS selbst
 # ---------------------------------------------------------------------------------------------
 
-SIZE_WARNING = re.compile(r'^WARN\s+Size "w\d+h\d+" should be the Adobe standard name ".+"\.$')
+# cupstestppd setzt je nach Plattform gerade („…") oder typografische (“…”) Anführungszeichen (macOS).
+SIZE_WARNING = re.compile(r'^WARN\s+Size ["“]w\d+h\d+["”] should be the Adobe standard name ["“].+["”]\.$')
 
 #: PPDs für die strenge Prüfung: ZPL+EPL2, reines EPL2, generisch CPCL.
 STRICT_SAMPLE = ("LabelWerk-zd421t-203dpi", "LabelWerk-lp2844-203dpi", "LabelWerk-generic-cpcl-203dpi")
@@ -1032,7 +1033,7 @@ INSTALLED_FILE_MODES = {
     "APPrinterIconPath": 0o444,
     "APPrinterUtilityPath": 0o555,
 }
-BAD_PERMISSIONS = re.compile(r'^\*\*FAIL\*\*\s+Bad permissions on (?P<kind>\w+) file "(?P<path>.+)"\.$')
+BAD_PERMISSIONS = re.compile(r'^\*\*FAIL\*\*\s+Bad permissions on (?P<kind>\w+) file ["“](?P<path>.+)["”]\.$')
 
 
 def build_installed_layout(base: Path) -> Path:
@@ -1164,7 +1165,7 @@ class CupsTestPPDTests(unittest.TestCase):
             result = gen.run_cupstestppd(sample, extra_args=("-R", str(root)))[0]
             ownership, other = split_ownership_failures(result.errors, root)
             self.assertEqual(len(other), 1, result.errors)
-            self.assertRegex(other[0], r'Bad permissions on cupsFilter file ".*rastertolabelwerk"')
+            self.assertRegex(other[0], r'Bad permissions on cupsFilter file ["“].*rastertolabelwerk["”]')
             program.chmod(0o755)
 
             # Ebenso fehlende Dateien und Meldungen zu Pfaden außerhalb des Wurzelverzeichnisses.
