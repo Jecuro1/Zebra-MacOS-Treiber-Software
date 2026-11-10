@@ -1,0 +1,124 @@
+#!/bin/bash
+# shellcheck disable=SC1111  # Deutsche Anführungszeichen („…“) in Meldungen sind beabsichtigt.
+#
+# LabelWerk – postinstall der Treiberkomponente
+#
+# Wird vom macOS-Installer als root aufgerufen: $1 = Paketpfad, $2 = Zielort, $3 = Zielvolume.
+#
+#  1. Besitzer und Rechte festziehen: CUPS führt Filter nur aus, wenn sie root:wheel gehören und
+#     weder für Gruppe noch für andere schreibbar sind (sonst „Filter … has insecure permissions“).
+#  2. Quarantäne-Attribute entfernen.
+#  3. Nur auf dem Startvolume: cupsd neu starten, damit Filter und PPDs sofort bekannt sind, und
+#     vorhandene LabelWerk-Warteschlangen auf die neuen PPDs aktualisieren. CUPS übernimmt dabei
+#     die bisher gewählten Standardoptionen der Warteschlange.
+#
+# Fehler beim Neustart oder Aktualisieren brechen die Installation nicht ab (der Treiber ist dann
+# trotzdem installiert); sie werden in /var/log/install.log protokolliert.
+
+set -euo pipefail
+
+TARGET="${3:-/}"
+TARGET="${TARGET%/}"
+DRIVER_DIR="${TARGET}/Library/Printers/LabelWerk"
+PPD_DIR="${TARGET}/Library/Printers/PPDs/Contents/Resources"
+CUPS_PPD_DIR="${TARGET}/etc/cups/ppd"
+LPADMIN="/usr/sbin/lpadmin"
+LPSTAT="/usr/bin/lpstat"
+
+log() {
+    printf 'LabelWerk postinstall: %s\n' "$*"
+}
+
+if [[ ! -d "${DRIVER_DIR}/Filter" ]]; then
+    log "Fehler: Filterordner fehlt (${DRIVER_DIR}/Filter)."
+    exit 1
+fi
+
+# --- 1. Besitzer und Rechte ------------------------------------------------------------------
+# Numerische IDs: 0:0 ist root:wheel auf macOS.
+chown -R 0:0 "${DRIVER_DIR}"
+find "${DRIVER_DIR}" -type d -exec chmod 755 {} +
+find "${DRIVER_DIR}" -type f -exec chmod 644 {} +
+for executable in "${DRIVER_DIR}"/Filter/* "${DRIVER_DIR}/uninstall.sh"; do
+    [[ -f "${executable}" ]] || continue
+    chmod 755 "${executable}"
+done
+ppd_count=0
+for ppd in "${PPD_DIR}"/LabelWerk-*.ppd.gz "${PPD_DIR}"/LabelWerk-*.ppd; do
+    [[ -f "${ppd}" ]] || continue
+    chown 0:0 "${ppd}"
+    chmod 644 "${ppd}"
+    ppd_count=$((ppd_count + 1))
+done
+log "Rechte gesetzt: $(find "${DRIVER_DIR}/Filter" -type f | wc -l | tr -d ' ') Filter, ${ppd_count} PPD-Dateien."
+
+# --- 2. Quarantäne ---------------------------------------------------------------------------
+if command -v xattr >/dev/null 2>&1; then
+    xattr -dr com.apple.quarantine "${DRIVER_DIR}" 2>/dev/null || true
+fi
+
+# --- 3. CUPS ---------------------------------------------------------------------------------
+if [[ -n "${TARGET}" ]]; then
+    log "Installation auf ${TARGET} (nicht das Startvolume) – CUPS wird nicht neu gestartet."
+    exit 0
+fi
+
+restart_cups() {
+    if launchctl kickstart -k system/org.cups.cupsd >/dev/null 2>&1; then
+        log "cupsd neu gestartet (launchctl kickstart)."
+    elif killall -HUP cupsd >/dev/null 2>&1; then
+        log "cupsd zum Neuladen aufgefordert (SIGHUP)."
+    else
+        log "cupsd läuft nicht – CUPS startet bei Bedarf automatisch und lädt dann den neuen Treiber."
+        return 1
+    fi
+    return 0
+}
+
+wait_for_scheduler() {
+    local waited=0
+    while (( waited < 15 )); do
+        if LANG=C LC_ALL=C "${LPSTAT}" -r 2>/dev/null | grep -q 'is running'; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    return 1
+}
+
+# Aktualisiert Warteschlangen, deren PPD von LabelWerk stammt (*lwModel), auf die neue PPD.
+refresh_queues() {
+    local queue_ppd queue model dpi new_ppd updated=0 skipped=0
+    [[ -d "${CUPS_PPD_DIR}" ]] || return 0
+    for queue_ppd in "${CUPS_PPD_DIR}"/*.ppd; do
+        [[ -f "${queue_ppd}" ]] || continue
+        grep -q '^\*lwModel:' "${queue_ppd}" || continue
+        queue="$(basename "${queue_ppd}" .ppd)"
+        model="$(sed -n 's/^\*lwModel:[[:space:]]*"\([^"]*\)".*/\1/p' "${queue_ppd}" | head -n 1)"
+        dpi="$(sed -n 's/^\*DefaultResolution:[[:space:]]*\([0-9][0-9]*\)dpi.*/\1/p' "${queue_ppd}" | head -n 1)"
+        new_ppd="${PPD_DIR}/LabelWerk-${model}-${dpi}dpi.ppd.gz"
+        if [[ -z "${model}" || -z "${dpi}" || ! -f "${new_ppd}" ]]; then
+            log "Warteschlange „${queue}“: keine passende neue PPD (${model:-?}, ${dpi:-?} dpi) – unverändert."
+            skipped=$((skipped + 1))
+            continue
+        fi
+        if "${LPADMIN}" -p "${queue}" -P "${new_ppd}" >/dev/null 2>&1; then
+            log "Warteschlange „${queue}“ auf $(basename "${new_ppd}") aktualisiert."
+            updated=$((updated + 1))
+        else
+            log "Warteschlange „${queue}“ konnte nicht aktualisiert werden (lpadmin-Fehler) – unverändert."
+            skipped=$((skipped + 1))
+        fi
+    done
+    log "${updated} Warteschlangen aktualisiert, ${skipped} unverändert."
+}
+
+if restart_cups; then
+    if wait_for_scheduler; then
+        refresh_queues
+    else
+        log "CUPS antwortet nicht – vorhandene Warteschlangen werden nicht aktualisiert."
+    fi
+fi
+exit 0

@@ -1,0 +1,16 @@
+/* LabelWerk – localized Info.plist values (English).
+   Keys must match Installer/Info.plist. Placeholders in at-signs are replaced by
+   Scripts/build_app.sh from Installer/config.env. */
+
+/* Name shown in Finder and the menu bar */
+"CFBundleDisplayName" = "@APP_NAME@";
+"CFBundleName" = "@APP_NAME@";
+
+/* System prompt on first Bluetooth access */
+"NSBluetoothAlwaysUsageDescription" = "LabelWerk uses Bluetooth to find mobile Zebra label printers, show their status and send labels to them.";
+
+/* System prompt on first local network access */
+"NSLocalNetworkUsageDescription" = "LabelWerk searches your local network for Zebra label printers (Bonjour and port 9100), shows their status and sends print jobs and settings.";
+
+/* Copyright notice in the About window */
+"NSHumanReadableCopyright" = "© @COPYRIGHT_YEAR@ LabelWerk. Zebra is a trademark of Zebra Technologies Corp.; LabelWerk is an independent project.";

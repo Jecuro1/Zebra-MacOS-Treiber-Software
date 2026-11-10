@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Important Information</title>
+<style>
+  :root { color-scheme: light dark; --text: #1d1d1f; --muted: #6e6e73; --accent: #6d3df0; --accent2: #0f9f8f;
+          --card: rgba(109, 61, 240, 0.07); --border: rgba(109, 61, 240, 0.22); --code: rgba(0, 0, 0, 0.06); }
+  @media (prefers-color-scheme: dark) {
+    :root { --text: #f5f5f7; --muted: #a1a1a6; --accent: #a78bfa; --accent2: #5eead4;
+            --card: rgba(167, 139, 250, 0.10); --border: rgba(167, 139, 250, 0.28); --code: rgba(255, 255, 255, 0.10); }
+  }
+  body { font: 13px/1.5 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; color: var(--text);
+         margin: 0; padding: 4px 6px 10px; -webkit-font-smoothing: antialiased; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0 0 2px; letter-spacing: -0.2px;
+       background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text;
+       -webkit-text-fill-color: transparent; }
+  h2 { font-size: 13px; font-weight: 600; margin: 16px 0 4px; }
+  p { margin: 6px 0; }
+  .lead { color: var(--muted); margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin: 10px 0; }
+  ul, ol { margin: 4px 0 4px 18px; padding: 0; }
+  li { margin: 3px 0; }
+  code { font: 12px "SF Mono", Menlo, monospace; background: var(--code); border-radius: 4px; padding: 1px 4px; }
+  .small { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>Important Information</h1>
+<p class="lead">Please take a moment to read this before installing.</p>
+<h2>Updating</h2>
+<p>An older version of the driver is replaced completely. Printers you already set up with LabelWerk are kept and
+switched to the new PPD files automatically – your chosen settings (darkness, speed, label stock …) are preserved.</p>
+<h2>After installation</h2>
+<ol>
+  <li>Open @APP_NAME@ from the Applications folder. The setup assistant looks for connected and network printers
+      (USB, Bonjour, network scan, Bluetooth).</li>
+  <li>Select a printer and add it as a macOS printer with a single click – model, resolution and driver are matched
+      automatically.</li>
+  <li>Alternatively: <em>System Settings › Printers &amp; Scanners › Add Printer</em> and choose
+      “Zebra … – LabelWerk” as the driver.</li>
+</ol>
+<h2>Privacy</h2>
+<p>@APP_NAME@ only talks to your printers on the local network, via USB or Bluetooth. No data is sent to third
+parties. macOS asks for permission the first time the app accesses the local network or Bluetooth.</p>
+<h2>Uninstalling</h2>
+<p>Use the <em>Driver &amp; Queues</em> section in the app or run
+<code>sudo /Library/Printers/LabelWerk/uninstall.sh</code> in Terminal (options: <code>--help</code>).</p>
+</body>
+</html>

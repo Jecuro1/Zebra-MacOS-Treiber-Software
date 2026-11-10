@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LabelWerk – Berechtigungen (Entitlements) der App
+
+  Die App läuft mit gehärteter Laufzeitumgebung (codesign-Option „runtime“, Pflicht für die
+  Notarisierung), aber bewusst OHNE App-Sandbox:
+    • Drucker einrichten und Treiber installieren erfordert lpadmin/cupsd-Zugriff und
+      Administratorrechte (osascript „with administrator privileges“) – in der Sandbox unmöglich.
+    • USB-Drucker werden direkt über IOKit (Bulk-Endpunkte) angesprochen, auch wenn sie keiner
+      CUPS-Warteschlange zugeordnet sind.
+    • Netzwerkdrucker werden per Subnetz-Scan, SNMP und rohen TCP-Sockets (Port 9100) gefunden
+      und angesprochen; der virtuelle Demo-Drucker lauscht als TCP-Server.
+  Die Geräte- und Netzwerkschlüssel unten wirken nur in der Sandbox; sie sind trotzdem gesetzt,
+  damit die Absicht dokumentiert ist und ein späterer Sandbox-Build ohne Änderungen funktioniert.
+  Ausnahmen der gehärteten Laufzeit (JIT, unsignierter Speicher, Bibliotheksprüfung aus …)
+  werden nicht benötigt und sind absichtlich nicht gesetzt.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.device.usb</key>
+	<true/>
+	<key>com.apple.security.device.bluetooth</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+</dict>
+</plist>

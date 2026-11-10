@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LabelWerk – Info.plist (Vorlage)
+
+  Platzhalter in At-Zeichen (App-Name, Bundle-ID, Version, Build, Copyright-Jahr) ersetzt
+  Scripts/build_app.sh mit den Werten aus Installer/config.env. Lokalisierte Texte (Anzeigename,
+  Nutzungsbeschreibungen) stehen zusätzlich in Installer/Resources/<sprache>.lproj/InfoPlist.strings.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>de</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>de</string>
+		<string>en</string>
+	</array>
+	<key>CFBundleExecutable</key>
+	<string>LabelWerk</string>
+	<key>CFBundleIdentifier</key>
+	<string>@BUNDLE_ID@</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>@APP_NAME@</string>
+	<key>CFBundleDisplayName</key>
+	<string>@APP_NAME@</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@BUILD@</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>MacOSX</string>
+	</array>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticTermination</key>
+	<false/>
+	<key>NSSupportsSuddenTermination</key>
+	<false/>
+	<key>NSHumanReadableCopyright</key>
+	<string>© @COPYRIGHT_YEAR@ LabelWerk. Zebra ist eine Marke der Zebra Technologies Corp.; LabelWerk ist ein unabhängiges Projekt.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>LabelWerk verwendet Bluetooth, um mobile Zebra-Etikettendrucker zu finden, ihren Status anzuzeigen und Etiketten an sie zu senden.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>LabelWerk sucht im lokalen Netzwerk nach Zebra-Etikettendruckern (Bonjour und Port 9100), zeigt ihren Status an und sendet Druckaufträge und Einstellungen.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pdl-datastream._tcp</string>
+		<string>_printer._tcp</string>
+		<string>_ipp._tcp</string>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.zebra.zpl</string>
+			<key>UTTypeDescription</key>
+			<string>ZPL-Etikett</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>zpl</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

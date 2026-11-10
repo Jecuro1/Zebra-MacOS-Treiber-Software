@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Fertig</title>
+<style>
+  :root { color-scheme: light dark; --text: #1d1d1f; --muted: #6e6e73; --accent: #6d3df0; --accent2: #0f9f8f;
+          --card: rgba(109, 61, 240, 0.07); --border: rgba(109, 61, 240, 0.22); --code: rgba(0, 0, 0, 0.06); }
+  @media (prefers-color-scheme: dark) {
+    :root { --text: #f5f5f7; --muted: #a1a1a6; --accent: #a78bfa; --accent2: #5eead4;
+            --card: rgba(167, 139, 250, 0.10); --border: rgba(167, 139, 250, 0.28); --code: rgba(255, 255, 255, 0.10); }
+  }
+  body { font: 13px/1.5 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; color: var(--text);
+         margin: 0; padding: 4px 6px 10px; -webkit-font-smoothing: antialiased; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0 0 2px; letter-spacing: -0.2px;
+       background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text;
+       -webkit-text-fill-color: transparent; }
+  h2 { font-size: 13px; font-weight: 600; margin: 16px 0 4px; }
+  p { margin: 6px 0; }
+  .lead { color: var(--muted); margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin: 10px 0; }
+  ul, ol { margin: 4px 0 4px 18px; padding: 0; }
+  li { margin: 3px 0; }
+  code { font: 12px "SF Mono", Menlo, monospace; background: var(--code); border-radius: 4px; padding: 1px 4px; }
+  .small { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>@APP_NAME@ ist bereit</h1>
+<p class="lead">Die Installation wurde erfolgreich abgeschlossen.</p>
+<div class="card">
+  <strong>So geht es weiter</strong>
+  <ol>
+    <li>@APP_NAME@ im Ordner „Programme“ oder über Spotlight öffnen.</li>
+    <li>Im Einrichtungsassistenten den Drucker auswählen – fertig. Ab jetzt druckt jedes Programm direkt auf Etiketten.</li>
+    <li>Ohne Drucker ausprobieren? Im Menü <em>Drucker › Demo-Drucker hinzufügen</em>.</li>
+  </ol>
+</div>
+<h2>Kommandozeile</h2>
+<p>Falls ausgewählt, steht <code>lwctl</code> im Terminal bereit, z. B. <code>lwctl discover</code> oder
+<code>lwctl help</code>.</p>
+<p class="small">Probleme? Hilfe zur Fehlersuche (Filterrechte, CUPS-Protokolle) steht in der Dokumentation
+„Installation“ und in der App unter <em>Treiber &amp; Warteschlangen › Diagnose</em>.</p>
+</body>
+</html>

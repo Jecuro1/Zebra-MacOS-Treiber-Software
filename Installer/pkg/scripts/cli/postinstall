@@ -1,0 +1,41 @@
+#!/bin/bash
+# shellcheck disable=SC1111  # Deutsche Anführungszeichen („…“) in Meldungen sind beabsichtigt.
+#
+# LabelWerk – postinstall der Komponente „Kommandozeilenwerkzeug lwctl“ (ohne Nutzdaten)
+#
+# Legt /usr/local/bin/lwctl als symbolischen Link auf das Werkzeug im App-Bundle an. Eine
+# vorhandene Datei, die kein Link auf LabelWerk ist (z. B. eine selbst gebaute Version), wird
+# nicht überschrieben. $3 = Zielvolume. Vorlage: Platzhalter in At-Zeichen ersetzt make_pkg.sh.
+
+set -euo pipefail
+
+TARGET="${3:-/}"
+TARGET="${TARGET%/}"
+APP_NAME="@APP_NAME@"  # wird von Scripts/make_pkg.sh aus Installer/config.env eingesetzt
+HELPER="/Applications/${APP_NAME}.app/Contents/Helpers/lwctl"
+BIN_DIR="${TARGET}/usr/local/bin"
+LINK="${BIN_DIR}/lwctl"
+
+log() {
+    printf 'LabelWerk cli: %s\n' "$*"
+}
+
+if [[ ! -x "${TARGET}${HELPER}" ]]; then
+    log "${TARGET}${HELPER} fehlt – Link wird nicht angelegt (App-Komponente nicht installiert?)."
+    exit 0
+fi
+
+if [[ -e "${LINK}" || -L "${LINK}" ]]; then
+    if [[ -L "${LINK}" && "$(readlink "${LINK}")" == *"/Contents/Helpers/lwctl" ]]; then
+        rm -f "${LINK}"
+    else
+        log "${LINK} existiert bereits und stammt nicht von LabelWerk – unverändert."
+        exit 0
+    fi
+fi
+
+mkdir -p "${BIN_DIR}"
+chmod 755 "${BIN_DIR}" 2>/dev/null || true
+ln -s "${HELPER}" "${LINK}"
+log "${LINK} → ${HELPER}"
+exit 0

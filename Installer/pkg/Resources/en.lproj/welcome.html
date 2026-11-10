@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Welcome</title>
+<style>
+  :root { color-scheme: light dark; --text: #1d1d1f; --muted: #6e6e73; --accent: #6d3df0; --accent2: #0f9f8f;
+          --card: rgba(109, 61, 240, 0.07); --border: rgba(109, 61, 240, 0.22); --code: rgba(0, 0, 0, 0.06); }
+  @media (prefers-color-scheme: dark) {
+    :root { --text: #f5f5f7; --muted: #a1a1a6; --accent: #a78bfa; --accent2: #5eead4;
+            --card: rgba(167, 139, 250, 0.10); --border: rgba(167, 139, 250, 0.28); --code: rgba(255, 255, 255, 0.10); }
+  }
+  body { font: 13px/1.5 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; color: var(--text);
+         margin: 0; padding: 4px 6px 10px; -webkit-font-smoothing: antialiased; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0 0 2px; letter-spacing: -0.2px;
+       background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text;
+       -webkit-text-fill-color: transparent; }
+  h2 { font-size: 13px; font-weight: 600; margin: 16px 0 4px; }
+  p { margin: 6px 0; }
+  .lead { color: var(--muted); margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin: 10px 0; }
+  ul, ol { margin: 4px 0 4px 18px; padding: 0; }
+  li { margin: 3px 0; }
+  code { font: 12px "SF Mono", Menlo, monospace; background: var(--code); border-radius: 4px; padding: 1px 4px; }
+  .small { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>Welcome to @APP_NAME@ @VERSION@</h1>
+<p class="lead">The modern driver and control center for Zebra® label printers on the Mac.</p>
+<div class="card">
+  <strong>This package installs</strong>
+  <ul>
+    <li><strong>@APP_NAME@</strong> in the Applications folder – discover and set up printers, live status with
+        notifications, all print settings, tools (calibration, configuration label …), terminal, label designer,
+        fonts &amp; graphics, network and firmware.</li>
+    <li>the <strong>printer driver</strong> (CUPS filters and PPD files for all supported models) – every Mac app can
+        then print straight to labels, in ZPL&nbsp;II, EPL2 or CPCL.</li>
+    <li>optionally the command-line tool <code>lwctl</code>.</li>
+  </ul>
+</div>
+<h2>Requirements</h2>
+<ul>
+  <li>macOS 14 Sonoma or later, Apple silicon or Intel</li>
+  <li>an administrator account (to install the driver)</li>
+</ul>
+<p class="small">Zebra is a trademark of Zebra Technologies Corp. @APP_NAME@ is an independent project and is not
+affiliated with Zebra Technologies.</p>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!--
+  LabelWerk – Distribution-Definition für productbuild (Vorlage)
+
+  Platzhalter in At-Zeichen ersetzt Scripts/make_pkg.sh aus Installer/config.env. Titel und
+  Komponententexte sind Schlüssel in pkg/Resources/<sprache>.lproj/Localizable.strings.
+  Komponenten (Reihenfolge = Installationsreihenfolge):
+    app     /Applications/LabelWerk.app
+    driver  CUPS-Filter, PPDs, Druckersymbol unter /Library/Printers (mit pre-/postinstall)
+    cli     symbolischer Link /usr/local/bin/lwctl (optional, ohne Nutzdaten)
+-->
+<installer-gui-script minSpecVersion="2">
+    <title>SU_TITLE</title>
+    <domains enable_localSystem="true" enable_anywhere="false" enable_currentUserHome="false"/>
+    <options customize="allow" require-scripts="true" hostArchitectures="arm64,x86_64"/>
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="14.0"/>
+        </allowed-os-versions>
+    </volume-check>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <readme file="readme.html" mime-type="text/html"/>
+    <license file="license.html" mime-type="text/html"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <background file="background.png" mime-type="image/png" alignment="bottomleft" scaling="none"/>
+    <background-darkAqua file="background-dark.png" mime-type="image/png" alignment="bottomleft" scaling="none"/>
+
+    <choices-outline>
+        <line choice="app"/>
+        <line choice="driver"/>
+        <line choice="cli"/>
+    </choices-outline>
+
+    <choice id="app" title="CHOICE_APP_TITLE" description="CHOICE_APP_DESCRIPTION">
+        <pkg-ref id="@LW_PKG_ID_APP@"/>
+    </choice>
+    <choice id="driver" title="CHOICE_DRIVER_TITLE" description="CHOICE_DRIVER_DESCRIPTION">
+        <pkg-ref id="@LW_PKG_ID_DRIVER@"/>
+    </choice>
+    <choice id="cli" title="CHOICE_CLI_TITLE" description="CHOICE_CLI_DESCRIPTION" start_selected="true">
+        <pkg-ref id="@LW_PKG_ID_CLI@"/>
+    </choice>
+
+    <pkg-ref id="@LW_PKG_ID_APP@" version="@VERSION@" onConclusion="none">LabelWerkApp.pkg</pkg-ref>
+    <pkg-ref id="@LW_PKG_ID_APP@">
+        <bundle-version>
+            <bundle id="@BUNDLE_ID@" CFBundleShortVersionString="@VERSION@" CFBundleVersion="@BUILD@" path="@APP_NAME@.app"/>
+        </bundle-version>
+    </pkg-ref>
+    <pkg-ref id="@LW_PKG_ID_DRIVER@" version="@VERSION@" onConclusion="none">LabelWerkDriver.pkg</pkg-ref>
+    <pkg-ref id="@LW_PKG_ID_CLI@" version="@VERSION@" onConclusion="none">LabelWerkCLI.pkg</pkg-ref>
+</installer-gui-script>

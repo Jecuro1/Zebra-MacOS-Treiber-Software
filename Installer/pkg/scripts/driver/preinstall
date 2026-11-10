@@ -1,0 +1,46 @@
+#!/bin/bash
+# shellcheck disable=SC1111  # Deutsche Anführungszeichen („…“) in Meldungen sind beabsichtigt.
+#
+# LabelWerk – preinstall der Treiberkomponente
+#
+# Wird vom macOS-Installer als root aufgerufen: $1 = Paketpfad, $2 = Zielort, $3 = Zielvolume.
+# Entfernt eine vorhandene (ältere) Treiberinstallation vollständig, damit bei einem Update keine
+# Filter oder PPDs entfallener Modelle zurückbleiben. Druckerwarteschlangen bleiben erhalten –
+# sie verweisen auf den Filterpfad, der direkt danach neu installiert wird.
+#
+# Meldungen landen in /var/log/install.log.
+
+set -euo pipefail
+
+TARGET="${3:-/}"
+TARGET="${TARGET%/}"
+DRIVER_DIR="${TARGET}/Library/Printers/LabelWerk"
+PPD_DIR="${TARGET}/Library/Printers/PPDs/Contents/Resources"
+
+log() {
+    printf 'LabelWerk preinstall: %s\n' "$*"
+}
+
+if [[ -f "${DRIVER_DIR}/VERSION" ]]; then
+    log "vorhandene Treiberversion $(head -n 1 "${DRIVER_DIR}/VERSION") wird ersetzt."
+fi
+
+if [[ -d "${DRIVER_DIR}" && ! -L "${DRIVER_DIR}" ]]; then
+    rm -rf "${DRIVER_DIR}"
+    log "alter Treiberordner entfernt: ${DRIVER_DIR}"
+elif [[ -L "${DRIVER_DIR}" ]]; then
+    # Ein symbolischer Link (z. B. aus „make install-dev“) wird nur entfernt, nie verfolgt.
+    rm -f "${DRIVER_DIR}"
+    log "symbolischen Link entfernt: ${DRIVER_DIR}"
+fi
+
+removed=0
+if [[ -d "${PPD_DIR}" ]]; then
+    for ppd in "${PPD_DIR}"/LabelWerk-*.ppd.gz "${PPD_DIR}"/LabelWerk-*.ppd; do
+        [[ -e "${ppd}" || -L "${ppd}" ]] || continue
+        rm -f "${ppd}"
+        removed=$((removed + 1))
+    done
+fi
+log "${removed} alte PPD-Dateien entfernt."
+exit 0

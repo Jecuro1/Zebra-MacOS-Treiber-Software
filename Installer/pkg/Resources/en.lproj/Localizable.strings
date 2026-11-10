@@ -1,0 +1,8 @@
+/* LabelWerk installer – distribution texts (English) */
+"SU_TITLE" = "@APP_NAME@ @VERSION@";
+"CHOICE_APP_TITLE" = "@APP_NAME@ App";
+"CHOICE_APP_DESCRIPTION" = "Control center for Zebra label printers: discover and set up printers, live status, settings, tools, terminal, label designer, firmware and network. Installed into the Applications folder.";
+"CHOICE_DRIVER_TITLE" = "Printer Driver (CUPS)";
+"CHOICE_DRIVER_DESCRIPTION" = "Filters and PPD files for all supported Zebra models (ZPL II, EPL2, CPCL), so every Mac app prints straight to labels. Existing LabelWerk printers are switched to the new version automatically.";
+"CHOICE_CLI_TITLE" = "Command-Line Tool lwctl";
+"CHOICE_CLI_DESCRIPTION" = "Creates /usr/local/bin/lwctl to discover, query and control printers from Terminal and scripts. Requires the app.";

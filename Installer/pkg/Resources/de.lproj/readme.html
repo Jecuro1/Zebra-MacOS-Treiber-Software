@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Wichtige Hinweise</title>
+<style>
+  :root { color-scheme: light dark; --text: #1d1d1f; --muted: #6e6e73; --accent: #6d3df0; --accent2: #0f9f8f;
+          --card: rgba(109, 61, 240, 0.07); --border: rgba(109, 61, 240, 0.22); --code: rgba(0, 0, 0, 0.06); }
+  @media (prefers-color-scheme: dark) {
+    :root { --text: #f5f5f7; --muted: #a1a1a6; --accent: #a78bfa; --accent2: #5eead4;
+            --card: rgba(167, 139, 250, 0.10); --border: rgba(167, 139, 250, 0.28); --code: rgba(255, 255, 255, 0.10); }
+  }
+  body { font: 13px/1.5 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; color: var(--text);
+         margin: 0; padding: 4px 6px 10px; -webkit-font-smoothing: antialiased; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0 0 2px; letter-spacing: -0.2px;
+       background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text;
+       -webkit-text-fill-color: transparent; }
+  h2 { font-size: 13px; font-weight: 600; margin: 16px 0 4px; }
+  p { margin: 6px 0; }
+  .lead { color: var(--muted); margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin: 10px 0; }
+  ul, ol { margin: 4px 0 4px 18px; padding: 0; }
+  li { margin: 3px 0; }
+  code { font: 12px "SF Mono", Menlo, monospace; background: var(--code); border-radius: 4px; padding: 1px 4px; }
+  .small { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>Wichtige Hinweise</h1>
+<p class="lead">Bitte vor der Installation kurz lesen.</p>
+<h2>Aktualisierung</h2>
+<p>Eine ältere Version des Treibers wird vollständig ersetzt. Bereits eingerichtete LabelWerk-Drucker bleiben erhalten
+und werden automatisch auf die neuen PPD-Dateien umgestellt – Ihre gewählten Einstellungen (Schwärzung,
+Geschwindigkeit, Etikettenformat …) bleiben dabei bestehen.</p>
+<h2>Nach der Installation</h2>
+<ol>
+  <li>@APP_NAME@ aus dem Ordner „Programme“ öffnen. Der Einrichtungsassistent sucht nach angeschlossenen und
+      Netzwerk-Druckern (USB, Bonjour, Netzwerk-Scan, Bluetooth).</li>
+  <li>Drucker auswählen und mit einem Klick als macOS-Drucker einrichten – Modell, Auflösung und Treiber werden
+      automatisch zugeordnet.</li>
+  <li>Alternativ: <em>Systemeinstellungen › Drucker &amp; Scanner › Drucker hinzufügen</em> und als Treiber
+      „Zebra … – LabelWerk“ wählen.</li>
+</ol>
+<h2>Datenschutz</h2>
+<p>@APP_NAME@ kommuniziert ausschließlich mit Ihren Druckern im lokalen Netzwerk, per USB oder Bluetooth. Es werden
+keine Daten an Dritte übertragen. macOS fragt beim ersten Zugriff auf das lokale Netzwerk und auf Bluetooth um Erlaubnis.</p>
+<h2>Entfernen</h2>
+<p>In der App unter <em>Treiber &amp; Warteschlangen</em> oder im Terminal mit
+<code>sudo /Library/Printers/LabelWerk/uninstall.sh</code> (Optionen: <code>--help</code>).</p>
+</body>
+</html>

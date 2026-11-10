@@ -1,0 +1,380 @@
+*PPD-Adobe: "4.3"
+*% LabelWerk - Test-PPD fuer die Filter-Tests (Driver/filter/tests).
+*% Enthaelt alle lw*-Optionen aus ARCHITECTURE.md Abschnitt 9 und die PPD-Attribute
+*% *lwModel, *lwMaxPrintWidthDots und *lwDefaultGapDots. Nicht zur Installation bestimmt -
+*% die echten PPDs erzeugt Driver/ppd/generate_ppds.py. Nur ASCII.
+*FormatVersion: "4.3"
+*FileVersion: "1.0.0"
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*PCFileName: "LWTEST.PPD"
+*Product: "(LabelWerk Test)"
+*Manufacturer: "Zebra"
+*ModelName: "LabelWerk Test"
+*ShortNickName: "LabelWerk Test"
+*NickName: "Zebra LabelWerk Test (203 dpi)"
+*PSVersion: "(3010.000) 0"
+*LanguageLevel: "3"
+*ColorDevice: False
+*DefaultColorSpace: Gray
+*FileSystem: False
+*Throughput: "6"
+*LandscapeOrientation: Plus90
+*TTRasterizer: Type42
+*cupsVersion: 2.4
+*cupsModelNumber: 0
+*cupsManualCopies: False
+*cupsFilter: "application/vnd.cups-raster 0 rastertolabelwerk"
+*cupsFilter: "application/vnd.cups-command 0 commandtolabelwerk"
+*cupsCommands: "Clean PrintSelfTestPage ReportLevels AutoConfigure Calibrate"
+*lwModel: "zd421t"
+*lwMaxPrintWidthDots: "832"
+*lwDefaultGapDots: "24"
+
+*OpenUI *PageSize/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageSize
+*DefaultPageSize: w288h432
+*PageSize w288h432/4 x 6 in: "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*PageSize w144h72/2 x 1 in: "<</PageSize[144 72]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageSize
+
+*OpenUI *PageRegion/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageRegion
+*DefaultPageRegion: w288h432
+*PageRegion w288h432/4 x 6 in: "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*PageRegion w144h72/2 x 1 in: "<</PageSize[144 72]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageRegion
+
+*DefaultImageableArea: w288h432
+*ImageableArea w288h432/4 x 6 in: "0 0 288 432"
+*ImageableArea w144h72/2 x 1 in: "0 0 144 72"
+*DefaultPaperDimension: w288h432
+*PaperDimension w288h432/4 x 6 in: "288 432"
+*PaperDimension w144h72/2 x 1 in: "144 72"
+
+*OpenUI *Resolution/Resolution: PickOne
+*OrderDependency: 10 AnySetup *Resolution
+*DefaultResolution: 203dpi
+*Resolution 203dpi/203 dpi: "<</HWResolution[203 203]>>setpagedevice"
+*CloseUI: *Resolution
+
+*OpenUI *ColorModel/Color Mode: PickOne
+*OrderDependency: 10 AnySetup *ColorModel
+*DefaultColorModel: Gray
+*ColorModel Gray/Grayscale: "<</cupsColorSpace 18/cupsBitsPerColor 8/cupsColorOrder 0/cupsCompression 0>>setpagedevice"
+*CloseUI: *ColorModel
+
+*OpenUI *lwLanguage/Printer Language: PickOne
+*OrderDependency: 20 AnySetup *lwLanguage
+*DefaultlwLanguage: ZPL
+*lwLanguage ZPL/ZPL II: ""
+*lwLanguage EPL/EPL2: ""
+*lwLanguage CPCL/CPCL: ""
+*CloseUI: *lwLanguage
+
+*OpenUI *lwDarkness/Darkness: PickOne
+*OrderDependency: 20 AnySetup *lwDarkness
+*DefaultlwDarkness: Default
+*lwDarkness Default/Printer Setting: ""
+*lwDarkness 0/0: ""
+*lwDarkness 1/1: ""
+*lwDarkness 2/2: ""
+*lwDarkness 3/3: ""
+*lwDarkness 4/4: ""
+*lwDarkness 5/5: ""
+*lwDarkness 6/6: ""
+*lwDarkness 7/7: ""
+*lwDarkness 8/8: ""
+*lwDarkness 9/9: ""
+*lwDarkness 10/10: ""
+*lwDarkness 11/11: ""
+*lwDarkness 12/12: ""
+*lwDarkness 13/13: ""
+*lwDarkness 14/14: ""
+*lwDarkness 15/15: ""
+*lwDarkness 16/16: ""
+*lwDarkness 17/17: ""
+*lwDarkness 18/18: ""
+*lwDarkness 19/19: ""
+*lwDarkness 20/20: ""
+*lwDarkness 21/21: ""
+*lwDarkness 22/22: ""
+*lwDarkness 23/23: ""
+*lwDarkness 24/24: ""
+*lwDarkness 25/25: ""
+*lwDarkness 26/26: ""
+*lwDarkness 27/27: ""
+*lwDarkness 28/28: ""
+*lwDarkness 29/29: ""
+*lwDarkness 30/30: ""
+*CloseUI: *lwDarkness
+
+*OpenUI *lwSpeed/Print Speed: PickOne
+*OrderDependency: 20 AnySetup *lwSpeed
+*DefaultlwSpeed: Default
+*lwSpeed Default/Printer Setting: ""
+*lwSpeed 1/1 ips: ""
+*lwSpeed 2/2 ips: ""
+*lwSpeed 3/3 ips: ""
+*lwSpeed 4/4 ips: ""
+*lwSpeed 5/5 ips: ""
+*lwSpeed 6/6 ips: ""
+*lwSpeed 7/7 ips: ""
+*lwSpeed 8/8 ips: ""
+*lwSpeed 9/9 ips: ""
+*lwSpeed 10/10 ips: ""
+*lwSpeed 11/11 ips: ""
+*lwSpeed 12/12 ips: ""
+*lwSpeed 13/13 ips: ""
+*lwSpeed 14/14 ips: ""
+*CloseUI: *lwSpeed
+
+*OpenUI *lwMediaType/Media Type: PickOne
+*OrderDependency: 20 AnySetup *lwMediaType
+*DefaultlwMediaType: Default
+*lwMediaType Default/Printer Setting: ""
+*lwMediaType DirectThermal/Direct Thermal: ""
+*lwMediaType ThermalTransfer/Thermal Transfer: ""
+*CloseUI: *lwMediaType
+
+*OpenUI *lwMediaTracking/Media Tracking: PickOne
+*OrderDependency: 20 AnySetup *lwMediaTracking
+*DefaultlwMediaTracking: Default
+*lwMediaTracking Default/Printer Setting: ""
+*lwMediaTracking Gap/Gap/Notch: ""
+*lwMediaTracking BlackMark/Black Mark: ""
+*lwMediaTracking Continuous/Continuous: ""
+*lwMediaTracking Auto/Auto Detect: ""
+*CloseUI: *lwMediaTracking
+
+*OpenUI *lwPrintMode/Print Mode: PickOne
+*OrderDependency: 20 AnySetup *lwPrintMode
+*DefaultlwPrintMode: Default
+*lwPrintMode Default/Printer Setting: ""
+*lwPrintMode TearOff/Tear Off: ""
+*lwPrintMode PeelOff/Peel Off: ""
+*lwPrintMode Cutter/Cutter: ""
+*lwPrintMode DelayedCut/Delayed Cut: ""
+*lwPrintMode Rewind/Rewind: ""
+*lwPrintMode Applicator/Applicator: ""
+*lwPrintMode Kiosk/Kiosk: ""
+*CloseUI: *lwPrintMode
+
+*OpenUI *lwLabelTop/Label Top: PickOne
+*OrderDependency: 20 AnySetup *lwLabelTop
+*DefaultlwLabelTop: Default
+*lwLabelTop Default/Printer Setting: ""
+*lwLabelTop -120/-120: ""
+*lwLabelTop -110/-110: ""
+*lwLabelTop -100/-100: ""
+*lwLabelTop -90/-90: ""
+*lwLabelTop -80/-80: ""
+*lwLabelTop -70/-70: ""
+*lwLabelTop -60/-60: ""
+*lwLabelTop -50/-50: ""
+*lwLabelTop -40/-40: ""
+*lwLabelTop -30/-30: ""
+*lwLabelTop -20/-20: ""
+*lwLabelTop -10/-10: ""
+*lwLabelTop 0/0: ""
+*lwLabelTop 10/10: ""
+*lwLabelTop 20/20: ""
+*lwLabelTop 30/30: ""
+*lwLabelTop 40/40: ""
+*lwLabelTop 50/50: ""
+*lwLabelTop 60/60: ""
+*lwLabelTop 70/70: ""
+*lwLabelTop 80/80: ""
+*lwLabelTop 90/90: ""
+*lwLabelTop 100/100: ""
+*lwLabelTop 110/110: ""
+*lwLabelTop 120/120: ""
+*CloseUI: *lwLabelTop
+
+*OpenUI *lwLabelLeft/Label Left: PickOne
+*OrderDependency: 20 AnySetup *lwLabelLeft
+*DefaultlwLabelLeft: Default
+*lwLabelLeft Default/Printer Setting: ""
+*lwLabelLeft -200/-200: ""
+*lwLabelLeft -190/-190: ""
+*lwLabelLeft -180/-180: ""
+*lwLabelLeft -170/-170: ""
+*lwLabelLeft -160/-160: ""
+*lwLabelLeft -150/-150: ""
+*lwLabelLeft -140/-140: ""
+*lwLabelLeft -130/-130: ""
+*lwLabelLeft -120/-120: ""
+*lwLabelLeft -110/-110: ""
+*lwLabelLeft -100/-100: ""
+*lwLabelLeft -90/-90: ""
+*lwLabelLeft -80/-80: ""
+*lwLabelLeft -70/-70: ""
+*lwLabelLeft -60/-60: ""
+*lwLabelLeft -50/-50: ""
+*lwLabelLeft -40/-40: ""
+*lwLabelLeft -30/-30: ""
+*lwLabelLeft -20/-20: ""
+*lwLabelLeft -10/-10: ""
+*lwLabelLeft 0/0: ""
+*lwLabelLeft 10/10: ""
+*lwLabelLeft 20/20: ""
+*lwLabelLeft 30/30: ""
+*lwLabelLeft 40/40: ""
+*lwLabelLeft 50/50: ""
+*lwLabelLeft 60/60: ""
+*lwLabelLeft 70/70: ""
+*lwLabelLeft 80/80: ""
+*lwLabelLeft 90/90: ""
+*lwLabelLeft 100/100: ""
+*lwLabelLeft 110/110: ""
+*lwLabelLeft 120/120: ""
+*lwLabelLeft 130/130: ""
+*lwLabelLeft 140/140: ""
+*lwLabelLeft 150/150: ""
+*lwLabelLeft 160/160: ""
+*lwLabelLeft 170/170: ""
+*lwLabelLeft 180/180: ""
+*lwLabelLeft 190/190: ""
+*lwLabelLeft 200/200: ""
+*CloseUI: *lwLabelLeft
+
+*OpenUI *lwTearOff/Tear Off Adjust: PickOne
+*OrderDependency: 20 AnySetup *lwTearOff
+*DefaultlwTearOff: Default
+*lwTearOff Default/Printer Setting: ""
+*lwTearOff -120/-120: ""
+*lwTearOff -110/-110: ""
+*lwTearOff -100/-100: ""
+*lwTearOff -90/-90: ""
+*lwTearOff -80/-80: ""
+*lwTearOff -70/-70: ""
+*lwTearOff -60/-60: ""
+*lwTearOff -50/-50: ""
+*lwTearOff -40/-40: ""
+*lwTearOff -30/-30: ""
+*lwTearOff -20/-20: ""
+*lwTearOff -10/-10: ""
+*lwTearOff 0/0: ""
+*lwTearOff 10/10: ""
+*lwTearOff 20/20: ""
+*lwTearOff 30/30: ""
+*lwTearOff 40/40: ""
+*lwTearOff 50/50: ""
+*lwTearOff 60/60: ""
+*lwTearOff 70/70: ""
+*lwTearOff 80/80: ""
+*lwTearOff 90/90: ""
+*lwTearOff 100/100: ""
+*lwTearOff 110/110: ""
+*lwTearOff 120/120: ""
+*CloseUI: *lwTearOff
+
+*OpenUI *lwBackfeed/Backfeed: PickOne
+*OrderDependency: 20 AnySetup *lwBackfeed
+*DefaultlwBackfeed: Default
+*lwBackfeed Default/Printer Setting: ""
+*lwBackfeed After/After Printing: ""
+*lwBackfeed Before/Before Printing: ""
+*lwBackfeed Normal/Normal: ""
+*lwBackfeed Off/Off: ""
+*CloseUI: *lwBackfeed
+
+*OpenUI *lwMirror/Mirror Image: PickOne
+*OrderDependency: 20 AnySetup *lwMirror
+*DefaultlwMirror: False
+*lwMirror False/Off: ""
+*lwMirror True/On: ""
+*CloseUI: *lwMirror
+
+*OpenUI *lwNegative/Negative Image: PickOne
+*OrderDependency: 20 AnySetup *lwNegative
+*DefaultlwNegative: False
+*lwNegative False/Off: ""
+*lwNegative True/On: ""
+*CloseUI: *lwNegative
+
+*OpenUI *lwRotate180/Rotate 180: PickOne
+*OrderDependency: 20 AnySetup *lwRotate180
+*DefaultlwRotate180: False
+*lwRotate180 False/Off: ""
+*lwRotate180 True/On: ""
+*CloseUI: *lwRotate180
+
+*OpenUI *lwDither/Dithering: PickOne
+*OrderDependency: 20 AnySetup *lwDither
+*DefaultlwDither: Threshold
+*lwDither Threshold/Threshold: ""
+*lwDither Ordered/Ordered (Bayer): ""
+*lwDither Halftone/Halftone: ""
+*lwDither FloydSteinberg/Floyd-Steinberg: ""
+*lwDither Atkinson/Atkinson: ""
+*lwDither Stucki/Stucki: ""
+*CloseUI: *lwDither
+
+*OpenUI *lwThreshold/Threshold: PickOne
+*OrderDependency: 20 AnySetup *lwThreshold
+*DefaultlwThreshold: 128
+*lwThreshold 64/64: ""
+*lwThreshold 96/96: ""
+*lwThreshold 128/128: ""
+*lwThreshold 160/160: ""
+*lwThreshold 192/192: ""
+*CloseUI: *lwThreshold
+
+*OpenUI *lwCompression/Graphics Compression: PickOne
+*OrderDependency: 20 AnySetup *lwCompression
+*DefaultlwCompression: Z64
+*lwCompression Z64/Z64 (Deflate): ""
+*lwCompression ACS/ACS: ""
+*lwCompression Hex/Hex: ""
+*CloseUI: *lwCompression
+
+*OpenUI *lwCutEvery/Cut Every: PickOne
+*OrderDependency: 20 AnySetup *lwCutEvery
+*DefaultlwCutEvery: 0
+*lwCutEvery 0/0: ""
+*lwCutEvery 1/1: ""
+*lwCutEvery 2/2: ""
+*lwCutEvery 5/5: ""
+*lwCutEvery 10/10: ""
+*lwCutEvery 25/25: ""
+*lwCutEvery 50/50: ""
+*lwCutEvery 100/100: ""
+*CloseUI: *lwCutEvery
+
+*OpenUI *lwCalibrate/Calibrate Before Job: PickOne
+*OrderDependency: 20 AnySetup *lwCalibrate
+*DefaultlwCalibrate: False
+*lwCalibrate False/Off: ""
+*lwCalibrate True/On: ""
+*CloseUI: *lwCalibrate
+
+*OpenUI *lwSaveSettings/Save Settings: PickOne
+*OrderDependency: 20 AnySetup *lwSaveSettings
+*DefaultlwSaveSettings: False
+*lwSaveSettings False/Off: ""
+*lwSaveSettings True/On: ""
+*CloseUI: *lwSaveSettings
+
+*OpenUI *lwSkipBlank/Skip Blank Labels: PickOne
+*OrderDependency: 20 AnySetup *lwSkipBlank
+*DefaultlwSkipBlank: False
+*lwSkipBlank False/Off: ""
+*lwSkipBlank True/On: ""
+*CloseUI: *lwSkipBlank
+
+*OpenUI *lwStartCmd/Start Commands: PickOne
+*OrderDependency: 20 AnySetup *lwStartCmd
+*DefaultlwStartCmd: None
+*lwStartCmd None/None: ""
+*lwStartCmd XlhBXkZYIExhYmVsV2Vya15YWg/Comment Format: ""
+*CloseUI: *lwStartCmd
+
+*OpenUI *lwEndCmd/End Commands: PickOne
+*OrderDependency: 20 AnySetup *lwEndCmd
+*DefaultlwEndCmd: None
+*lwEndCmd None/None: ""
+*lwEndCmd XlhBXkZYIExhYmVsV2Vya15YWg/Comment Format: ""
+*CloseUI: *lwEndCmd
+
+*% Ende der Test-PPD
