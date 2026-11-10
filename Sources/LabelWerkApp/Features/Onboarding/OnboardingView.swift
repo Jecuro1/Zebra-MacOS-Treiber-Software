@@ -300,6 +300,10 @@ struct OnboardingView: View {
     private func finish() {
         model.hasCompletedOnboarding = true
         model.isOnboardingPresented = false
+        // Mitteilungen erst nach dem Assistenten einrichten (Delegate + ggf. Systemabfrage), damit
+        // die Abfrage nicht schon beim ersten Start über dem Assistenten erscheint – auch bei
+        // „Überspringen“. Wiederholte Aufrufe sind unschädlich (macOS fragt nur einmal).
+        NotificationService.shared.setUp()
         dismiss()
     }
 }

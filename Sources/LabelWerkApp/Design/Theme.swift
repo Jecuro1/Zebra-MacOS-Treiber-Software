@@ -114,6 +114,21 @@ enum Motion {
     }
 }
 
+// MARK: - App-Einstellung „Bewegung reduzieren“
+
+private struct AppReduceMotionKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// App-eigene Einstellung „Bewegung zusätzlich reduzieren“ (wird in `RootView` gesetzt).
+    /// Komponenten kombinieren sie mit `accessibilityReduceMotion`.
+    var appReduceMotion: Bool {
+        get { self[AppReduceMotionKey.self] }
+        set { self[AppReduceMotionKey.self] = newValue }
+    }
+}
+
 // MARK: - Anzeige-Erweiterungen für Statusmodelle
 
 extension PrinterState {

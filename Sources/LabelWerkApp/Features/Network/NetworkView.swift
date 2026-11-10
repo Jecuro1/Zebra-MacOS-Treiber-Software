@@ -64,7 +64,7 @@ struct NetworkView: View {
     private var content: some View {
         switch editor.loadPhase {
         case .idle, .loading:
-            NetConfigSkeleton()
+            NetConfigSkeleton(reduceMotion: reduceMotion)
                 .transition(.opacity)
         case .failed(let message):
             NetConfigLoadError(message: message) {
@@ -73,14 +73,18 @@ struct NetworkView: View {
             .transition(.opacity.combined(with: .scale(scale: 0.98)))
         case .loaded:
             VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
+                // Während der Übertragung keine Eingaben: Sie würden sonst als übertragen gelten.
                 NetConfigIPv4Card(editor: editor, reduceMotion: reduceMotion)
+                    .disabled(editor.isApplying)
                     .transferAppear(index: 0, reduceMotion: reduceMotion)
                 if hasWLAN {
                     NetConfigWLANCard(editor: editor, reduceMotion: reduceMotion)
+                        .disabled(editor.isApplying)
                         .transferAppear(index: 1, reduceMotion: reduceMotion)
                 }
                 if hasBluetooth {
                     NetConfigBluetoothCard(editor: editor, reduceMotion: reduceMotion)
+                        .disabled(editor.isApplying)
                         .transferAppear(index: 2, reduceMotion: reduceMotion)
                 }
                 NetConfigChangesCard(session: session, editor: editor, hasBluetooth: hasBluetooth,
@@ -95,6 +99,8 @@ struct NetworkView: View {
 // MARK: - Platzhalter & Fehler
 
 private struct NetConfigSkeleton: View {
+    let reduceMotion: Bool
+
     var body: some View {
         VStack(spacing: Theme.Metrics.cardSpacing) {
             ForEach(0..<2, id: \.self) { _ in
@@ -118,7 +124,7 @@ private struct NetConfigSkeleton: View {
                 }
             }
         }
-        .shimmering(active: true)
+        .shimmering(active: !reduceMotion)
         .accessibilityLabel(tr("Netzwerkeinstellungen werden gelesen …"))
     }
 }
@@ -215,7 +221,7 @@ private struct NetConfigIPv4Card: View {
                                    reduceMotion: reduceMotion)
                     NetConfigInputField(tr("Hostname (optional)"), text: $editor.draft.hostname,
                                    issue: editor.issue(.hostname, hasBluetooth: false, hasWLAN: false),
-                                   shakeToken: editor.shakeToken(.hostname), placeholder: "lager-zd421",
+                                   shakeToken: editor.shakeToken(.hostname), placeholder: tr("lager-zd421"),
                                    monospaced: false, reduceMotion: reduceMotion)
                 }
             }
@@ -413,7 +419,7 @@ private struct NetConfigBluetoothCard: View {
                     HStack(alignment: .top, spacing: 14) {
                         NetConfigInputField(tr("Gerätename"), text: $editor.draft.bluetoothName,
                                        issue: editor.issue(.bluetoothName, hasBluetooth: true, hasWLAN: false),
-                                       shakeToken: editor.shakeToken(.bluetoothName), placeholder: "ZD421-Lager",
+                                       shakeToken: editor.shakeToken(.bluetoothName), placeholder: tr("ZD421-Lager"),
                                        monospaced: false, reduceMotion: reduceMotion)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(tr("Sichtbarkeit"))
@@ -587,27 +593,48 @@ private struct NetConfigRestartCard: View {
     let wantsBluetooth: Bool
 
     @Environment(AppModel.self) private var model
+    /// Die erwartete Neustartzeit ist abgelaufen (beendet den Sekunden-Countdown).
+    @State private var countdownOver = false
 
     private var isDone: Bool { outcome.reconnected || !outcome.restartExpected }
     private var expectedDuration: TimeInterval { session.isVirtual ? 3 : 30 }
-    private var tint: Color { isDone ? Theme.ready : Theme.printing }
+    /// Die neue Adresse wurde noch nicht übernommen – ohne Zutun verbindet sich nichts.
+    private var awaitsHostSwitch: Bool { outcome.suggestedHost != nil && !outcome.hostUpdated && !outcome.reconnected }
+
+    private var tint: Color {
+        if isDone { return Theme.ready }
+        if outcome.reconnectFailed { return Theme.warning }
+        return Theme.printing
+    }
 
     private var title: String {
         if !outcome.restartExpected { return tr("Einstellungen übernommen") }
         if outcome.reconnected { return tr("Drucker wieder verbunden") }
+        if outcome.reconnectFailed { return tr("Drucker antwortet nicht") }
+        if countdownOver && outcome.reconnecting { return tr("Verbindung wird wiederhergestellt …") }
+        if countdownOver && awaitsHostSwitch { return tr("Neue Adresse übernehmen") }
         return tr("Drucker startet neu …")
     }
 
     private var message: String {
         if !outcome.restartExpected { return tr("Die Änderungen sind sofort aktiv.") }
         if outcome.reconnected { return tr("Die neuen Netzwerkeinstellungen sind aktiv.") }
-        if outcome.suggestedHost != nil && !outcome.hostUpdated {
+        if outcome.reconnectFailed {
+            if outcome.switchedToDHCP {
+                return tr("Unter der bisherigen Adresse meldet sich der Drucker nicht – per DHCP hat er vermutlich eine neue erhalten. Sie steht auf dem Konfigurationsetikett oder wird über die Druckersuche gefunden.")
+            }
+            return tr("Nach dem Neustart kam keine Verbindung zustande. Prüfe, ob der Drucker eingeschaltet und im Netzwerk erreichbar ist, und versuche es erneut.")
+        }
+        if awaitsHostSwitch {
             return tr("Der Drucker übernimmt die neue Adresse. Stelle die Verbindung um, damit LabelWerk ihn weiterhin erreicht.")
         }
         if outcome.switchedToDHCP {
-            return tr("Der Drucker bezieht seine Adresse jetzt per DHCP. Die neue Adresse steht auf dem Konfigurationsetikett oder wird über die Druckersuche gefunden.")
+            return tr("Der Drucker bezieht seine Adresse jetzt per DHCP. LabelWerk versucht es zuerst unter der bisherigen Adresse; hat er eine neue erhalten, findet ihn die Druckersuche.")
         }
-        return tr("Die Verbindung wird nach dem Neustart automatisch wiederhergestellt.")
+        if outcome.reconnecting {
+            return tr("Die Verbindung wird nach dem Neustart automatisch wiederhergestellt.")
+        }
+        return tr("Die automatische Wiederverbindung wurde unterbrochen. Verbinde dich erneut, sobald der Drucker bereit ist.")
     }
 
     var body: some View {
@@ -627,7 +654,7 @@ private struct NetConfigRestartCard: View {
                     if let host = outcome.suggestedHost {
                         if outcome.hostUpdated {
                             TransferNote(tr("Die Verbindung verwendet jetzt %@.", host), style: .success)
-                        } else {
+                        } else if !outcome.reconnected {
                             Button {
                                 editor.adoptSuggestedHost(session: session, reduceMotion: reduceMotion, wantsBluetooth: wantsBluetooth)
                             } label: {
@@ -643,15 +670,17 @@ private struct NetConfigRestartCard: View {
                             } label: {
                                 Label(tr("Drucker suchen"), systemImage: "dot.radiowaves.left.and.right")
                             }
-                            .buttonStyle(.labelWerkSecondary)
+                            .buttonStyle(outcome.reconnectFailed ? LabelWerkButtonStyle.labelWerkPrimary : LabelWerkButtonStyle.labelWerkSecondary)
                         }
-                        if outcome.restartExpected && !outcome.reconnected {
+                        if outcome.restartExpected && !outcome.reconnected && !awaitsHostSwitch {
                             Button {
                                 editor.reconnectNow(session: session, reduceMotion: reduceMotion, wantsBluetooth: wantsBluetooth)
                             } label: {
-                                Label(tr("Jetzt verbinden"), systemImage: "bolt.horizontal")
+                                Label(outcome.reconnectFailed ? tr("Erneut versuchen") : tr("Jetzt verbinden"),
+                                      systemImage: outcome.reconnectFailed ? "arrow.clockwise" : "bolt.horizontal")
                             }
                             .buttonStyle(.labelWerkSecondary)
+                            .disabled(session.connectionState == .connecting)
                         }
                         Button(tr("Schließen")) {
                             editor.dismissOutcome(reduceMotion: reduceMotion)
@@ -664,28 +693,56 @@ private struct NetConfigRestartCard: View {
             }
         }
         .animation(reduceMotion ? nil : Motion.spring, value: outcome)
+        .animation(reduceMotion ? nil : Motion.spring, value: countdownOver)
+        .task(id: outcome.appliedAt) {
+            // Countdown nur bis zur erwarteten Neustartzeit – danach keine sekündlichen Aktualisierungen mehr.
+            let remaining = expectedDuration - Date().timeIntervalSince(outcome.appliedAt)
+            guard remaining > 0 else {
+                countdownOver = true
+                return
+            }
+            countdownOver = false
+            try? await Task.sleep(for: .seconds(remaining))
+            guard !Task.isCancelled else { return }
+            countdownOver = true
+        }
+        .onChange(of: session.connectionState) { oldValue, newValue in
+            // Auch eine Wiederverbindung über die Statusüberwachung oder die Seitenleiste beendet das Warten.
+            if newValue == .connected && oldValue != .connected {
+                editor.connectionRestored(session: session, reduceMotion: reduceMotion, wantsBluetooth: wantsBluetooth)
+            }
+        }
     }
 
     @ViewBuilder
     private var indicator: some View {
         if isDone {
             IconBadge(systemImage: "checkmark", tint: Theme.ready, size: 50)
-                .symbolEffect(.bounce, value: outcome.reconnected)
+                .symbolEffect(.bounce, value: reduceMotion ? false : outcome.reconnected)
                 .transition(.scale.combined(with: .opacity))
-        } else {
+        } else if outcome.reconnectFailed {
+            IconBadge(systemImage: "wifi.exclamationmark", tint: Theme.warning, size: 50)
+                .symbolEffect(.bounce, value: reduceMotion ? false : outcome.reconnectFailed)
+                .transition(.scale.combined(with: .opacity))
+        } else if !countdownOver {
             TimelineView(.periodic(from: outcome.appliedAt, by: 1)) { context in
                 let elapsed = context.date.timeIntervalSince(outcome.appliedAt)
                 let remaining = max(0, Int((expectedDuration - elapsed).rounded(.up)))
                 RingGauge(value: min(1, max(0, elapsed / expectedDuration)), lineWidth: 6,
                           colors: [Theme.printing, Theme.teal],
                           valueText: remaining > 0 ? "\(remaining)" : nil)
-                    .overlay {
-                        if remaining == 0 {
-                            ProgressRing(progress: nil, size: 22, lineWidth: 3)
-                        }
-                    }
             }
             .transition(.opacity)
+        } else if outcome.reconnecting {
+            ZStack {
+                PulseRings(color: Theme.printing, active: !reduceMotion)
+                ProgressRing(progress: nil, size: 30, lineWidth: 3.5)
+            }
+            .transition(.opacity)
+        } else {
+            IconBadge(systemImage: awaitsHostSwitch ? "arrow.triangle.swap" : "bolt.horizontal.circle",
+                      tint: Theme.printing, size: 50)
+                .transition(.scale.combined(with: .opacity))
         }
     }
 }

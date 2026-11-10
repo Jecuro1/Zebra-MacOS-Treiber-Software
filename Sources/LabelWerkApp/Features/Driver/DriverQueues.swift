@@ -135,7 +135,7 @@ struct DriverQueueRow: View {
                 .help(tr("Angehaltene Warteschlange wieder aktivieren"))
             }
             Button {
-                testPulse += 1
+                if !reduceMotion { testPulse += 1 }
                 onTestPage()
             } label: {
                 Label(tr("Testseite"), systemImage: "doc.text.image")
@@ -169,7 +169,7 @@ struct DriverQueueRow: View {
             .accessibilityLabel(tr("Entfernen"))
         }
         .disabled(isBusy)
-        .animation(Motion.snappy, value: isBusy)
+        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: isBusy)
     }
 
     private func badge(_ text: String, tint: Color) -> some View {

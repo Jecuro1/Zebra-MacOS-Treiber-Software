@@ -95,7 +95,9 @@ struct GlassCard<Content: View>: View {
 private struct ShimmerModifier: ViewModifier {
     let active: Bool
     @State private var phase: CGFloat = -1
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
 
     func body(content: Content) -> some View {
         content
@@ -127,7 +129,9 @@ private struct ShimmerModifier: ViewModifier {
 
 private struct CardHoverModifier: ViewModifier {
     @State private var hovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
 
     func body(content: Content) -> some View {
         content

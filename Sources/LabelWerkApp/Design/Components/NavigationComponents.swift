@@ -9,7 +9,9 @@ struct AnimatedTabBar<Item: Hashable>: View {
 
     @Namespace private var namespace
     @State private var hovered: Item?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
 
     init(items: [Item], selection: Binding<Item>, title: @escaping (Item) -> String,
          systemImage: @escaping (Item) -> String) {

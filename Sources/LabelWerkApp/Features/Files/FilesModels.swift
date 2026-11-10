@@ -398,6 +398,8 @@ final class FilesBrowserModel {
     private(set) var deleting: Set<String> = []
     /// Erhöht sich nach jedem erfolgreichen Laden (für Animationen).
     private(set) var loadCount = 0
+    /// Zählt Ladevorgänge; nur der jüngste darf den Zustand setzen.
+    @ObservationIgnored private var loadGeneration = 0
 
     init() {}
 
@@ -437,13 +439,21 @@ final class FilesBrowserModel {
     // MARK: Laden
 
     func load(session: PrinterSession, reduceMotion: Bool) async {
+        loadGeneration += 1
+        let generation = loadGeneration
         let requested = drive
         withAnimation(reduceMotion ? nil : Motion.snappy) {
             isLoading = true
             loadError = nil
         }
         let result = await session.listFiles(drive: requested.code)
-        guard !Task.isCancelled, requested == drive else { return }
+        // Ein neuerer Ladevorgang (z. B. nach Laufwerkswechsel) übernimmt den Zustand.
+        guard generation == loadGeneration else { return }
+        guard !Task.isCancelled, requested == drive else {
+            // Abgebrochen (Ansicht verlassen): Ladeanzeige nicht hängen lassen.
+            withAnimation(reduceMotion ? nil : Motion.snappy) { isLoading = false }
+            return
+        }
         var error: String?
         if !session.connectionState.isConnected {
             error = session.lastError ?? tr("Der Drucker ist nicht verbunden.")
@@ -461,7 +471,7 @@ final class FilesBrowserModel {
     }
 
     /// Liest freien/gesamten Speicher (Link-OS-SGD). Ohne Antwort bleibt die Anzeige leer.
-    func loadMemory(session: PrinterSession) async {
+    func loadMemory(session: PrinterSession, reduceMotion: Bool) async {
         guard session.supportsStatus, session.connectionState.isConnected else { return }
         let names = FilesDrive.allCases.compactMap(\.memoryVariables).flatMap { [$0.free, $0.size] }
         let values = await session.getvars(names)
@@ -473,7 +483,7 @@ final class FilesBrowserModel {
                                        free: FilesMemoryInfo.parseBytes(values[variables.free]))
             if info.isKnown { result[drive] = info }
         }
-        withAnimation(Motion.spring) { memory = result }
+        withAnimation(reduceMotion ? nil : Motion.spring) { memory = result }
     }
 
     // MARK: Löschen
@@ -481,7 +491,7 @@ final class FilesBrowserModel {
     @discardableResult
     func delete(_ file: PrinterFile, session: PrinterSession, model: AppModel, reduceMotion: Bool) async -> Bool {
         guard !deleting.contains(file.id) else { return false }
-        withAnimation(Motion.snappy) { _ = deleting.insert(file.id) }
+        withAnimation(reduceMotion ? nil : Motion.snappy) { _ = deleting.insert(file.id) }
         let ok = await session.deleteFile(FilesZPL.path(drive: file.drive, name: file.name))
         withAnimation(reduceMotion ? nil : Motion.spring) {
             _ = deleting.remove(file.id)
@@ -489,7 +499,7 @@ final class FilesBrowserModel {
         }
         if ok {
             model.toast(tr("Datei gelöscht"), message: FilesZPL.path(drive: file.drive, name: file.name), style: .success)
-            await loadMemory(session: session)
+            await loadMemory(session: session, reduceMotion: reduceMotion)
         }
         return ok
     }

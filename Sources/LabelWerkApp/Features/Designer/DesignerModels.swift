@@ -271,7 +271,7 @@ enum DesignerCanvasMath {
     }
 
     /// Umrandung eines Elements in Anzeigekoordinaten (Punkte), berücksichtigt `^POI`/`^PMY`
-    /// genau wie `LabelCanvas`.
+    /// genau wie `LabelCanvas` und `DesignerRaster.asPrinted(_:)`.
     static func displayRect(of index: Int, in label: RenderedLabel) -> CGRect? {
         guard label.elements.indices.contains(index) else { return nil }
         let box = label.elements[index].boundingBox
@@ -305,6 +305,59 @@ enum DesignerCanvasMath {
         let lower = Double(horizontal ? rect.minX : rect.minY) / dpmm
         let upper = Double(horizontal ? rect.maxX : rect.maxY) / dpmm
         return lower...max(lower, upper)
+    }
+}
+
+// MARK: - Rasterung „wie gedruckt“
+
+/// Druckaufträge aus dem ZPL-Designer für Drucker ohne ZPL (EPL/CPCL).
+enum DesignerGraphicJob: Sendable {
+    /// Gerasterte Etiketten (Reihenfolge wie im Dokument) und Kopien je Durchlauf.
+    case ready(images: [GrayImage], copies: Int)
+    /// Das Dokument enthält kein Etikett.
+    case empty
+    /// Unterschiedliche `^PQ`-Mengen ergäben mehr Einzelbilder als sinnvoll übertragbar.
+    case tooManyLabels(Int)
+}
+
+enum DesignerRaster {
+    /// Obergrenze für einzeln gerasterte Etiketten, wenn sich die `^PQ`-Mengen unterscheiden.
+    static let maximumExpandedLabels = 2000
+
+    /// Pixelgenaue Rasterung „wie gedruckt“. `^POI` (180°) und `^PMY` (Spiegeln) werden hier
+    /// selbst angewendet – unabhängig davon, ob `SoftwareRasterizer` die Flags auswertet. So passt
+    /// das Ergebnis immer zur Vektorvorschau (`LabelCanvas`) und zu `DesignerCanvasMath.displayRect`.
+    static func asPrinted(_ label: RenderedLabel) -> MonoBitmap {
+        var plain = label
+        plain.inverted = false
+        plain.mirrored = false
+        var bitmap = SoftwareRasterizer.rasterize(plain)
+        if label.inverted { bitmap = bitmap.rotated180() }
+        if label.mirrored { bitmap = bitmap.mirrored() }
+        return bitmap
+    }
+
+    /// Rastert alle Etiketten eines ZPL-Dokuments für den Grafikdruck. Eine `^PQ`-Menge im Format
+    /// hat Vorrang vor `copies` – genau wie beim ZPL-Druck (`PrinterSession.applyingQuantity`).
+    static func graphicJob(zpl: String, geometry: DesignerLabelGeometry, copies: Int) -> DesignerGraphicJob {
+        let document = ZPLInterpreter(dotsPerMM: geometry.dotsPerMM,
+                                      defaultWidthDots: geometry.widthDots,
+                                      defaultHeightDots: geometry.heightDots).render(zpl)
+        let labels = document.labels.filter { $0.widthDots > 0 && $0.heightDots > 0 }
+        guard !labels.isEmpty else { return .empty }
+        let quantities = labels.map { $0.quantity > 1 ? $0.quantity : max(1, copies) }
+        if let first = quantities.first, quantities.allSatisfy({ $0 == first }) {
+            return .ready(images: labels.map { asPrinted($0).toGrayImage() }, copies: first)
+        }
+        let total = quantities.reduce(0, +)
+        guard total <= maximumExpandedLabels else { return .tooManyLabels(total) }
+        var images: [GrayImage] = []
+        images.reserveCapacity(total)
+        for (label, quantity) in zip(labels, quantities) {
+            // Gleiche Bilder teilen sich den Speicher (Copy-on-Write).
+            images.append(contentsOf: repeatElement(asPrinted(label).toGrayImage(), count: quantity))
+        }
+        return .ready(images: images, copies: 1)
     }
 }
 
@@ -343,6 +396,7 @@ final class DesignerPreviewState {
     private(set) var hoverFromCanvas = false
 
     @ObservationIgnored private var renderToken = 0
+    @ObservationIgnored private var rasterToken = 0
     @ObservationIgnored private var lastKey: DesignerRenderKey?
 
     var labels: [RenderedLabel] { document?.labels ?? [] }
@@ -361,7 +415,13 @@ final class DesignerPreviewState {
 
     /// Rendert das Dokument im Hintergrund; bei `debounce` erst nach 250 ms Ruhe.
     func render(_ key: DesignerRenderKey, debounce: Bool) async {
-        if key == lastKey, document != nil { return }
+        if key == lastKey, document != nil {
+            // Zurück auf den angezeigten Stand (z. B. ⌘Z): Ein noch laufendes Rendering eines
+            // verworfenen Stands darf danach nicht mehr landen.
+            renderToken += 1
+            isRendering = false
+            return
+        }
         if debounce && document != nil {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
         }
@@ -393,10 +453,14 @@ final class DesignerPreviewState {
         guard style == .pixel, let label = currentLabel else { return }
         let request = DesignerRasterRequest(generation: generation, index: labelIndex, style: .pixel)
         guard rasterRequest != request else { return }
+        rasterToken += 1
+        let token = rasterToken
         isRasterizing = true
         let bitmap = await Task.detached(priority: .userInitiated) {
-            SoftwareRasterizer.rasterize(label)
+            DesignerRaster.asPrinted(label)
         }.value
+        // Eine neuere Rasterung läuft bereits – sie setzt Ergebnis und Anzeige.
+        guard token == rasterToken else { return }
         isRasterizing = false
         guard generation == request.generation, labelIndex == request.index else { return }
         raster = bitmap

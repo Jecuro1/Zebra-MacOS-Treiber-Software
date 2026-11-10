@@ -200,7 +200,9 @@ private struct ToastView: View {
 struct PulseRings: View {
     let color: Color
     var active: Bool = true
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
 
     init(color: Color, active: Bool = true) {
         self.color = color
@@ -232,7 +234,9 @@ struct CelebrationBurst: View {
     var colors: [Color] = [Theme.violet, Theme.teal, Theme.magenta]
 
     @State private var start: Date?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
     private let duration: TimeInterval = 1.4
 
     init(trigger: Int, colors: [Color] = [Theme.violet, Theme.teal, Theme.magenta]) {

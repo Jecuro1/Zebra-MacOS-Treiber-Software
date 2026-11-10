@@ -149,8 +149,10 @@ struct OnboardingWelcomePage: View {
                     PrinterIllustration(state: .ready, isPrinting: false, accent: Theme.violet,
                                         category: .desktop, labelAspect: 1.4, printTrigger: printTrigger)
                         .frame(width: 190, height: 210)
-                        .onTapGesture { printTrigger += 1 }
-                        .help(tr("Klicken für einen Probedruck"))
+                        .onTapGesture {
+                            if !reduceMotion { printTrigger += 1 }
+                        }
+                        .help(reduceMotion ? "" : tr("Klicken für einen Probedruck"))
                 }
                 .onboardingAppear(0, reduceMotion: reduceMotion)
 
@@ -304,7 +306,7 @@ struct OnboardingDriverPage: View {
             if installer.isInstalled { pulseFlow(4) }
         }
         .onChange(of: installer.successCount) { _, _ in
-            successPop += 1
+            if !reduceMotion { successPop += 1 }
             pulseFlow(5)
         }
     }
@@ -670,10 +672,10 @@ struct OnboardingNotificationsPage: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(alert.severity.color)
                 }
-                Text(verbatim: "\(printerName): \(alert.title)")
+                Text(verbatim: "\(printerName): \(tr(alert.title))")
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
-                Text(alert.recovery)
+                Text(tr(alert.recovery))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -688,7 +690,7 @@ struct OnboardingNotificationsPage: View {
 
     private func requestPermission() {
         requesting = true
-        bell += 1
+        if !reduceMotion { bell += 1 }
         NotificationService.shared.setUp()
         Task {
             // Der Systemdialog antwortet asynchron – kurz nachfragen, bis eine Entscheidung vorliegt.
@@ -793,6 +795,7 @@ struct OnboardingDonePage: View {
             .onboardingAppear(8, reduceMotion: reduceMotion)
         }
         .task {
+            guard !reduceMotion else { return }
             try? await Task.sleep(for: .milliseconds(350))
             pop += 1
             burst += 1

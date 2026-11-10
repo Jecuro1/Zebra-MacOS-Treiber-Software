@@ -6,7 +6,9 @@ struct StatusOrb: View {
     let state: PrinterState
     var size: CGFloat = 12
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
 
     init(state: PrinterState, size: CGFloat = 12) {
         self.state = state

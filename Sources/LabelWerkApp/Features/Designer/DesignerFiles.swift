@@ -7,12 +7,15 @@ import LabelWerkKit
 enum DesignerFileError: LocalizedError {
     case tooLarge(String)
     case unreadable(String)
+    case binary(String)
     case noPages(String)
 
     var errorDescription: String? {
         switch self {
         case .tooLarge(let name): return tr("„%@“ ist zu groß für den Editor (höchstens 16 MB).", name)
         case .unreadable(let name): return tr("„%@“ ist keine lesbare Textdatei.", name)
+        case .binary(let name):
+            return tr("„%@“ enthält Binärdaten (z. B. ein ZebraDesigner-Etikett) und kann nicht als ZPL-Text bearbeitet werden.", name)
         case .noPages(let name): return tr("„%@“ enthält keine darstellbaren Seiten.", name)
         }
     }
@@ -55,7 +58,8 @@ enum DesignerFiles {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
-    /// Liest eine Textdatei (UTF-8, ersatzweise ISO-Latin-1).
+    /// Liest eine Textdatei (UTF-8, UTF-16 mit BOM, ersatzweise ISO-Latin-1). Dateien mit
+    /// NUL-Bytes sind binär (ISO-Latin-1 würde sie sonst stillschweigend als Zeichensalat laden).
     static func readText(_ url: URL) throws -> String {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
@@ -63,6 +67,11 @@ enum DesignerFiles {
             throw DesignerFileError.tooLarge(url.lastPathComponent)
         }
         let data = try Data(contentsOf: url)
+        let byteOrderMarks: [[UInt8]] = [[0xFF, 0xFE], [0xFE, 0xFF]]
+        if byteOrderMarks.contains(where: { data.starts(with: $0) }), let text = String(data: data, encoding: .utf16) {
+            return text
+        }
+        if data.contains(0) { throw DesignerFileError.binary(url.lastPathComponent) }
         if let text = String(data: data, encoding: .utf8) { return text }
         if let text = String(data: data, encoding: .isoLatin1) { return text }
         throw DesignerFileError.unreadable(url.lastPathComponent)

@@ -85,6 +85,8 @@ final class DiscoveryController {
 
     private(set) var found: [DiscoveredPrinter] = []
     private(set) var isScanning = false
+    /// Quellen der laufenden Suche (leer, wenn keine läuft).
+    private(set) var activeSources: Set<DiscoverySource> = []
     private(set) var startedAt: Date?
     private(set) var duration: Double = 8
     /// Anzahl abgeschlossener Suchläufe.
@@ -117,11 +119,18 @@ final class DiscoveryController {
         found.reduce(0) { $0 + ($1.source == source ? 1 : 0) }
     }
 
+    /// `true`, wenn gerade eine Suche über mindestens eine der Quellen läuft.
+    func isScanningAny(of candidates: Set<DiscoverySource>) -> Bool {
+        isScanning && !activeSources.isDisjoint(with: candidates)
+    }
+
     /// Startet eine neue Suche (eine laufende wird beendet). `override` ersetzt die gewählten Quellen.
     func start(sources override: Set<DiscoverySource>? = nil) {
-        cancelRunningTask()
+        // Ohne Quellen nichts tun – vor allem eine laufende Suche nicht abbrechen, ohne sie zu beenden
+        // (sonst bliebe `isScanning` hängen und das Radar liefe weiter).
         let selected = override ?? sources
         guard !selected.isEmpty else { return }
+        cancelRunningTask()
         let currentGeneration = generation
         let seconds = DiscoverySourceStyle.duration(for: selected)
         found = []
@@ -130,6 +139,7 @@ final class DiscoveryController {
         lastDelay = 0
         duration = seconds
         startedAt = Date()
+        activeSources = selected
         isScanning = true
 
         let discovery = PrinterDiscovery()
@@ -162,6 +172,7 @@ final class DiscoveryController {
 
     private func finish() {
         isScanning = false
+        activeSources = []
         startedAt = nil
         scanCount += 1
         lastFinishedAt = Date()
@@ -387,6 +398,100 @@ enum DiscoveryFeatureText {
         case .display: return tr("Display")
         case .linerless: return tr("Linerless")
         case .battery: return tr("Akku")
+        }
+    }
+}
+
+// MARK: - Details gefundener Drucker (Anzeige)
+
+/// Lesbare Bezeichnungen und Werte für `DiscoveredPrinter.details` (Schlüssel aus dem Transport-Modul).
+enum DiscoveryDetailText {
+    /// Anzeigereihenfolge bekannter Schlüssel; unbekannte folgen alphabetisch.
+    private static let order: [String] = [
+        "name", "sysName", "serviceName", "productName", "makeAndModel", "sysDescr",
+        "host", "port", "servicePort", "serviceType", "deviceURI", "isDefault",
+        "address", "identifier", "rssi",
+        "serialNumber", "vendorID", "productID", "locationID",
+        "firmware", "dotsPerMM", "memory", "location", "adminURL", "identifiedBy",
+    ]
+
+    /// Schlüssel in sinnvoller Reihenfolge.
+    static func sortedKeys(_ details: [String: String]) -> [String] {
+        details.keys.sorted { lhs, rhs in
+            let left = order.firstIndex(of: lhs) ?? Int.max
+            let right = order.firstIndex(of: rhs) ?? Int.max
+            if left != right { return left < right }
+            return lhs < rhs
+        }
+    }
+
+    static func title(for key: String) -> String {
+        switch key {
+        case "host": return tr("Adresse")
+        case "port": return tr("Port")
+        case "servicePort": return tr("Dienst-Port")
+        case "serviceName": return tr("Dienstname")
+        case "serviceType": return tr("Diensttyp")
+        case "sysDescr": return tr("Systembeschreibung (SNMP)")
+        case "sysName": return tr("Gerätename (SNMP)")
+        case "identifiedBy": return tr("Erkannt über")
+        case "firmware": return tr("Firmware")
+        case "dotsPerMM": return tr("Auflösung")
+        case "memory": return tr("Speicher")
+        case "deviceURI": return tr("Geräte-URI")
+        case "isDefault": return tr("Standarddrucker")
+        case "makeAndModel": return tr("Treiber")
+        case "location": return tr("Standort")
+        case "adminURL": return tr("Verwaltungsseite")
+        case "productName": return tr("Produktname")
+        case "productID": return tr("Produkt-ID")
+        case "vendorID": return tr("Hersteller-ID")
+        case "serialNumber": return tr("Seriennummer")
+        case "locationID": return tr("USB-Anschluss")
+        case "address": return tr("Bluetooth-Adresse")
+        case "name": return tr("Gerätename")
+        case "identifier": return tr("Kennung")
+        case "rssi": return tr("Signalstärke")
+        default: return key
+        }
+    }
+
+    static func value(for key: String, raw: String) -> String {
+        switch key {
+        case "isDefault":
+            switch raw.lowercased() {
+            case "true", "yes", "1": return tr("Ja")
+            case "false", "no", "0": return tr("Nein")
+            default: return raw
+            }
+        case "identifiedBy":
+            let methods = raw.split(separator: "+").map { part -> String in
+                switch part.lowercased() {
+                case "snmp": return "SNMP"
+                case "hi": return tr("Host-Identifikation (~HI)")
+                default: return String(part)
+                }
+            }
+            return methods.joined(separator: " + ")
+        case "rssi":
+            guard let level = Int(raw.trimmingCharacters(in: .whitespaces)) else { return raw }
+            return tr("%d dBm", level)
+        case "dotsPerMM":
+            guard let dotsPerMM = Int(raw.trimmingCharacters(in: .whitespaces)), dotsPerMM > 0 else { return raw }
+            return tr("%d Punkte/mm (%d dpi)", dotsPerMM, dpi(forDotsPerMM: dotsPerMM))
+        default:
+            return raw
+        }
+    }
+
+    /// Zebra-Druckköpfe: 6 → 152, 8 → 203, 12 → 300, 24 → 600 dpi.
+    static func dpi(forDotsPerMM dotsPerMM: Int) -> Int {
+        switch dotsPerMM {
+        case 6: return 152
+        case 8: return 203
+        case 12: return 300
+        case 24: return 600
+        default: return Int((Double(dotsPerMM) * 25.4).rounded())
         }
     }
 }

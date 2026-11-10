@@ -12,14 +12,13 @@ struct DesignerView: View {
     @AppStorage("designer.stockOverrideID") private var stockOverrideID = ""
     @AppStorage("designer.fallbackResolution") private var fallbackResolution: Resolution = .dpi203
 
-    @State private var mode: DesignerMode = .zpl
-    @State private var preview = DesignerPreviewState()
-    @State private var imageState = DesignerImageState()
-    @State private var documentTitle = ""
     @State private var isTargetPickerPresented = false
     @State private var didSetUp = false
 
     init() {}
+
+    /// Vorschau, Bild, Arbeitsbereich und Titel überdauern das Verlassen des Designers.
+    @MainActor private var store: DesignerStore { .shared }
 
     private var reduceMotion: Bool { systemReduceMotion || model.preferences.reduceMotion }
 
@@ -36,27 +35,28 @@ struct DesignerView: View {
     }
 
     var body: some View {
+        @Bindable var store = store
         let session = targetSession
         let target = DesignerTarget.make(session: session, stockOverride: stockOverride,
                                          fallbackResolution: fallbackResolution)
+        let pending = store.pendingReplacement
         VStack(spacing: 0) {
             header(target: target, session: session)
                 .padding(.horizontal, Theme.Metrics.paddingLarge)
                 .padding(.top, Theme.Metrics.padding)
 
-            AnimatedTabBar(items: DesignerMode.allCases, selection: $mode,
+            AnimatedTabBar(items: DesignerMode.allCases, selection: $store.mode,
                            title: { $0.title }, systemImage: { $0.systemImage })
                 .padding(.horizontal, Theme.Metrics.paddingLarge)
                 .padding(.vertical, 12)
 
             ZStack {
-                switch mode {
+                switch store.mode {
                 case .zpl:
-                    DesignerZPLWorkspace(target: target, session: session, preview: preview,
-                                         documentTitle: $documentTitle, reduceMotion: reduceMotion)
+                    DesignerZPLWorkspace(target: target, session: session, store: store, reduceMotion: reduceMotion)
                         .transition(transition(from: .leading))
                 case .image:
-                    DesignerImageWorkspace(target: target, session: session, state: imageState,
+                    DesignerImageWorkspace(target: target, session: session, state: store.image,
                                            reduceMotion: reduceMotion,
                                            onAdopt: { zpl, title in adopt(zpl, title: title) })
                         .transition(transition(from: .trailing))
@@ -65,7 +65,7 @@ struct DesignerView: View {
             .padding(.horizontal, Theme.Metrics.paddingLarge)
             .padding(.bottom, Theme.Metrics.padding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: mode)
+            .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: store.mode)
         }
         .background {
             AnimatedBackground(style: .subtle)
@@ -73,6 +73,18 @@ struct DesignerView: View {
         }
         .navigationTitle(tr("Etiketten-Designer"))
         .navigationSubtitle(target.summary)
+        .confirmationDialog(pending?.origin == .template ? tr("Vorlage übernehmen?") : tr("Dokument ersetzen?"),
+                            isPresented: Binding(get: { store.pendingReplacement != nil },
+                                                 set: { if !$0 { store.pendingReplacement = nil } }),
+                            titleVisibility: .visible,
+                            presenting: pending) { replacement in
+            Button(tr("Dokument ersetzen")) { perform(replacement, append: false) }
+            Button(tr("Als weiteres Etikett anhängen")) { perform(replacement, append: true) }
+            Button(tr("Abbrechen"), role: .cancel) { store.pendingReplacement = nil }
+        } message: { replacement in
+            Text(tr("Der Editor enthält Änderungen. „%@“ ersetzt den Inhalt – oder wird als zusätzliches Etikett angehängt.",
+                    replacement.title))
+        }
         .onAppear { setUp(target: target) }
     }
 
@@ -95,7 +107,7 @@ struct DesignerView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 12)
-            DesignerTargetButton(target: target, session: session) {
+            DesignerTargetButton(target: target, session: session, reduceMotion: reduceMotion) {
                 isTargetPickerPresented.toggle()
             }
             .popover(isPresented: $isTargetPickerPresented, arrowEdge: .bottom) {
@@ -114,23 +126,41 @@ struct DesignerView: View {
     private func setUp(target: DesignerTarget) {
         guard !didSetUp else { return }
         didSetUp = true
-        if !imageState.didApplyPreferences {
-            imageState.dither = model.preferences.imageDither
-            imageState.didApplyPreferences = true
+        let image = store.image
+        if !image.didApplyPreferences {
+            image.dither = model.preferences.imageDither
+            image.didApplyPreferences = true
         }
         if model.designerDocument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let template = DesignerTemplate.suggested(for: target.stock)
             model.designerDocument = template.zpl(geometry: target.geometry)
-            documentTitle = template.title
+            store.documentTitle = template.title
+            // Die Startvorlage gilt als unverändert: Eine andere Vorlage ersetzt sie ohne Rückfrage.
+            store.markGenerated(model.designerDocument)
         }
     }
 
-    /// Übernimmt ZPL aus „Bild & PDF“ und wechselt animiert in den Editor.
+    /// Übernimmt ZPL aus „Bild & PDF“ (bei geändertem Dokument erst nach Rückfrage).
     private func adopt(_ zpl: String, title: String) {
-        model.designerDocument = zpl
-        documentTitle = title
+        let replacement = DesignerReplacement(zpl: zpl, title: title, systemImage: "photo.on.rectangle.angled",
+                                              origin: .image, notice: tr("Übernommen: %@", title))
+        if store.request(replacement, in: model) {
+            didAdopt(title)
+        }
+    }
+
+    /// Antwort aus dem Rückfrage-Dialog.
+    private func perform(_ replacement: DesignerReplacement, append: Bool) {
+        store.apply(replacement, append: append, in: model)
+        if replacement.origin == .image {
+            didAdopt(replacement.title)
+        }
+    }
+
+    /// Nach der Übernahme animiert in den Editor wechseln.
+    private func didAdopt(_ title: String) {
         withAnimation(Motion.animation(Motion.spring, reduceMotion: reduceMotion)) {
-            mode = .zpl
+            store.mode = .zpl
         }
         model.toast(tr("In den Designer übernommen"), message: title, style: .success)
     }
@@ -149,6 +179,7 @@ struct DesignerView: View {
 private struct DesignerTargetButton: View {
     let target: DesignerTarget
     let session: PrinterSession?
+    let reduceMotion: Bool
     let action: () -> Void
 
     @State private var hovering = false
@@ -179,14 +210,14 @@ private struct DesignerTargetButton: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .labelWerkGlass(cornerRadius: 12, tint: session?.accentColor)
-            .scaleEffect(hovering ? 1.02 : 1)
+            .scaleEffect(hovering && !reduceMotion ? 1.02 : 1)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { inside in
-            withAnimation(Motion.snappy) { hovering = inside }
+            withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) { hovering = inside }
         }
-        .animation(Motion.spring, value: target)
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: target)
         .help(tr("Zieldrucker und Etikettenformat wählen"))
     }
 }
@@ -223,7 +254,8 @@ private struct DesignerTargetPicker: View {
             } else {
                 VStack(spacing: 4) {
                     ForEach(model.sessions) { session in
-                        DesignerTargetRow(session: session, isSelected: session.id == currentSessionID) {
+                        DesignerTargetRow(session: session, isSelected: session.id == currentSessionID,
+                                          reduceMotion: reduceMotion) {
                             onSelectSession(session.id)
                         }
                     }
@@ -241,7 +273,7 @@ private struct DesignerTargetPicker: View {
                 ForEach(LabelStock.Category.allCases, id: \.self) { category in
                     let stocks = model.allStocks.filter { $0.category == category }
                     if !stocks.isEmpty {
-                        Section(category.displayName) {
+                        Section(tr(category.displayName)) {
                             ForEach(stocks) { stock in
                                 Text(stock.name).tag(stock.id)
                             }
@@ -275,6 +307,7 @@ private struct DesignerTargetPicker: View {
 private struct DesignerTargetRow: View {
     let session: PrinterSession
     let isSelected: Bool
+    let reduceMotion: Bool
     let action: () -> Void
 
     @State private var hovering = false
@@ -309,6 +342,6 @@ private struct DesignerTargetRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(Motion.snappy, value: isSelected)
+        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: isSelected)
     }
 }

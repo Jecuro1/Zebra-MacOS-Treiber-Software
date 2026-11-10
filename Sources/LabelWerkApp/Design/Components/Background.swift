@@ -18,7 +18,9 @@ struct AnimatedBackground: View {
     let style: AnimatedBackgroundStyle
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
     @Environment(\.controlActiveState) private var controlActiveState
 
     init(style: AnimatedBackgroundStyle) {

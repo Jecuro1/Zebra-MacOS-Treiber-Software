@@ -90,8 +90,10 @@ struct FirmwareTransferCard: View {
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
-                    CelebrationBurst(trigger: controller.celebration)
-                        .frame(width: 280, height: 280)
+                    if !reduceMotion {
+                        CelebrationBurst(trigger: controller.celebration)
+                            .frame(width: 280, height: 280)
+                    }
                 }
                 .frame(width: 136, height: 136)
 
@@ -300,7 +302,7 @@ struct FirmwarePostUpdateCard: View {
             .transition(.opacity.combined(with: .scale(scale: 0.9)))
         case .reconnecting:
             ZStack {
-                PulseRings(color: Theme.printing, active: true)
+                PulseRings(color: Theme.printing, active: !reduceMotion)
                 IconBadge(systemImage: "antenna.radiowaves.left.and.right", tint: Theme.printing, size: 58)
                     .symbolEffect(.variableColor.iterative, options: .repeating, isActive: !reduceMotion)
             }
@@ -308,7 +310,7 @@ struct FirmwarePostUpdateCard: View {
         case .completed:
             ZStack {
                 IconBadge(systemImage: "checkmark.seal.fill", tint: Theme.ready, size: 84)
-                    .keyframeAnimator(initialValue: FirmwareBadgeBounce(), trigger: controller.celebration) { content, value in
+                    .keyframeAnimator(initialValue: FirmwareBadgeBounce(), trigger: reduceMotion ? 0 : controller.celebration) { content, value in
                         content
                             .scaleEffect(value.scale)
                             .rotationEffect(.degrees(value.angle))
@@ -324,13 +326,15 @@ struct FirmwarePostUpdateCard: View {
                             SpringKeyframe(0, duration: 0.45, spring: .bouncy)
                         }
                     }
-                CelebrationBurst(trigger: controller.celebration, colors: [Theme.ready, Theme.teal, Theme.violet, Theme.magenta])
-                    .frame(width: 320, height: 320)
+                if !reduceMotion {
+                    CelebrationBurst(trigger: controller.celebration, colors: [Theme.ready, Theme.teal, Theme.violet, Theme.magenta])
+                        .frame(width: 320, height: 320)
+                }
             }
             .transition(.scale(scale: 0.6).combined(with: .opacity))
         case .reconnectFailed:
             IconBadge(systemImage: "wifi.exclamationmark", tint: Theme.warning, size: 84)
-                .symbolEffect(.bounce, value: controller.reconnectLog.count)
+                .symbolEffect(.bounce, value: reduceMotion ? 0 : controller.reconnectLog.count)
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
         default:
             ProgressRing(progress: nil, size: 60, lineWidth: 6)

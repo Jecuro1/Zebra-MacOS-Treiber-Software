@@ -247,6 +247,24 @@ struct NetConfigDraft: Equatable {
     func bluetoothDiffers(from initial: NetConfigDraft) -> Bool {
         bluetoothName != initial.bluetoothName || bluetoothDiscoverable != initial.bluetoothDiscoverable
     }
+
+    /// Überträgt die eigenen Änderungen (gegenüber `oldBase`) auf einen neu gelesenen Stand `newBase`.
+    func rebased(from oldBase: NetConfigDraft, onto newBase: NetConfigDraft) -> NetConfigDraft {
+        var result = newBase
+        if useDHCP != oldBase.useDHCP { result.useDHCP = useDHCP }
+        if ipAddress != oldBase.ipAddress { result.ipAddress = ipAddress }
+        if subnetMask != oldBase.subnetMask { result.subnetMask = subnetMask }
+        if gateway != oldBase.gateway { result.gateway = gateway }
+        if dnsServer != oldBase.dnsServer { result.dnsServer = dnsServer }
+        if hostname != oldBase.hostname { result.hostname = hostname }
+        if wlanEnabled != oldBase.wlanEnabled { result.wlanEnabled = wlanEnabled }
+        if wlanSSID != oldBase.wlanSSID { result.wlanSSID = wlanSSID }
+        if wlanSecurity != oldBase.wlanSecurity { result.wlanSecurity = wlanSecurity }
+        if wlanPassphrase != oldBase.wlanPassphrase { result.wlanPassphrase = wlanPassphrase }
+        if bluetoothName != oldBase.bluetoothName { result.bluetoothName = bluetoothName }
+        if bluetoothDiscoverable != oldBase.bluetoothDiscoverable { result.bluetoothDiscoverable = bluetoothDiscoverable }
+        return result
+    }
 }
 
 // MARK: - Änderungsliste
@@ -415,6 +433,10 @@ struct NetConfigOutcome: Equatable {
     var switchedToDHCP: Bool
     var hostUpdated = false
     var reconnected = false
+    /// Die automatische Wiederverbindung läuft (Wartezeit oder Versuche).
+    var reconnecting = false
+    /// Alle Wiederverbindungsversuche sind fehlgeschlagen.
+    var reconnectFailed = false
 }
 
 @Observable
@@ -432,6 +454,8 @@ final class NetConfigEditor {
     private(set) var shakeTokens: [NetConfigField: Int] = [:]
     private(set) var localInterfaces: [NetworkInterfaceInfo] = []
     @ObservationIgnored private var reconnectTask: Task<Void, Never>?
+    /// Zählt geplante Wiederverbindungen; nur die jüngste räumt am Ende auf.
+    @ObservationIgnored private var reconnectGeneration = 0
 
     static let activeVariables = [
         "interface.network.active.ip_addr", "interface.network.active.netmask",
@@ -479,8 +503,9 @@ final class NetConfigEditor {
         withAnimation(reduceMotion ? nil : Motion.spring) {
             original = settings
             originalBluetooth = bluetooth
+            // Noch nicht übertragene Eingaben (z. B. während des Neustarts) bleiben erhalten.
+            draft = draft.rebased(from: initial, onto: fresh)
             initial = fresh
-            draft = fresh
             loadPhase = .loaded
         }
         await loadActive(session: session, reduceMotion: reduceMotion)
@@ -572,23 +597,27 @@ final class NetConfigEditor {
             return
         }
         guard let original, hasChanges, !isApplying else { return }
+        // Stand beim Auslösen festhalten: Nach den folgenden `await`s darf `draft` nicht erneut
+        // gelesen werden – sonst würden spätere Eingaben als „übertragen“ markiert, ohne gesendet zu sein.
+        let submitted = draft
+        let baseline = initial
+        let restart = submitted.networkDiffers(from: baseline) || !submitted.wlanPassphrase.isEmpty
         withAnimation(reduceMotion ? nil : Motion.spring) { isApplying = true }
         defer { withAnimation(reduceMotion ? nil : Motion.spring) { isApplying = false } }
 
         var ok = true
         if hasBluetooth, originalBluetooth != nil {
-            if draft.bluetoothName != initial.bluetoothName {
-                let result = await session.setvar("bluetooth.friendly_name", draft.bluetoothName)
+            if submitted.bluetoothName != baseline.bluetoothName {
+                let result = await session.setvar("bluetooth.friendly_name", submitted.bluetoothName)
                 ok = ok && result
             }
-            if draft.bluetoothDiscoverable != initial.bluetoothDiscoverable {
-                let result = await session.setvar("bluetooth.discoverable", draft.bluetoothDiscoverable ? "on" : "off")
+            if submitted.bluetoothDiscoverable != baseline.bluetoothDiscoverable {
+                let result = await session.setvar("bluetooth.discoverable", submitted.bluetoothDiscoverable ? "on" : "off")
                 ok = ok && result
             }
         }
 
-        let restart = needsRestart
-        let target = draft.applying(to: original, initial: initial)
+        let target = submitted.applying(to: original, initial: baseline)
         if restart {
             let result = await session.applyNetworkSettings(target)
             ok = ok && result
@@ -608,22 +637,28 @@ final class NetConfigEditor {
             }
         }
         let switchedToDHCP = restart && target.useDHCP && !original.useDHCP
-        let applied = draft
         withAnimation(reduceMotion ? nil : Motion.bouncy) {
             outcome = NetConfigOutcome(appliedAt: Date(), restartExpected: restart, suggestedHost: suggestedHost,
                                        port: port, switchedToDHCP: switchedToDHCP)
             // Übernommene Werte sind der neue Ausgangszustand; das Passwort wird nie gespeichert.
-            var accepted = applied
+            var accepted = submitted
             accepted.wlanPassphrase = ""
             initial = accepted
-            draft = accepted
+            if draft == submitted {
+                draft = accepted
+            } else if draft.wlanPassphrase == submitted.wlanPassphrase {
+                // Neuere Eingaben bleiben als ausstehende Änderungen erhalten; das bereits
+                // gesendete Passwort aber nicht noch einmal anbieten.
+                draft.wlanPassphrase = ""
+            }
             self.original = target
             if hasBluetooth, originalBluetooth != nil {
-                originalBluetooth = NetConfigBluetooth(friendlyName: applied.bluetoothName,
-                                                       discoverable: applied.bluetoothDiscoverable)
+                originalBluetooth = NetConfigBluetooth(friendlyName: submitted.bluetoothName,
+                                                       discoverable: submitted.bluetoothDiscoverable)
             }
         }
-        if restart && suggestedHost == nil && !switchedToDHCP {
+        // Bei DHCP zuerst die bisherige Adresse versuchen – oft bleibt die Zuweisung (Reservierung) gleich.
+        if restart && suggestedHost == nil {
             scheduleReconnect(session: session, reduceMotion: reduceMotion, wantsBluetooth: hasBluetooth)
         }
     }
@@ -641,16 +676,40 @@ final class NetConfigEditor {
     /// Wartet den Neustart ab und verbindet sich dann erneut (mehrere Versuche).
     func scheduleReconnect(session: PrinterSession, reduceMotion: Bool, wantsBluetooth: Bool, initialDelay: Double? = nil) {
         reconnectTask?.cancel()
+        reconnectGeneration += 1
+        let generation = reconnectGeneration
         let delay = initialDelay ?? (session.isVirtual ? 2 : 25)
+        updateOutcome(reduceMotion: reduceMotion) { outcome in
+            outcome.reconnecting = true
+            outcome.reconnectFailed = false
+        }
         reconnectTask = Task { [weak self] in
+            var succeeded = false
+            defer {
+                // `reconnect()` hält die Statusüberwachung an und `connect()` startet sie nur bei Erfolg neu.
+                // Ohne Verbindung übernimmt wieder die Überwachung (sie verbindet im Hintergrund weiter).
+                if !session.connectionState.isConnected { session.startMonitoring() }
+                if let self, self.reconnectGeneration == generation {
+                    self.reconnectTask = nil
+                    let cancelled = Task.isCancelled
+                    self.updateOutcome(reduceMotion: reduceMotion) { outcome in
+                        outcome.reconnecting = false
+                        if !succeeded && !cancelled { outcome.reconnectFailed = true }
+                    }
+                }
+            }
             try? await Task.sleep(for: .seconds(delay))
-            for _ in 0..<6 {
+            for attempt in 0..<6 {
                 guard !Task.isCancelled, let self else { return }
-                if !session.connectionState.isConnected { await session.reconnect() }
+                // Erster Versuch immer mit frischer Verbindung: Die alte endete mit dem Neustart.
+                if attempt == 0 || !session.connectionState.isConnected { await session.reconnect() }
+                guard !Task.isCancelled else { return }
                 if session.connectionState.isConnected {
-                    if var current = self.outcome {
-                        current.reconnected = true
-                        withAnimation(reduceMotion ? nil : Motion.bouncy) { self.outcome = current }
+                    succeeded = true
+                    self.updateOutcome(reduceMotion: reduceMotion, animation: Motion.bouncy) { outcome in
+                        outcome.reconnected = true
+                        outcome.reconnecting = false
+                        outcome.reconnectFailed = false
                     }
                     await session.refreshIdentity()
                     await self.load(session: session, reduceMotion: reduceMotion, wantsBluetooth: wantsBluetooth)
@@ -659,6 +718,26 @@ final class NetConfigEditor {
                 try? await Task.sleep(for: .seconds(8))
             }
         }
+    }
+
+    /// Die Sitzung ist nach dem Neustart wieder verbunden (z. B. über die Statusüberwachung oder
+    /// „Verbinden“ in der Seitenleiste), ohne dass die eigene Wiederverbindung lief.
+    func connectionRestored(session: PrinterSession, reduceMotion: Bool, wantsBluetooth: Bool) {
+        guard let current = outcome, current.restartExpected, !current.reconnected, !current.reconnecting else { return }
+        updateOutcome(reduceMotion: reduceMotion, animation: Motion.bouncy) { outcome in
+            outcome.reconnected = true
+            outcome.reconnectFailed = false
+        }
+        guard loadPhase != .loading else { return }
+        Task { await self.load(session: session, reduceMotion: reduceMotion, wantsBluetooth: wantsBluetooth) }
+    }
+
+    private func updateOutcome(reduceMotion: Bool, animation: Animation = Motion.spring,
+                               _ change: (inout NetConfigOutcome) -> Void) {
+        guard var current = outcome else { return }
+        change(&current)
+        guard current != outcome else { return }
+        withAnimation(reduceMotion ? nil : animation) { outcome = current }
     }
 
     func reconnectNow(session: PrinterSession, reduceMotion: Bool, wantsBluetooth: Bool) {

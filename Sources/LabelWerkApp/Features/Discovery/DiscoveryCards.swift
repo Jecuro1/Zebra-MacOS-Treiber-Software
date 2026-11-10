@@ -10,6 +10,7 @@ struct DiscoverySourceToggle: View {
     @Binding var isOn: Bool
     let count: Int
     var compact: Bool = false
+    var reduceMotion: Bool = false
 
     @State private var hovering = false
 
@@ -21,7 +22,7 @@ struct DiscoverySourceToggle: View {
             HStack(spacing: 6) {
                 Image(systemName: DiscoverySourceStyle.systemImage(source))
                     .font(.system(size: compact ? 10.5 : 11.5, weight: .semibold))
-                    .symbolEffect(.bounce, value: isOn)
+                    .symbolEffect(.bounce, value: reduceMotion ? false : isOn)
                     .frame(width: compact ? 13 : 15)
                 Text(DiscoverySourceStyle.title(source))
                     .font(.system(size: compact ? 11 : 12, weight: .semibold))
@@ -48,13 +49,13 @@ struct DiscoverySourceToggle: View {
             }
             .overlay(Capsule().strokeBorder(isOn ? Color.white.opacity(0.25) : Theme.cardStroke, lineWidth: 1))
             .contentShape(Capsule())
-            .scaleEffect(hovering ? 1.03 : 1)
+            .scaleEffect(hovering && !reduceMotion ? 1.03 : 1)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(Motion.spring, value: isOn)
-        .animation(Motion.snappy, value: hovering)
-        .animation(Motion.bouncy, value: count)
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: isOn)
+        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: hovering)
+        .animation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion), value: count)
         .help(DiscoverySourceStyle.detail(source))
         .accessibilityLabel(DiscoverySourceStyle.title(source))
         .accessibilityValue(isOn ? tr("Ein") : tr("Aus"))
@@ -123,7 +124,7 @@ struct DiscoveryPrinterCard: View {
             }
         }
         .onChange(of: isAdded) { _, added in
-            if added { successPulse += 1 }
+            if added && !reduceMotion { successPulse += 1 }
         }
     }
 
@@ -182,8 +183,10 @@ struct DiscoveryPrinterCard: View {
 
                 if showDetails {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(printer.details.keys.sorted(), id: \.self) { key in
-                            KeyValueRow(key, printer.details[key] ?? "", monospaced: true, copyable: true)
+                        ForEach(DiscoveryDetailText.sortedKeys(printer.details), id: \.self) { key in
+                            KeyValueRow(DiscoveryDetailText.title(for: key),
+                                        DiscoveryDetailText.value(for: key, raw: printer.details[key] ?? ""),
+                                        monospaced: true, copyable: true)
                         }
                     }
                     .padding(10)
@@ -203,7 +206,7 @@ struct DiscoveryPrinterCard: View {
             }
         }
         .cardHoverEffect()
-        .animation(Motion.snappy, value: isHighlighted)
+        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: isHighlighted)
     }
 
     // MARK: Kompakt (Onboarding)
@@ -240,7 +243,7 @@ struct DiscoveryPrinterCard: View {
                 .strokeBorder(isHighlighted ? tint : (isAdded ? Theme.ready.opacity(0.35) : Theme.cardStroke),
                               lineWidth: isHighlighted ? 1.5 : 1)
         }
-        .animation(Motion.snappy, value: isHighlighted)
+        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: isHighlighted)
     }
 
     // MARK: Bausteine

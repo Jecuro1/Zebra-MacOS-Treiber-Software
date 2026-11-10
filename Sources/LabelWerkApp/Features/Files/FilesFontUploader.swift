@@ -159,7 +159,8 @@ final class FilesFontUpload: Identifiable {
         // Statusabfragen pausieren, damit sie die Binärdaten nicht unterbrechen.
         session.stopMonitoring()
         let ok = await session.uploadFont(name: name, data: data, drive: drive.code)
-        if session.connectionState.isConnected { session.startMonitoring() }
+        // Immer wieder aufnehmen: Die Überwachung verbindet auch eine fehlgeschlagene Sitzung neu.
+        session.startMonitoring()
         withAnimation(reduceMotion ? nil : Motion.bouncy) {
             if ok {
                 phase = .done(path)
@@ -170,7 +171,7 @@ final class FilesFontUpload: Identifiable {
         }
         if ok {
             if browser.drive == drive { await browser.load(session: session, reduceMotion: reduceMotion) }
-            await browser.loadMemory(session: session)
+            await browser.loadMemory(session: session, reduceMotion: reduceMotion)
         }
     }
 
@@ -242,7 +243,7 @@ struct FilesFontComposer: View {
             ZStack {
                 IconBadge(systemImage: upload.phase.isDone ? "checkmark" : "textformat", tint: Theme.violet, size: 42)
                     .contentTransition(.symbolEffect(.replace))
-                    .keyframeAnimator(initialValue: FilesBadgePop(), trigger: upload.successCount) { content, value in
+                    .keyframeAnimator(initialValue: FilesBadgePop(), trigger: reduceMotion ? 0 : upload.successCount) { content, value in
                         content
                             .scaleEffect(value.scale)
                             .rotationEffect(.degrees(value.angle))
@@ -257,8 +258,10 @@ struct FilesFontComposer: View {
                             SpringKeyframe(0, duration: 0.4, spring: .bouncy)
                         }
                     }
-                CelebrationBurst(trigger: upload.successCount, colors: [Theme.violet, Theme.magenta, Theme.teal])
-                    .frame(width: 220, height: 220)
+                if !reduceMotion {
+                    CelebrationBurst(trigger: upload.successCount, colors: [Theme.violet, Theme.magenta, Theme.teal])
+                        .frame(width: 220, height: 220)
+                }
             }
             .frame(width: 42, height: 42)
             VStack(alignment: .leading, spacing: 2) {

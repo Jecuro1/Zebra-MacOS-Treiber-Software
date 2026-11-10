@@ -29,8 +29,10 @@ struct RootView: View {
         }
         .preferredColorScheme(colorScheme(for: model.preferences.appearance))
         .tint(Theme.accent)
+        .environment(\.appReduceMotion, model.preferences.reduceMotion)
         .task {
-            NotificationService.shared.setUp()
+            // Die Mitteilungs-Berechtigung fragt das Onboarding gezielt an.
+            if model.hasCompletedOnboarding { NotificationService.shared.setUp() }
             NotificationService.shared.onOpenPrinter = { id in
                 model.selection = .printer(id)
             }

@@ -47,7 +47,7 @@ struct FilesView: View {
             // Nacheinander, damit sich Verzeichnis- und Speicherabfrage nicht überschneiden.
             await browser.load(session: session, reduceMotion: reduceMotion)
             if browser.memory.isEmpty && !Task.isCancelled {
-                await browser.loadMemory(session: session)
+                await browser.loadMemory(session: session, reduceMotion: reduceMotion)
             }
         }
         .onChange(of: session.connectionState) { oldValue, newValue in
@@ -87,6 +87,7 @@ struct FilesView: View {
         } else {
             FilesUploadCard(
                 isPreparing: isPreparing,
+                reduceMotion: reduceMotion,
                 onDrop: handleDrop,
                 pickFont: pickFont,
                 pickGraphic: pickGraphic
@@ -192,7 +193,7 @@ struct FilesView: View {
 
     private func reload() async {
         await browser.load(session: session, reduceMotion: reduceMotion)
-        await browser.loadMemory(session: session)
+        await browser.loadMemory(session: session, reduceMotion: reduceMotion)
     }
 
     private var deleteDialogBinding: Binding<Bool> {
@@ -313,7 +314,7 @@ private struct FilesOverviewCard: View {
                     .stroke(drive.tint.opacity(0.35), style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                 IconBadge(systemImage: drive.systemImage, tint: drive.tint, size: 50)
-                    .symbolEffect(.bounce, value: drive)
+                    .symbolEffect(.bounce, value: reduceMotion ? "" : drive.code)
             }
             .padding(5)
         }
@@ -354,6 +355,7 @@ private struct FilesOverviewCard: View {
 
 private struct FilesUploadCard: View {
     let isPreparing: Bool
+    let reduceMotion: Bool
     let onDrop: ([URL]) -> Bool
     let pickFont: () -> Void
     let pickGraphic: () -> Void
@@ -370,6 +372,7 @@ private struct FilesUploadCard: View {
                     systemImage: "tray.and.arrow.down",
                     tint: Theme.violet,
                     isEnabled: !isPreparing,
+                    reduceMotion: reduceMotion,
                     onDrop: onDrop
                 ) {
                     HStack(spacing: 10) {
@@ -387,7 +390,7 @@ private struct FilesUploadCard: View {
                         }
                     }
                     .disabled(isPreparing)
-                    .animation(Motion.snappy, value: isPreparing)
+                    .animation(reduceMotion ? nil : Motion.snappy, value: isPreparing)
                 }
             }
         }
@@ -425,7 +428,7 @@ private struct FilesListCard: View {
                     .fixedSize()
                 }
                 if !browser.files.isEmpty || !browser.search.isEmpty {
-                    TransferSearchField(text: $browser.search, prompt: tr("Dateien durchsuchen"))
+                    TransferSearchField(text: $browser.search, prompt: tr("Dateien durchsuchen"), reduceMotion: reduceMotion)
                 }
                 content(groups)
             }
@@ -440,14 +443,14 @@ private struct FilesListCard: View {
                     TransferSkeletonRow(widthFactor: [1, 0.8, 0.9, 0.7, 0.85][index])
                 }
             }
-            .shimmering(active: true)
+            .shimmering(active: !reduceMotion)
             .transition(.opacity)
         } else if let error = browser.loadError, browser.files.isEmpty {
             VStack(spacing: 10) {
                 Image(systemName: "exclamationmark.icloud")
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(Theme.warning)
-                    .symbolEffect(.bounce, value: browser.loadCount)
+                    .symbolEffect(.bounce, value: reduceMotion ? 0 : browser.loadCount)
                 Text(tr("Dateiliste nicht verfügbar"))
                     .font(Theme.Typography.headline)
                 Text(error)
@@ -496,6 +499,7 @@ private struct FilesListCard: View {
                                 canDelete: (FilesDrive(code: file.drive) ?? browser.drive).isWritable,
                                 canPrint: [.font, .graphic, .format].contains(group.category) && !session.isBusy,
                                 fontHeight: session.resolution.dotsPerMM * 5,
+                                reduceMotion: reduceMotion,
                                 onPrint: { printSample(file) },
                                 onDelete: { requestDelete(file) }
                             )
@@ -510,7 +514,7 @@ private struct FilesListCard: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .shimmering(active: browser.isLoading)
+            .shimmering(active: browser.isLoading && !reduceMotion)
             .id(browser.drive)
             .transition(reduceMotion ? .opacity : .push(from: .trailing))
             .animation(reduceMotion ? nil : Motion.spring, value: browser.files.map(\.id))
@@ -554,6 +558,7 @@ private struct FilesRow: View {
     let canDelete: Bool
     let canPrint: Bool
     let fontHeight: Int
+    let reduceMotion: Bool
     let onPrint: () -> Void
     let onDelete: () -> Void
 
@@ -627,7 +632,7 @@ private struct FilesRow: View {
         }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .animation(Motion.snappy, value: hovering)
+        .animation(reduceMotion ? nil : Motion.snappy, value: hovering)
         .opacity(isDeleting ? 0.55 : 1)
         .contextMenu {
             if canPrint {
@@ -647,10 +652,11 @@ private struct FilesRow: View {
 
     private func copyReference() {
         copy(reference)
-        withAnimation(Motion.snappy) { copied = true }
+        let animation: Animation? = reduceMotion ? nil : Motion.snappy
+        withAnimation(animation) { copied = true }
         Task {
             try? await Task.sleep(for: .seconds(1.2))
-            withAnimation(Motion.snappy) { copied = false }
+            withAnimation(animation) { copied = false }
         }
     }
 

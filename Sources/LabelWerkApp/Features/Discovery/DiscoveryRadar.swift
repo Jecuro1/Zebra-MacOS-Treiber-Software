@@ -22,7 +22,7 @@ struct DiscoveryRadar: View {
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height)
             ZStack {
-                DiscoveryRadarBackdrop(isScanning: isScanning)
+                DiscoveryRadarBackdrop(isScanning: isScanning, reduceMotion: reduceMotion)
                     .frame(width: side, height: side)
 
                 if isScanning && !reduceMotion {
@@ -116,6 +116,7 @@ struct DiscoveryRadar: View {
 
 private struct DiscoveryRadarBackdrop: View {
     let isScanning: Bool
+    let reduceMotion: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -154,7 +155,7 @@ private struct DiscoveryRadarBackdrop: View {
                 )
         }
         .shadow(color: Theme.indigo.opacity(isScanning ? 0.35 : 0.15), radius: isScanning ? 22 : 12, y: 6)
-        .animation(Motion.gentle, value: isScanning)
+        .animation(Motion.animation(Motion.gentle, reduceMotion: reduceMotion), value: isScanning)
     }
 }
 
@@ -286,7 +287,7 @@ private struct DiscoveryRadarBlip: View {
         }
         .buttonStyle(.plain)
         .onHover { inside in
-            withAnimation(Motion.snappy) { hovering = inside }
+            withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) { hovering = inside }
         }
         .overlay(alignment: .top) {
             if hovering || isHighlighted {
@@ -303,8 +304,8 @@ private struct DiscoveryRadarBlip: View {
                     .transition(.opacity.combined(with: .offset(y: 4)))
             }
         }
-        .animation(Motion.snappy, value: isHighlighted)
-        .animation(Motion.bouncy, value: isAdded)
+        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: isHighlighted)
+        .animation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion), value: isAdded)
         .help(label)
         .accessibilityLabel(label)
         .accessibilityAddTraits(.isButton)

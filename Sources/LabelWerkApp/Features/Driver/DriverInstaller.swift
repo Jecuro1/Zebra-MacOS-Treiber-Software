@@ -96,6 +96,7 @@ final class DriverInstaller {
     private(set) var isRefreshing = false
 
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshGeneration = 0
 
     private init() {}
 
@@ -137,11 +138,23 @@ final class DriverInstaller {
     // MARK: Prüfen
 
     /// Liest Installationszustand, Paketinhalt und CUPS-Dienst neu ein.
-    func refresh() async {
-        if let refreshTask {
-            await refreshTask.value
-            return
+    ///
+    /// Läuft bereits eine Prüfung, wird ihr Ergebnis abgewartet. Mit `force` folgt danach eine
+    /// eigene, frische Prüfung – nötig nach Installation/Entfernen, weil eine zuvor (z. B. während
+    /// des Passwortdialogs) gestartete Prüfung noch den alten Zustand gelesen haben kann.
+    func refresh(force: Bool = false) async {
+        if let running = refreshTask {
+            await running.value
+            guard force else { return }
+            // Eine inzwischen von einem anderen Aufruf gestartete Prüfung begann erst nach dieser
+            // Anforderung und ist damit aktuell genug.
+            if let newer = refreshTask {
+                await newer.value
+                return
+            }
         }
+        refreshGeneration += 1
+        let generation = refreshGeneration
         let task = Task { [weak self] in
             guard let self else { return }
             self.isRefreshing = true
@@ -154,10 +167,13 @@ final class DriverInstaller {
                 self.lastRefresh = Date()
                 self.isRefreshing = false
             }
+            // Vor dem Ende der Aufgabe freigeben: Wer danach `refresh` aufruft, startet neu.
+            if self.refreshGeneration == generation {
+                self.refreshTask = nil
+            }
         }
         refreshTask = task
         await task.value
-        refreshTask = nil
     }
 
     // MARK: Installieren / Aktualisieren
@@ -181,7 +197,7 @@ final class DriverInstaller {
             return handle(error, operation: operation)
         }
         setPhase(.running(operation, tr("Installation wird überprüft …")))
-        await refresh()
+        await refresh(force: true)
         guard isInstalled else {
             setPhase(.failed(operation, tr("Der CUPS-Filter wurde nach der Installation nicht gefunden.")))
             return false
@@ -207,7 +223,7 @@ final class DriverInstaller {
             return handle(error, operation: .uninstall)
         }
         setPhase(.running(.uninstall, tr("Entfernen wird überprüft …")))
-        await refresh()
+        await refresh(force: true)
         guard !isInstalled else {
             setPhase(.failed(.uninstall, tr("Der Treiber ist weiterhin vorhanden.")))
             return false
@@ -390,6 +406,8 @@ final class DriverInstaller {
             "/usr/bin/find \(q(root)) -type d -exec /bin/chmod 755 {} +",
             "/usr/bin/find \(q(root)) -type f -exec /bin/chmod 644 {} +",
             "/bin/chmod 755 \(q(root))/Filter/*",
+            // Mitgelieferte Skripte (z. B. uninstall.sh) bleiben ausführbar.
+            "/usr/bin/find \(q(root)) -type f -name '*.sh' -exec /bin/chmod 755 {} +",
             "/bin/rm -f \(q(ppdDirectory))/LabelWerk-*.ppd.gz \(q(ppdDirectory))/LabelWerk-*.ppd",
             "for f in \(q(sourcePPDs))/LabelWerk-*.ppd*; do if [ -e \"$f\" ]; then /bin/cp -f \"$f\" \(q(ppdDirectory))/; fi; done",
             "for f in \(q(ppdDirectory))/LabelWerk-*.ppd*; do if [ -e \"$f\" ]; then /usr/sbin/chown root:wheel \"$f\"; /bin/chmod 644 \"$f\"; fi; done",
@@ -480,6 +498,27 @@ enum DriverQueueStatusReader {
             }
         }
         return states
+    }
+}
+
+/// Erkennt Warteschlangen, die den LabelWerk-Treiber verwenden – ohne die Warteschlangen erneut
+/// über `lpstat`/`lpoptions` abzufragen (gleiche Kriterien wie `CUPSService.labelWerkQueues()`).
+enum DriverQueueClassifier {
+    static func labelWerkQueueNames(in queues: [CUPSQueueInfo]) async -> Set<String> {
+        await Task.detached(priority: .utility) {
+            var names = Set<String>()
+            for queue in queues {
+                if queue.makeAndModel?.contains("LabelWerk") == true {
+                    names.insert(queue.name)
+                    continue
+                }
+                let ppd = URL(fileURLWithPath: "/etc/cups/ppd/\(queue.name).ppd")
+                if let text = try? String(contentsOf: ppd, encoding: .isoLatin1), text.contains("*lwModel:") {
+                    names.insert(queue.name)
+                }
+            }
+            return names
+        }.value
     }
 }
 

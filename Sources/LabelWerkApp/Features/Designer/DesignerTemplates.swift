@@ -522,7 +522,7 @@ enum DesignerTemplate: String, CaseIterable, Identifiable {
         // Millimeter-Lineal
         let rulerTop = H - m - footer
         let dpmm = g.dotsPerMM
-        let millimeterCount = cw / dpmm
+        let millimeterCount = max(0, cw / dpmm)
         let tick = max(1, dpmm / 6)
         let numberHeight = Z.clamp(footer * 30 / 100, 10, g.dots(2.5))
         b.horizontalLine(x: m, y: rulerTop, length: millimeterCount * dpmm + tick, thickness: max(1, g.dots(0.25)))
@@ -554,6 +554,12 @@ enum DesignerTemplate: String, CaseIterable, Identifiable {
             let barHeight = max(8, height - Z.interpretationHeight(module: module))
             return (module, x + max(0, (width - symbolWidth) / 2), barHeight)
         }
+        /// EAN/UPC: Die Balken beginnen nach der Ruhezone (`quiet` Module, dort steht die erste
+        /// Klarschriftziffer). Ist die Zelle zu schmal, rücken die Balken in die Ruhezone, damit
+        /// das Symbol (`core` Module) nicht über den Zellrand hinausragt.
+        func barsX(_ fit: (module: Int, x: Int, height: Int), quiet: Int, core: Int) -> Int {
+            max(x, min(fit.x + quiet * fit.module, x + width - core * fit.module))
+        }
         switch symbol {
         case .code128:
             let data = "LabelWerk-128"
@@ -565,13 +571,13 @@ enum DesignerTemplate: String, CaseIterable, Identifiable {
             b.code39(data, x: fit.x, y: y, height: fit.height, module: fit.module)
         case .ean13:
             let fit = linear(modules: 110)
-            b.ean13("400638133393", x: fit.x + 9 * fit.module, y: y, height: fit.height, module: fit.module)
+            b.ean13("400638133393", x: barsX(fit, quiet: 9, core: 95), y: y, height: fit.height, module: fit.module)
         case .ean8:
             let fit = linear(modules: 81)
-            b.ean8("1234567", x: fit.x + 7 * fit.module, y: y, height: fit.height, module: fit.module)
+            b.ean8("1234567", x: barsX(fit, quiet: 7, core: 67), y: y, height: fit.height, module: fit.module)
         case .upcA:
             let fit = linear(modules: 113)
-            b.upcA("03600029145", x: fit.x + 9 * fit.module, y: y, height: fit.height, module: fit.module)
+            b.upcA("03600029145", x: barsX(fit, quiet: 9, core: 95), y: y, height: fit.height, module: fit.module)
         case .interleaved:
             let digits = "12345678"
             let fit = linear(modules: Z.interleavedModules(digits))

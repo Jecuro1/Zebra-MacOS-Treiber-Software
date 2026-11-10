@@ -14,7 +14,9 @@ struct PrinterIllustration: View {
     var labelAspect: CGFloat = 1.5
     var printTrigger: Int = 0
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
     @Environment(\.colorScheme) private var colorScheme
 
     init(state: PrinterState, isPrinting: Bool, accent: Color,

@@ -6,16 +6,12 @@ import LabelWerkKit
 /// ZPL-Editor mit Vorlagen, Bausteinen, Aufräumen, Öffnen/Sichern und Drag & Drop.
 struct DesignerEditorPane: View {
     let target: DesignerTarget
-    @Binding var documentTitle: String
+    @Bindable var store: DesignerStore
     let reduceMotion: Bool
     let onPrint: () -> Void
 
     @Environment(AppModel.self) private var model
     @State private var isDropTargeted = false
-    @State private var pendingTemplate: DesignerTemplate?
-    @State private var lastGenerated = ""
-    @State private var notice: DesignerNotice?
-    @State private var noticeTask: Task<Void, Never>?
     @State private var formatCount = 0
 
     var body: some View {
@@ -38,18 +34,6 @@ struct DesignerEditorPane: View {
         .onChange(of: model.designerDocument) { oldValue, newValue in
             detectDroppedPath(old: oldValue, new: newValue)
         }
-        .confirmationDialog(tr("Vorlage übernehmen?"),
-                            isPresented: Binding(get: { pendingTemplate != nil },
-                                                 set: { if !$0 { pendingTemplate = nil } }),
-                            titleVisibility: .visible,
-                            presenting: pendingTemplate) { template in
-            Button(tr("Dokument ersetzen")) { applyTemplate(template, append: false) }
-            Button(tr("Als weiteres Etikett anhängen")) { applyTemplate(template, append: true) }
-            Button(tr("Abbrechen"), role: .cancel) {}
-        } message: { template in
-            Text(tr("„%@“ ersetzt den Inhalt des Editors – oder wird als zusätzliches Etikett angehängt.", template.title))
-        }
-        .onDisappear { noticeTask?.cancel() }
     }
 
     // MARK: Kopf
@@ -59,7 +43,7 @@ struct DesignerEditorPane: View {
             Image(systemName: "doc.text.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.brandGradient)
-            TextField(tr("Titel"), text: $documentTitle, prompt: Text(tr("Designer-Etikett")))
+            TextField(tr("Titel"), text: $store.documentTitle, prompt: Text(tr("Designer-Etikett")))
                 .textFieldStyle(.plain)
                 .font(.system(size: 13.5, weight: .semibold))
                 .help(tr("Titel für Auftragsverlauf und Dateinamen"))
@@ -143,7 +127,7 @@ struct DesignerEditorPane: View {
                 }
             } label: {
                 Label(tr("Aufräumen"), systemImage: "text.alignleft")
-                    .symbolEffect(.bounce, value: formatCount)
+                    .symbolEffect(.bounce, value: reduceMotion ? 0 : formatCount)
             } primaryAction: {
                 format(.perCommand)
             }
@@ -179,8 +163,8 @@ struct DesignerEditorPane: View {
             DesignerStat(systemImage: "internaldrive", text: DesignerFormat.bytes(text.utf8.count))
             Spacer(minLength: 6)
             ZStack(alignment: .trailing) {
-                if let notice {
-                    DesignerNoticePill(notice: notice)
+                if let notice = store.notice {
+                    DesignerNoticePill(notice: notice, reduceMotion: reduceMotion)
                         .id(notice.id)
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                 removal: .opacity))
@@ -195,7 +179,7 @@ struct DesignerEditorPane: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .animation(reduceMotion ? nil : Motion.spring, value: notice)
+        .animation(reduceMotion ? nil : Motion.spring, value: store.notice)
     }
 
     @ViewBuilder
@@ -209,7 +193,7 @@ struct DesignerEditorPane: View {
                     Image(systemName: "arrow.down.doc.fill")
                         .font(.system(size: 30, weight: .semibold))
                         .foregroundStyle(Theme.brandGradient)
-                        .symbolEffect(.bounce, value: isDropTargeted)
+                        .symbolEffect(.bounce, value: reduceMotion ? false : isDropTargeted)
                     Text(tr("Loslassen zum Öffnen"))
                         .font(Theme.Typography.headline)
                     Text(tr("ZPL- und Textdateien werden geöffnet, Bilder als Grafik eingefügt."))
@@ -227,37 +211,17 @@ struct DesignerEditorPane: View {
     // MARK: Hinweise
 
     private func showNotice(_ text: String, systemImage: String) {
-        noticeTask?.cancel()
-        notice = DesignerNotice(text: text, systemImage: systemImage)
-        noticeTask = Task {
-            try? await Task.sleep(for: .seconds(2.4))
-            guard !Task.isCancelled else { return }
-            notice = nil
-        }
+        store.showNotice(text, systemImage: systemImage)
     }
 
     // MARK: Vorlagen & Bausteine
 
+    /// Übernimmt eine Vorlage – bei geändertem Dokument erst nach Rückfrage (Dialog in `DesignerView`).
     private func requestTemplate(_ template: DesignerTemplate) {
-        let current = model.designerDocument
-        if current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || current == lastGenerated {
-            applyTemplate(template, append: false)
-        } else {
-            pendingTemplate = template
-        }
-    }
-
-    private func applyTemplate(_ template: DesignerTemplate, append: Bool) {
-        let zpl = template.zpl(geometry: target.geometry)
-        if append {
-            model.designerDocument = DesignerZPLFormatter.append(format: zpl, to: model.designerDocument)
-            showNotice(tr("Angehängt: %@", template.title), systemImage: template.systemImage)
-        } else {
-            model.designerDocument = zpl
-            documentTitle = template.title
-            showNotice(tr("Vorlage: %@", template.title), systemImage: template.systemImage)
-        }
-        lastGenerated = model.designerDocument
+        let replacement = DesignerReplacement(zpl: template.zpl(geometry: target.geometry), title: template.title,
+                                              systemImage: template.systemImage, origin: .template,
+                                              notice: tr("Vorlage: %@", template.title))
+        store.request(replacement, in: model)
     }
 
     private func insert(_ snippet: DesignerSnippet) {
@@ -316,7 +280,8 @@ struct DesignerEditorPane: View {
         openDocument(url)
     }
 
-    /// Öffnet ZPL-/Textdateien; Bilder und PDFs werden als Grafik eingefügt.
+    /// Öffnet ZPL-/Textdateien (bei geändertem Dokument erst nach Rückfrage); Bilder und PDFs
+    /// werden als Grafik eingefügt.
     private func openDocument(_ url: URL) {
         if DesignerFiles.isImage(url) {
             insertGraphic(from: url)
@@ -328,22 +293,24 @@ struct DesignerEditorPane: View {
         }
         do {
             let text = try DesignerFiles.readText(url)
-            model.designerDocument = text
-            lastGenerated = text
-            documentTitle = url.deletingPathExtension().lastPathComponent
-            showNotice(tr("Geöffnet: %@", url.lastPathComponent), systemImage: "doc.text")
+            let replacement = DesignerReplacement(zpl: text, title: url.deletingPathExtension().lastPathComponent,
+                                                  systemImage: "doc.text", origin: .file,
+                                                  notice: tr("Geöffnet: %@", url.lastPathComponent))
+            store.request(replacement, in: model)
         } catch {
             model.toast(tr("Datei konnte nicht geöffnet werden"), message: PrinterSession.describe(error), style: .error)
         }
     }
 
     private func saveFile() {
-        let title = documentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = store.documentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = DesignerFiles.safeFileName(title.isEmpty ? tr("Designer-Etikett") : title) + ".zpl"
         guard let url = DesignerFiles.chooseDestination(name: name, types: DesignerFiles.zplTypes,
                                                         title: tr("Als ZPL-Datei sichern")) else { return }
         do {
             try Data(model.designerDocument.utf8).write(to: url, options: .atomic)
+            // Gesichert: Vorlagen und Dateien dürfen diesen Stand ohne Rückfrage ersetzen.
+            store.markGenerated(model.designerDocument)
             showNotice(tr("Gesichert: %@", url.lastPathComponent), systemImage: "checkmark.circle")
         } catch {
             model.toast(tr("Sichern fehlgeschlagen"), message: error.localizedDescription, style: .error)

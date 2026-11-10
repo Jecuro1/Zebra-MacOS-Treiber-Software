@@ -63,7 +63,9 @@ struct RingGauge: View {
     var valueText: String?
 
     @State private var shown: Double = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
 
     init(value: Double, lineWidth: CGFloat = 10, colors: [Color] = [Theme.violet, Theme.teal],
          label: String? = nil, valueText: String? = nil) {
@@ -160,7 +162,9 @@ struct StripedProgressBar: View {
     var tint: Color = Theme.accent
 
     @State private var stripeOffset: CGFloat = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
 
     init(progress: Double?, tint: Color = Theme.accent) {
         self.progress = progress

@@ -29,8 +29,14 @@ enum DesignerZPLFormatter {
         }
     }
 
-    /// Dateiendungen, die als ZPL-Dokument geöffnet werden.
-    static let openableExtensions: Set<String> = ["zpl", "zpl2", "txt", "prn", "lbl", "nlbl"]
+    /// Dateiendungen, die als ZPL-Dokument geöffnet werden. (`.lbl`/`.nlbl` sind binäre
+    /// ZebraDesigner-Formate und bewusst nicht dabei.)
+    static let openableExtensions: Set<String> = ["zpl", "zpl2", "txt", "prn"]
+
+    /// Bild- und PDF-Endungen, die beim Ablegen auf den Editor als Grafik eingefügt werden.
+    static let droppableImageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "heic", "heif", "webp", "pdf",
+    ]
 
     // MARK: Zerlegen
 
@@ -186,21 +192,50 @@ enum DesignerZPLFormatter {
 
     // MARK: Kennzahlen
 
-    private static func occurrences(of needle: String, in text: String) -> Int {
-        guard !text.isEmpty else { return 0 }
-        return text.uppercased().components(separatedBy: needle).count - 1
+    /// Zählt Befehle `^` + zweistelliger Code (Groß-/Kleinschreibung egal) in einem Durchlauf über
+    /// die UTF-8-Bytes – ohne Kopie des Textes, damit auch große Dokumente (Grafiken mit `^GFA`)
+    /// bei jedem Tastendruck flüssig bleiben.
+    private static func commandCount(in text: String, codes: [String]) -> Int {
+        let wanted = codes.map { Array($0.uppercased().utf8) }.filter { $0.count == 2 }
+        guard !wanted.isEmpty else { return 0 }
+        var count = 0
+        var beforePrevious: UInt8 = 0
+        var previous: UInt8 = 0
+        for byte in text.utf8 {
+            let upper = byte >= 0x61 && byte <= 0x7A ? byte - 0x20 : byte
+            if beforePrevious == 0x5E, wanted.contains(where: { $0[0] == previous && $0[1] == upper }) {
+                count += 1
+            }
+            beforePrevious = previous
+            previous = upper
+        }
+        return count
     }
 
     /// Anzahl der Etikettenformate (`^XA`).
-    static func formatCount(_ zpl: String) -> Int { occurrences(of: "^XA", in: zpl) }
+    static func formatCount(_ zpl: String) -> Int { commandCount(in: zpl, codes: ["XA"]) }
 
     /// Anzahl der Felder (`^FO`/`^FT`) – staffelt die Position neuer Bausteine.
-    static func fieldCount(_ zpl: String) -> Int {
-        occurrences(of: "^FO", in: zpl) + occurrences(of: "^FT", in: zpl)
-    }
+    static func fieldCount(_ zpl: String) -> Int { commandCount(in: zpl, codes: ["FO", "FT"]) }
 
+    /// Anzahl der Zeilen. Erkennt `\n`, `\r\n` (in Swift *ein* Zeichen) und einzelnes `\r`.
     static func lineCount(_ zpl: String) -> Int {
-        zpl.isEmpty ? 0 : zpl.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        guard !zpl.isEmpty else { return 0 }
+        var lines = 1
+        var previousWasCarriageReturn = false
+        for byte in zpl.utf8 {
+            switch byte {
+            case 0x0A:
+                if !previousWasCarriageReturn { lines += 1 }
+                previousWasCarriageReturn = false
+            case 0x0D:
+                lines += 1
+                previousWasCarriageReturn = true
+            default:
+                previousWasCarriageReturn = false
+            }
+        }
+        return lines
     }
 
     // MARK: Abgelegte Dateipfade
@@ -218,7 +253,8 @@ enum DesignerZPLFormatter {
         return String(decoding: b[prefix..<(b.count - suffix)], as: UTF8.self)
     }
 
-    /// Erkennt einen in den Editor abgelegten Dateipfad einer ZPL-/Textdatei.
+    /// Erkennt einen in den Editor abgelegten Dateipfad einer ZPL-/Textdatei, eines Bildes oder
+    /// eines PDFs (die Textansicht fügt beim Ablegen den Pfad ein).
     static func droppedFileURL(in inserted: String) -> URL? {
         let candidate = inserted.trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: .newlines).first ?? ""
@@ -230,7 +266,9 @@ enum DesignerZPLFormatter {
         } else {
             parsed = nil
         }
-        guard let url = parsed, openableExtensions.contains(url.pathExtension.lowercased()),
+        guard let url = parsed else { return nil }
+        let ext = url.pathExtension.lowercased()
+        guard openableExtensions.contains(ext) || droppableImageExtensions.contains(ext),
               FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
     }

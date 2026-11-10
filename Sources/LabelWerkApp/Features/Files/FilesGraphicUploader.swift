@@ -63,6 +63,8 @@ final class FilesGraphicUpload: Identifiable {
     private(set) var phase: FilesUploadPhase = .ready
     private(set) var successCount = 0
     @ObservationIgnored private var renderedParameters: FilesGraphicParameters?
+    /// Zählt Rasterläufe; nur der jüngste darf `isRendering` zurücksetzen.
+    @ObservationIgnored private var renderGeneration = 0
 
     private init(url: URL, source: GrayImage, originalWidth: Int, originalHeight: Int,
                  labelWidth: Int, labelHeight: Int, maxWidth: Int,
@@ -88,7 +90,7 @@ final class FilesGraphicUpload: Identifiable {
     static func load(url: URL, dpi: Int, labelWidth: Int, labelHeight: Int, maxWidth: Int,
                      algorithm: DitherAlgorithm, drive: FilesDrive) async throws -> FilesGraphicUpload {
         let loaded = try await Task.detached(priority: .userInitiated) { () throws -> (GrayImage, Int, Int) in
-            guard let image = try ImageImport.pages(contentsOf: url, dpi: dpi).first else {
+            guard let image = try ImageImport.pages(contentsOf: url, dpi: dpi, maxPages: 1).first else {
                 throw ImageImport.ImportError.unreadable(url.lastPathComponent)
             }
             let longSide = Double(max(image.width, image.height, 1))
@@ -163,12 +165,21 @@ final class FilesGraphicUpload: Identifiable {
     // MARK: Rastern
 
     func render(reduceMotion: Bool) async {
+        renderGeneration += 1
+        let generation = renderGeneration
+        // Ein abgebrochener Lauf (z. B. Schwelle 128 → 129 → 128) darf die Anzeige nicht
+        // im Zustand „wird berechnet“ zurücklassen: Der jüngste Lauf räumt immer auf.
+        defer {
+            if generation == renderGeneration, isRendering {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { isRendering = false }
+            }
+        }
         let params = parameters
         if params == renderedParameters, bitmap != nil { return }
         // Geänderte Einstellungen machen ein früheres Übertragungsergebnis ungültig.
         if renderedParameters != nil, !phase.isUploading { invalidateResult() }
         let source = self.source
-        if !isRendering { withAnimation(Motion.snappy) { isRendering = true } }
+        if !isRendering { withAnimation(reduceMotion ? nil : Motion.snappy) { isRendering = true } }
         // Kurz warten: schnelle Reglerbewegungen fassen sich zu einer Berechnung zusammen.
         try? await Task.sleep(for: .milliseconds(70))
         guard !Task.isCancelled else { return }
@@ -184,7 +195,7 @@ final class FilesGraphicUpload: Identifiable {
             }
             return (gray, bitmap)
         }.value
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, generation == renderGeneration else { return }
         renderedParameters = params
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
             preview = output.0
@@ -200,7 +211,8 @@ final class FilesGraphicUpload: Identifiable {
         withAnimation(reduceMotion ? nil : Motion.spring) { phase = .uploading }
         session.stopMonitoring()
         let ok = await session.uploadGraphic(name: name, bitmap: bitmap, drive: drive.code)
-        if session.connectionState.isConnected { session.startMonitoring() }
+        // Immer wieder aufnehmen: Die Überwachung verbindet auch eine fehlgeschlagene Sitzung neu.
+        session.startMonitoring()
         withAnimation(reduceMotion ? nil : Motion.bouncy) {
             if ok {
                 phase = .done(path)
@@ -211,7 +223,7 @@ final class FilesGraphicUpload: Identifiable {
         }
         if ok {
             if browser.drive == drive { await browser.load(session: session, reduceMotion: reduceMotion) }
-            await browser.loadMemory(session: session)
+            await browser.loadMemory(session: session, reduceMotion: reduceMotion)
         }
     }
 
@@ -276,7 +288,7 @@ struct FilesGraphicComposer: View {
             ZStack {
                 IconBadge(systemImage: upload.phase.isDone ? "checkmark" : "photo", tint: Theme.teal, size: 42)
                     .contentTransition(.symbolEffect(.replace))
-                    .keyframeAnimator(initialValue: FilesBadgePop(), trigger: upload.successCount) { content, value in
+                    .keyframeAnimator(initialValue: FilesBadgePop(), trigger: reduceMotion ? 0 : upload.successCount) { content, value in
                         content
                             .scaleEffect(value.scale)
                             .rotationEffect(.degrees(value.angle))
@@ -291,8 +303,10 @@ struct FilesGraphicComposer: View {
                             SpringKeyframe(0, duration: 0.4, spring: .bouncy)
                         }
                     }
-                CelebrationBurst(trigger: upload.successCount, colors: [Theme.teal, Theme.violet, Theme.ready])
-                    .frame(width: 220, height: 220)
+                if !reduceMotion {
+                    CelebrationBurst(trigger: upload.successCount, colors: [Theme.teal, Theme.violet, Theme.ready])
+                        .frame(width: 220, height: 220)
+                }
             }
             .frame(width: 42, height: 42)
             VStack(alignment: .leading, spacing: 2) {
@@ -368,9 +382,12 @@ struct FilesGraphicComposer: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Während der Übertragung fest: Das gesendete Druckbild soll dem angezeigten entsprechen.
             sizeSection
+                .disabled(upload.phase.isUploading)
             Divider().opacity(0.5)
             ditherSection
+                .disabled(upload.phase.isUploading)
             Divider().opacity(0.5)
             targetSection
             actionArea

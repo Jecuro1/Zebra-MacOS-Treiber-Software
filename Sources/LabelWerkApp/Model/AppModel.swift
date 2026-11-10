@@ -114,7 +114,7 @@ final class AppModel {
     /// Fügt einen gefundenen Drucker hinzu (oder liefert die bestehende Sitzung mit gleicher Verbindung).
     @discardableResult
     func addPrinter(from discovered: DiscoveredPrinter) -> PrinterSession {
-        if let existing = sessions.first(where: { $0.saved.descriptor == discovered.descriptor }) {
+        if let existing = sessions.first(where: { $0.saved.descriptor.refersToSameDevice(as: discovered.descriptor) }) {
             return existing
         }
         let model = discovered.modelHint.flatMap { catalog.match(productName: $0) }

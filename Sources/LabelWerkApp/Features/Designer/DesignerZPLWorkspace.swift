@@ -7,8 +7,7 @@ import LabelWerkKit
 struct DesignerZPLWorkspace: View {
     let target: DesignerTarget
     let session: PrinterSession?
-    let preview: DesignerPreviewState
-    @Binding var documentTitle: String
+    @Bindable var store: DesignerStore
     let reduceMotion: Bool
 
     @Environment(AppModel.self) private var model
@@ -16,17 +15,26 @@ struct DesignerZPLWorkspace: View {
     @State private var printPhase: DesignerSendPhase = .idle
     @State private var printSuccessCount = 0
     @State private var copied = false
+    @State private var copyCount = 0
+
+    private var preview: DesignerPreviewState { store.preview }
 
     private var effectiveTitle: String {
-        let trimmed = documentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = store.documentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? tr("Designer-Etikett") : trimmed
+    }
+
+    /// Drucker ohne ZPL (EPL/CPCL) erhalten die Etiketten pixelgenau gerastert als Grafik.
+    private var printsAsGraphic: Bool {
+        guard let session else { return false }
+        return session.saved.language != .zpl
     }
 
     var body: some View {
         let key = DesignerRenderKey(zpl: model.designerDocument, geometry: target.geometry)
         VStack(spacing: Theme.Metrics.spacing) {
             HSplitView {
-                DesignerEditorPane(target: target, documentTitle: $documentTitle, reduceMotion: reduceMotion,
+                DesignerEditorPane(target: target, store: store, reduceMotion: reduceMotion,
                                    onPrint: { printLabel() })
                     .frame(minWidth: 340, idealWidth: 470, maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.trailing, 6)
@@ -49,13 +57,13 @@ struct DesignerZPLWorkspace: View {
             HStack(spacing: 14) {
                 destination
                 Spacer(minLength: 8)
-                if let session, session.saved.language != .zpl {
-                    Label(tr("Drucker ist auf %@ eingestellt", session.saved.language.displayName),
-                          systemImage: "exclamationmark.triangle.fill")
+                if let session, printsAsGraphic {
+                    Label(tr("%@: wird als Grafik gedruckt", session.saved.language.displayName), systemImage: "photo")
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Theme.warning)
+                        .foregroundStyle(Theme.teal)
                         .lineLimit(1)
-                        .help(tr("ZPL wird nur von Druckern mit ZPL-Sprache verstanden. Ändere die Sprache in den Druckeinstellungen."))
+                        .help(tr("Der Drucker versteht kein ZPL. LabelWerk rastert jedes Etikett pixelgenau in Druckerauflösung und sendet es als Grafik in der Druckersprache – mit den Treibereinstellungen des Druckers."))
+                        .transition(.opacity)
                 }
                 Stepper(value: $copies, in: 1...9999) {
                     HStack(spacing: 4) {
@@ -64,7 +72,7 @@ struct DesignerZPLWorkspace: View {
                         Text(copies, format: .number)
                             .font(.system(size: 13, weight: .semibold).monospacedDigit())
                             .contentTransition(.numericText(value: Double(copies)))
-                            .animation(Motion.snappy, value: copies)
+                            .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: copies)
                     }
                     .font(.system(size: 12.5))
                 }
@@ -97,7 +105,7 @@ struct DesignerZPLWorkspace: View {
     private var destination: some View {
         HStack(spacing: 10) {
             IconBadge(systemImage: session?.model?.systemImage ?? "printer", tint: session?.accentColor ?? Theme.offline, size: 32)
-                .symbolEffect(.bounce, value: printSuccessCount)
+                .symbolEffect(.bounce, value: reduceMotion ? 0 : printSuccessCount)
             VStack(alignment: .leading, spacing: 1) {
                 Text(session?.displayName ?? tr("Kein Drucker ausgewählt"))
                     .font(.system(size: 13, weight: .semibold))
@@ -135,9 +143,16 @@ struct DesignerZPLWorkspace: View {
         }
         let title = effectiveTitle
         let count = copies
+        let asGraphic = printsAsGraphic
+        let geometry = target.geometry
         printPhase = .sending
         Task {
-            let ok = await session.printZPL(zpl, title: title, copies: count)
+            let ok: Bool
+            if asGraphic {
+                ok = await printAsGraphic(zpl, geometry: geometry, session: session, title: title, copies: count)
+            } else {
+                ok = await session.printZPL(zpl, title: title, copies: count)
+            }
             printPhase = ok ? .success : .failure
             if ok { printSuccessCount += 1 }
             try? await Task.sleep(for: .seconds(1.8))
@@ -145,13 +160,45 @@ struct DesignerZPLWorkspace: View {
         }
     }
 
+    /// Für EPL-/CPCL-Drucker: alle Etiketten im Hintergrund rastern (inkl. `^POI`/`^PMY`) und als
+    /// Grafik in der Druckersprache senden – wie der Windows-Treiber.
+    private func printAsGraphic(_ zpl: String, geometry: DesignerLabelGeometry, session: PrinterSession,
+                                title: String, copies: Int) async -> Bool {
+        let job = await Task.detached(priority: .userInitiated) {
+            DesignerRaster.graphicJob(zpl: zpl, geometry: geometry, copies: copies)
+        }.value
+        switch job {
+        case .empty:
+            model.toast(tr("Kein Etikettenformat gefunden"),
+                        message: tr("Das Dokument enthält kein Format zwischen ^XA und ^XZ."), style: .warning)
+            return false
+        case .tooManyLabels(let count):
+            model.toast(tr("Zu viele Etiketten für den Grafikdruck"),
+                        message: tr("Die ^PQ-Mengen ergeben %d einzeln gerasterte Etiketten (höchstens %d).",
+                                    count, DesignerRaster.maximumExpandedLabels),
+                        style: .warning)
+            return false
+        case .ready(let images, let quantity):
+            // Schwarz/Weiß ist bereits fertig gerastert – die Schwelle übernimmt es unverändert.
+            var settings = session.saved.settings
+            settings.dither = .threshold
+            settings.threshold = 128
+            return await session.printImages(images, title: title, copies: quantity, settings: settings)
+        }
+    }
+
     private func copyZPL() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(model.designerDocument, forType: .string)
-        withAnimation(Motion.snappy) { copied = true }
+        copyCount += 1
+        let token = copyCount
+        let animation = Motion.animation(Motion.snappy, reduceMotion: reduceMotion)
+        withAnimation(animation) { copied = true }
         Task {
             try? await Task.sleep(for: .seconds(1.4))
-            withAnimation(Motion.snappy) { copied = false }
+            // Nur der letzte Klick setzt die Bestätigung zurück.
+            guard token == copyCount else { return }
+            withAnimation(animation) { copied = false }
         }
     }
 
@@ -163,7 +210,7 @@ struct DesignerZPLWorkspace: View {
                                                         title: tr("Etikett als PNG exportieren")) else { return }
         Task {
             let data = await Task.detached(priority: .userInitiated) {
-                PNGCodec.encode(SoftwareRasterizer.rasterize(label))
+                PNGCodec.encode(DesignerRaster.asPrinted(label))
             }.value
             do {
                 try data.write(to: url, options: .atomic)

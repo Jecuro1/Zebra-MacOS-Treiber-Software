@@ -118,8 +118,8 @@ enum ImageImport {
     }
 
     /// Lädt Bild oder PDF als Liste von Seiten.
-    static func pages(contentsOf url: URL, dpi: Int) throws -> [CGImage] {
-        if isPDF(url) { return try pdfPages(url: url, dpi: dpi) }
+    static func pages(contentsOf url: URL, dpi: Int, maxPages: Int = 100) throws -> [CGImage] {
+        if isPDF(url) { return try pdfPages(url: url, dpi: dpi, maxPages: maxPages) }
         return [try cgImage(contentsOf: url)]
     }
 

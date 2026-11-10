@@ -74,7 +74,7 @@ struct DesignerSendButton: View {
                     } else {
                         Image(systemName: symbol)
                             .contentTransition(.symbolEffect(.replace))
-                            .symbolEffect(.bounce, value: successCount)
+                            .symbolEffect(.bounce, value: reduceMotion ? 0 : successCount)
                             .transition(.scale.combined(with: .opacity))
                     }
                 }
@@ -100,7 +100,7 @@ struct DesignerSendButton: View {
             }
             .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
-        .buttonStyle(DesignerPressStyle())
+        .buttonStyle(DesignerPressStyle(reduceMotion: reduceMotion))
         .opacity(isEnabled ? 1 : 0.45)
         .modifier(DesignerShakeEffect(travel: shakes))
         .overlay {
@@ -125,13 +125,15 @@ struct DesignerSendButton: View {
     }
 }
 
-/// Drückeffekt ohne eigene Gestaltung.
+/// Drückeffekt ohne eigene Gestaltung (bei „Bewegung reduzieren“ nur Abdunkeln).
 struct DesignerPressStyle: ButtonStyle {
+    var reduceMotion = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
             .brightness(configuration.isPressed ? -0.04 : 0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -207,7 +209,7 @@ struct DesignerChoiceBar<Item: Hashable>: View {
                 if let systemImage {
                     Image(systemName: systemImage(item))
                         .font(.system(size: 10.5, weight: .semibold))
-                        .symbolEffect(.bounce, value: isSelected)
+                        .symbolEffect(.bounce, value: reduceMotion ? false : isSelected)
                 }
                 Text(title(item))
                     .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
@@ -247,6 +249,7 @@ struct DesignerOptionTile: View {
     let systemImage: String
     let isSelected: Bool
     let namespace: Namespace.ID
+    let reduceMotion: Bool
     let action: () -> Void
 
     @State private var hovering = false
@@ -256,7 +259,7 @@ struct DesignerOptionTile: View {
             VStack(spacing: 5) {
                 Image(systemName: systemImage)
                     .font(.system(size: 15, weight: .semibold))
-                    .symbolEffect(.bounce, value: isSelected)
+                    .symbolEffect(.bounce, value: reduceMotion ? false : isSelected)
                 Text(title)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
                     .lineLimit(1)
@@ -279,7 +282,7 @@ struct DesignerOptionTile: View {
             }
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(DesignerPressStyle())
+        .buttonStyle(DesignerPressStyle(reduceMotion: reduceMotion))
         .onHover { hovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -293,18 +296,22 @@ struct DesignerValueSlider: View {
     let range: ClosedRange<Double>
     var neutral: Double = 0
     var step: Double?
+    let reduceMotion: Bool
     let format: (Double) -> String
 
     init(title: String, systemImage: String, value: Binding<Double>, range: ClosedRange<Double>,
-         neutral: Double = 0, step: Double? = nil, format: @escaping (Double) -> String) {
+         neutral: Double = 0, step: Double? = nil, reduceMotion: Bool, format: @escaping (Double) -> String) {
         self.title = title
         self.systemImage = systemImage
         self._value = value
         self.range = range
         self.neutral = neutral
         self.step = step
+        self.reduceMotion = reduceMotion
         self.format = format
     }
+
+    private var animation: Animation? { Motion.animation(Motion.snappy, reduceMotion: reduceMotion) }
 
     private var isNeutral: Bool { abs(value - neutral) < 0.0005 }
 
@@ -317,10 +324,10 @@ struct DesignerValueSlider: View {
                 Text(format(value))
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     .contentTransition(.numericText(value: value))
-                    .animation(Motion.snappy, value: value)
+                    .animation(animation, value: value)
                 if !isNeutral {
                     Button {
-                        withAnimation(Motion.spring) { value = neutral }
+                        withAnimation(Motion.animation(Motion.spring, reduceMotion: reduceMotion)) { value = neutral }
                     } label: {
                         Image(systemName: "arrow.uturn.backward.circle.fill")
                             .symbolRenderingMode(.hierarchical)
@@ -337,7 +344,7 @@ struct DesignerValueSlider: View {
                 Slider(value: $value, in: range)
             }
         }
-        .animation(Motion.snappy, value: isNeutral)
+        .animation(animation, value: isNeutral)
     }
 }
 
@@ -387,7 +394,7 @@ struct DesignerDropZone: View {
                 } else {
                     IconBadge(systemImage: isTargeted ? "arrow.down.doc.fill" : "photo.badge.plus",
                               tint: Theme.violet, size: 64)
-                        .symbolEffect(.bounce, value: isTargeted)
+                        .symbolEffect(.bounce, value: reduceMotion ? false : isTargeted)
                         .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -578,13 +585,14 @@ struct DesignerNotice: Equatable, Identifiable {
 
 struct DesignerNoticePill: View {
     let notice: DesignerNotice
+    let reduceMotion: Bool
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: notice.systemImage)
                 .font(.system(size: 10.5, weight: .bold))
                 .foregroundStyle(Theme.brandGradient)
-                .symbolEffect(.bounce, value: notice.id)
+                .symbolEffect(.bounce, value: reduceMotion ? nil : notice.id)
             Text(notice.text)
                 .font(.system(size: 11.5, weight: .semibold))
                 .lineLimit(1)

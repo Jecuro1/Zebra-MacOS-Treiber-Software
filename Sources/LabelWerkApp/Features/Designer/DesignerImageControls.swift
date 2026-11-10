@@ -37,7 +37,8 @@ struct DesignerImageControls: View {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                         ForEach(ImageFitMode.allCases) { mode in
                             DesignerOptionTile(title: mode.displayName, systemImage: mode.systemImage,
-                                               isSelected: state.fitMode == mode, namespace: fitNamespace) {
+                                               isSelected: state.fitMode == mode, namespace: fitNamespace,
+                                               reduceMotion: reduceMotion) {
                                 withAnimation(animation) { state.fitMode = mode }
                             }
                         }
@@ -64,9 +65,9 @@ struct DesignerImageControls: View {
                 }
 
                 DesignerValueSlider(title: tr("Helligkeit"), systemImage: "sun.max", value: $state.brightness,
-                                    range: -1...1, format: DesignerFormat.signedPercent)
+                                    range: -1...1, reduceMotion: reduceMotion, format: DesignerFormat.signedPercent)
                 DesignerValueSlider(title: tr("Kontrast"), systemImage: "circle.lefthalf.filled", value: $state.contrast,
-                                    range: -1...1, format: DesignerFormat.signedPercent)
+                                    range: -1...1, reduceMotion: reduceMotion, format: DesignerFormat.signedPercent)
 
                 Toggle(isOn: $state.invert.animation(animation)) {
                     Label(tr("Invertieren (Negativ)"), systemImage: "circle.righthalf.filled")
@@ -93,7 +94,7 @@ struct DesignerImageControls: View {
                               systemImage: "circle.grid.cross")
                 Picker(selection: $state.dither.animation(animation)) {
                     ForEach(DitherAlgorithm.allCases) { algorithm in
-                        Text(algorithm.displayName).tag(algorithm)
+                        Text(tr(algorithm.displayName)).tag(algorithm)
                     }
                 } label: {
                     Text(tr("Verfahren"))
@@ -109,12 +110,13 @@ struct DesignerImageControls: View {
 
                 DesignerValueSlider(title: state.dither == .threshold ? tr("Schwelle") : tr("Helligkeitsbezug"),
                                     systemImage: "sun.min", value: thresholdBinding, range: 1...254,
-                                    neutral: 128, step: 1, format: { String(Int($0.rounded())) })
+                                    neutral: 128, step: 1, reduceMotion: reduceMotion,
+                                    format: { String(Int($0.rounded())) })
                 if state.dither != defaultDither {
                     Button {
                         withAnimation(animation) { state.dither = defaultDither }
                     } label: {
-                        Label(tr("Standard aus den App-Einstellungen: %@", defaultDither.displayName),
+                        Label(tr("Standard aus den App-Einstellungen: %@", tr(defaultDither.displayName)),
                               systemImage: "arrow.uturn.backward")
                             .font(.system(size: 11.5))
                     }

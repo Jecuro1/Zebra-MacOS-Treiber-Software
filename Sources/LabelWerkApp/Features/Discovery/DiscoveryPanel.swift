@@ -44,6 +44,9 @@ struct DiscoveryPanel: View {
     var onFinished: ((PrinterSession) -> Void)?
     /// Nur kompakt: Wunsch nach manuellem Hinzufügen (öffnet ein eigenes Fenster).
     var onRequestManual: (() -> Void)?
+    /// Seite & Sheet: Steuerung des umgebenden `ScrollView` (die Trefferkarten liegen darin), damit ein
+    /// Klick auf einen Radarpunkt zur Karte scrollt. Kompakt nutzt einen eigenen `ScrollViewReader`.
+    var scrollProxy: ScrollViewProxy?
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -54,40 +57,43 @@ struct DiscoveryPanel: View {
 
     init(style: DiscoveryPanelStyle,
          initialTab: DiscoveryPanelTab = .search,
+         scrollProxy: ScrollViewProxy? = nil,
          onFinished: ((PrinterSession) -> Void)? = nil,
          onRequestManual: (() -> Void)? = nil) {
         self.style = style
         self.onFinished = onFinished
         self.onRequestManual = onRequestManual
+        self.scrollProxy = scrollProxy
         _tab = State(initialValue: style == .compact ? .search : initialTab)
     }
 
     private var reduceMotion: Bool { systemReduceMotion || model.preferences.reduceMotion }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            Group {
-                if style == .compact {
+        Group {
+            if style == .compact {
+                // Die kompakte Trefferliste hat ein eigenes ScrollView – dafür ein eigener Reader.
+                ScrollViewReader { proxy in
                     compactContent(proxy)
-                } else {
-                    VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
-                        AnimatedTabBar(
-                            items: DiscoveryPanelTab.allCases,
-                            selection: $tab,
-                            title: { $0.title },
-                            systemImage: { $0.systemImage }
-                        )
-                        ZStack(alignment: .top) {
-                            tabContent(tab, proxy: proxy)
-                                .id(tab)
-                                .transition(reduceMotion ? .opacity : .asymmetric(
-                                    insertion: .opacity.combined(with: .offset(y: 14)),
-                                    removal: .opacity
-                                ))
-                        }
-                        .frame(maxWidth: .infinity, alignment: .top)
-                        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: tab)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
+                    AnimatedTabBar(
+                        items: DiscoveryPanelTab.allCases,
+                        selection: $tab,
+                        title: { $0.title },
+                        systemImage: { $0.systemImage }
+                    )
+                    ZStack(alignment: .top) {
+                        tabContent(tab)
+                            .id(tab)
+                            .transition(reduceMotion ? .opacity : .asymmetric(
+                                insertion: .opacity.combined(with: .offset(y: 14)),
+                                removal: .opacity
+                            ))
                     }
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: tab)
                 }
             }
         }
@@ -105,10 +111,10 @@ struct DiscoveryPanel: View {
     }
 
     @ViewBuilder
-    private func tabContent(_ tab: DiscoveryPanelTab, proxy: ScrollViewProxy) -> some View {
+    private func tabContent(_ tab: DiscoveryPanelTab) -> some View {
         switch tab {
         case .search:
-            searchContent(proxy)
+            searchContent
         case .manual:
             DiscoveryManualForm(discovered: controller.found) { session in
                 onFinished?(session)
@@ -122,12 +128,12 @@ struct DiscoveryPanel: View {
 
     // MARK: Suche (Seite & Sheet)
 
-    private func searchContent(_ proxy: ScrollViewProxy) -> some View {
+    private var searchContent: some View {
         VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
             GlassCard(padding: 20, cornerRadius: Theme.Metrics.cornerLarge,
                       tint: controller.isScanning ? Theme.teal : nil) {
                 HStack(alignment: .center, spacing: 26) {
-                    radar(proxy)
+                    radar(scrollProxy)
                         .frame(width: style == .page ? 290 : 240, height: style == .page ? 290 : 240)
                     VStack(alignment: .leading, spacing: 16) {
                         statusText(large: true)
@@ -149,12 +155,12 @@ struct DiscoveryPanel: View {
                 }
             }
 
-            results(proxy)
+            results
         }
     }
 
     @ViewBuilder
-    private func results(_ proxy: ScrollViewProxy) -> some View {
+    private var results: some View {
         if !controller.found.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(tr("Gefundene Drucker"),
@@ -239,6 +245,8 @@ struct DiscoveryPanel: View {
                             Label(tr("Erneut suchen"), systemImage: "arrow.clockwise")
                         }
                         .buttonStyle(.labelWerkPrimary)
+                        .disabled(controller.sources.isEmpty)
+                        .help(controller.sources.isEmpty ? tr("Mindestens eine Quelle auswählen") : "")
                         Button {
                             tab = .manual
                         } label: {
@@ -348,7 +356,7 @@ struct DiscoveryPanel: View {
 
     // MARK: Bausteine
 
-    private func radar(_ proxy: ScrollViewProxy) -> some View {
+    private func radar(_ proxy: ScrollViewProxy?) -> some View {
         DiscoveryRadar(
             printers: controller.found,
             isScanning: controller.isScanning,
@@ -380,7 +388,8 @@ struct DiscoveryPanel: View {
         DiscoveryFlowLayout(spacing: compact ? 6 : 8) {
             ForEach(DiscoverySourceStyle.ordered, id: \.self) { source in
                 DiscoverySourceToggle(source: source, isOn: sourceBinding(source),
-                                      count: controller.count(for: source), compact: compact)
+                                      count: controller.count(for: source), compact: compact,
+                                      reduceMotion: reduceMotion)
             }
         }
     }
@@ -399,7 +408,7 @@ struct DiscoveryPanel: View {
         .buttonStyle(controller.isScanning ? LabelWerkButtonStyle.labelWerkSecondary : LabelWerkButtonStyle.labelWerkPrimary)
         .disabled(!controller.isScanning && controller.sources.isEmpty)
         .help(controller.sources.isEmpty ? tr("Mindestens eine Quelle auswählen") : "")
-        .animation(Motion.snappy, value: controller.isScanning)
+        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: controller.isScanning)
     }
 
     private var scanButtonTitle: String {
@@ -445,10 +454,15 @@ struct DiscoveryPanel: View {
 
     // MARK: Daten & Aktionen
 
-    /// IDs gefundener Drucker, die bereits eingerichtet sind (gleiche Verbindung).
+    /// IDs gefundener Drucker, die bereits eingerichtet sind. Verglichen wird über
+    /// `ConnectionDescriptor.stableID` – ein anderer Bluetooth-Name oder USB-Anschluss ist dasselbe Gerät.
     private var addedIDs: Set<String> {
-        let descriptors = Set(model.sessions.map { $0.saved.descriptor })
-        return Set(controller.found.filter { descriptors.contains($0.descriptor) }.map(\.id))
+        let stableIDs = Set(model.sessions.map { $0.saved.descriptor.stableID })
+        return Set(controller.found.filter { stableIDs.contains($0.descriptor.stableID) }.map(\.id))
+    }
+
+    private func existingSession(for printer: DiscoveredPrinter) -> PrinterSession? {
+        model.sessions.first { $0.saved.descriptor.refersToSameDevice(as: printer.descriptor) }
     }
 
     private func sourceBinding(_ source: DiscoverySource) -> Binding<Bool> {
@@ -465,6 +479,14 @@ struct DiscoveryPanel: View {
     }
 
     private func add(_ printer: DiscoveredPrinter) {
+        // `AppModel.addPrinter(from:)` vergleicht exakt; hier zählt dasselbe Gerät (keine Dubletten).
+        if let existing = existingSession(for: printer) {
+            if style == .page {
+                model.toast(tr("Bereits eingerichtet"), message: existing.displayName, style: .info)
+            }
+            highlight(printer.id, proxy: scrollProxy)
+            return
+        }
         let previousSelection = model.selection
         let session = model.addPrinter(from: printer)
         if model.preferences.playSounds { SoundService.play(.success) }
@@ -477,7 +499,7 @@ struct DiscoveryPanel: View {
     }
 
     private func open(_ printer: DiscoveredPrinter) {
-        guard let session = model.sessions.first(where: { $0.saved.descriptor == printer.descriptor }) else { return }
+        guard let session = existingSession(for: printer) else { return }
         model.selection = .printer(session.id)
         onFinished?(session)
     }
@@ -513,6 +535,8 @@ struct DiscoveryDemoPane: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var printTrigger = 0
+    /// Konfetti nur ohne „Bewegung reduzieren“ (die Komponente kennt nur die Systemeinstellung).
+    @State private var burstTrigger = 0
     @State private var appeared = false
 
     private var reduceMotion: Bool { systemReduceMotion || model.preferences.reduceMotion }
@@ -525,7 +549,7 @@ struct DiscoveryDemoPane: View {
                     PrinterIllustration(state: .ready, isPrinting: false,
                                         accent: DiscoveryAccentPalette.color(0.78),
                                         category: .desktop, labelAspect: 1.5, printTrigger: printTrigger)
-                    CelebrationBurst(trigger: printTrigger, colors: [Theme.magenta, Theme.violet, Theme.teal])
+                    CelebrationBurst(trigger: burstTrigger, colors: [Theme.magenta, Theme.violet, Theme.teal])
                 }
                 .frame(width: 210, height: 230)
 
@@ -555,7 +579,7 @@ struct DiscoveryDemoPane: View {
                             .buttonStyle(.labelWerkPrimary)
                         } else {
                             Button {
-                                printTrigger += 1
+                                celebrate()
                                 let session = model.addDemoPrinter()
                                 onFinished(session)
                             } label: {
@@ -563,12 +587,15 @@ struct DiscoveryDemoPane: View {
                             }
                             .buttonStyle(.labelWerkPrimary)
                         }
-                        Button {
-                            printTrigger += 1
-                        } label: {
-                            Label(tr("Probedruck ansehen"), systemImage: "printer.dotmatrix.filled.and.paper")
+                        if !reduceMotion {
+                            Button {
+                                celebrate()
+                            } label: {
+                                Label(tr("Probedruck ansehen"), systemImage: "printer.dotmatrix.filled.and.paper")
+                            }
+                            .buttonStyle(.labelWerkSecondary)
+                            .transition(.opacity)
                         }
-                        .buttonStyle(.labelWerkSecondary)
                     }
                 }
                 Spacer(minLength: 0)
@@ -579,9 +606,16 @@ struct DiscoveryDemoPane: View {
             guard !reduceMotion else { return }
             Task {
                 try? await Task.sleep(for: .milliseconds(450))
-                printTrigger += 1
+                celebrate()
             }
         }
+    }
+
+    /// Probedruck der Darstellung samt Konfetti – nur ohne „Bewegung reduzieren“.
+    private func celebrate() {
+        guard !reduceMotion else { return }
+        printTrigger += 1
+        burstTrigger += 1
     }
 
     private func feature(_ symbol: String, _ text: String, index: Int) -> some View {
@@ -609,23 +643,26 @@ struct DiscoveryView: View {
     init() {}
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
-                SectionHeader(tr("Drucker suchen"),
-                              subtitle: tr("Zebra-Drucker per Bonjour, USB, Netzwerk-Scan, macOS-Warteschlange oder Bluetooth finden und einrichten."),
-                              systemImage: "dot.radiowaves.left.and.right") {
-                    if !model.sessions.isEmpty {
-                        Label(tr("%d Drucker eingerichtet", model.sessions.count), systemImage: "printer.fill")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .contentTransition(.numericText(value: Double(model.sessions.count)))
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
+                    SectionHeader(tr("Drucker suchen"),
+                                  subtitle: tr("Zebra-Drucker per Bonjour, USB, Netzwerk-Scan, macOS-Warteschlange oder Bluetooth finden und einrichten."),
+                                  systemImage: "dot.radiowaves.left.and.right") {
+                        if !model.sessions.isEmpty {
+                            Label(tr("%d Drucker eingerichtet", model.sessions.count), systemImage: "printer.fill")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .contentTransition(.numericText(value: Double(model.sessions.count)))
+                        }
                     }
+                    // Der Reader umschließt das ScrollView der Seite: Radarpunkte scrollen zu ihrer Karte.
+                    DiscoveryPanel(style: .page, scrollProxy: proxy)
                 }
-                DiscoveryPanel(style: .page)
+                .padding(Theme.Metrics.paddingLarge)
+                .frame(maxWidth: Theme.Metrics.contentMaxWidth)
+                .frame(maxWidth: .infinity)
             }
-            .padding(Theme.Metrics.paddingLarge)
-            .frame(maxWidth: Theme.Metrics.contentMaxWidth)
-            .frame(maxWidth: .infinity)
         }
         .background { AnimatedBackground(style: .subtle).ignoresSafeArea() }
         .navigationTitle(tr("Drucker suchen"))
@@ -638,6 +675,7 @@ struct DiscoveryView: View {
 struct AddPrinterView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     private let initialTab: DiscoveryPanelTab
 
     init(initialTab: DiscoveryPanelTab = .search) {
@@ -668,10 +706,13 @@ struct AddPrinterView: View {
             .padding(.top, 20)
             .padding(.bottom, 12)
 
-            ScrollView {
-                DiscoveryPanel(style: .sheet, initialTab: initialTab, onFinished: { _ in close() })
-                    .padding(.horizontal, Theme.Metrics.paddingLarge)
-                    .padding(.bottom, Theme.Metrics.padding)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    DiscoveryPanel(style: .sheet, initialTab: initialTab, scrollProxy: proxy,
+                                   onFinished: { _ in close() })
+                        .padding(.horizontal, Theme.Metrics.paddingLarge)
+                        .padding(.bottom, Theme.Metrics.padding)
+                }
             }
 
             Divider().opacity(0.5)
@@ -681,7 +722,9 @@ struct AddPrinterView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .contentTransition(.numericText(value: Double(model.sessions.count)))
-                    .animation(Motion.spring, value: model.sessions.count)
+                    .animation(Motion.animation(Motion.spring,
+                                                reduceMotion: systemReduceMotion || model.preferences.reduceMotion),
+                               value: model.sessions.count)
                 Spacer()
                 Button(action: close) {
                     Text(tr("Fertig")).padding(.horizontal, 10)

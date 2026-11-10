@@ -513,7 +513,8 @@ final class FirmwareUpdateController {
                     self.phase = .transferFailed(session.lastError ?? tr("Die Übertragung wurde abgebrochen."))
                 }
                 self.endKeepAwake()
-                if session.connectionState.isConnected { session.startMonitoring() }
+                // Immer wieder aufnehmen: Die Überwachung verbindet auch eine fehlgeschlagene Sitzung neu.
+                session.startMonitoring()
             }
         }
     }
@@ -599,6 +600,8 @@ final class FirmwareUpdateController {
         }
         withAnimation(reduceMotion ? nil : Motion.spring) { phase = .reconnectFailed }
         endKeepAwake()
+        // `reconnect()` hat die Statusüberwachung angehalten; sie versucht es im Hintergrund weiter.
+        session.startMonitoring()
     }
 
     /// Nach einem Fehler erneut übertragen (Datei bleibt geladen).

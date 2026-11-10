@@ -88,7 +88,14 @@ struct CodeEditor: NSViewRepresentable {
         textView.language = language
         if textView.string != text {
             let selection = textView.selectedRanges
-            textView.string = text
+            // Über das Text-Storage ersetzen, damit der Undo-Stapel erhalten bleibt.
+            let full = NSRange(location: 0, length: (textView.string as NSString).length)
+            if textView.shouldChangeText(in: full, replacementString: text) {
+                textView.textStorage?.replaceCharacters(in: full, with: text)
+                textView.didChangeText()
+            } else {
+                textView.string = text
+            }
             let length = (text as NSString).length
             let clamped = selection.map { value -> NSValue in
                 let r = value.rangeValue

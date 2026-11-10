@@ -29,10 +29,10 @@ struct DesignerImageWorkspace: View {
     }
 
     private var key: DesignerImageKey? {
-        guard let source = state.source, !source.pages.isEmpty else { return nil }
+        guard let source = state.source, source.pageCount > 0 else { return nil }
         return DesignerImageKey(
             sourceID: source.id,
-            page: min(max(0, state.pageIndex), source.pages.count - 1),
+            page: min(max(0, state.pageIndex), source.pageCount - 1),
             widthDots: target.widthDots,
             heightDots: target.heightDots,
             fitMode: state.fitMode,
@@ -107,7 +107,7 @@ struct DesignerImageWorkspace: View {
                 sourceHeader(source)
                 Divider().opacity(0.6)
                 comparison
-                if source.pages.count > 1 {
+                if source.pageCount > 1 {
                     Divider().opacity(0.6)
                     pageStrip(source)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -143,9 +143,7 @@ struct DesignerImageWorkspace: View {
                 Text(source.name)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
-                Text(source.isPDF
-                     ? tr("PDF · %d Seiten · gerendert mit %d dpi", source.pages.count, source.renderedDPI)
-                     : tr("Bild · %d × %d Pixel", source.pixelWidth, source.pixelHeight))
+                Text(sourceDetail(source))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -172,6 +170,15 @@ struct DesignerImageWorkspace: View {
         }
         .padding(12)
         .animation(reduceMotion ? nil : Motion.snappy, value: state.isProcessing)
+    }
+
+    private func sourceDetail(_ source: DesignerImageSource) -> String {
+        guard source.isPDF else { return tr("Bild · %d × %d Pixel", source.pixelWidth, source.pixelHeight) }
+        if source.totalPageCount > source.pageCount {
+            return tr("PDF · erste %d von %d Seiten · gerendert mit %d dpi",
+                      source.pageCount, source.totalPageCount, source.renderedDPI)
+        }
+        return tr("PDF · %d Seiten · gerendert mit %d dpi", source.pageCount, source.renderedDPI)
     }
 
     private var comparison: some View {
@@ -217,17 +224,19 @@ struct DesignerImageWorkspace: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 10) {
-                    ForEach(source.thumbnails.indices, id: \.self) { index in
-                        DesignerPageThumbnail(image: source.thumbnails[index], number: index + 1,
+                    ForEach(0..<source.pageCount, id: \.self) { index in
+                        DesignerPageThumbnail(source: source, index: index,
                                               isSelected: index == state.pageIndex,
                                               isIncluded: state.allPages || index == state.pageIndex,
-                                              namespace: pageNamespace)
+                                              namespace: pageNamespace, reduceMotion: reduceMotion)
                             .id(index)
                             .onTapGesture {
                                 withAnimation(reduceMotion ? nil : Motion.spring) { state.pageIndex = index }
                             }
                     }
                 }
+                // Neue Datei → neue Zellen (sonst blieben Vorschaubilder der alten Datei stehen).
+                .id(source.id)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
@@ -239,7 +248,7 @@ struct DesignerImageWorkspace: View {
     }
 
     private func statsLine(_ source: DesignerImageSource) -> some View {
-        let pageCount = state.allPages ? source.pages.count : 1
+        let pageCount = state.allPages ? source.pageCount : 1
         return HStack(spacing: 14) {
             DesignerStat(systemImage: "ruler", text: target.sizeText)
             DesignerStat(systemImage: "square.grid.3x3", text: tr("%d × %d Punkte", target.widthDots, target.heightDots))
@@ -267,9 +276,9 @@ struct DesignerImageWorkspace: View {
                 SectionHeader(tr("Ausgabe"), subtitle: target.printerName ?? tr("Kein Drucker ausgewählt"),
                               systemImage: "printer.dotmatrix")
 
-                if let source = state.source, source.pages.count > 1 {
+                if let source = state.source, source.pageCount > 1 {
                     DesignerChoiceBar(items: [false, true], selection: $state.allPages, reduceMotion: reduceMotion,
-                                      title: { $0 ? tr("Alle %d Seiten", source.pages.count) : tr("Diese Seite") },
+                                      title: { $0 ? tr("Alle %d Seiten", source.pageCount) : tr("Diese Seite") },
                                       systemImage: { $0 ? "doc.on.doc" : "doc" })
                 }
 
@@ -280,7 +289,7 @@ struct DesignerImageWorkspace: View {
                         Text(state.copies, format: .number)
                             .font(.system(size: 13, weight: .semibold).monospacedDigit())
                             .contentTransition(.numericText(value: Double(state.copies)))
-                            .animation(Motion.snappy, value: state.copies)
+                            .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: state.copies)
                     }
                     .font(.system(size: 12.5))
                 }
@@ -473,7 +482,7 @@ struct DesignerSplitCompare: View {
                 } else {
                     Theme.labelPaper
                         .frame(width: width, height: height)
-                        .shimmering()
+                        .shimmering(active: !reduceMotion)
                 }
             }
             .frame(width: width, height: height)
@@ -529,44 +538,65 @@ struct DesignerSplitCompare: View {
 // MARK: - Seitenleiste (PDF)
 
 private struct DesignerPageThumbnail: View {
-    let image: CGImage
-    let number: Int
+    let source: DesignerImageSource
+    let index: Int
     let isSelected: Bool
     let isIncluded: Bool
     let namespace: Namespace.ID
+    let reduceMotion: Bool
 
     @State private var hovering = false
+    @State private var image: CGImage?
 
     var body: some View {
         VStack(spacing: 5) {
-            Image(decorative: image, scale: 1)
-                .resizable()
-                .interpolation(.medium)
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 62, height: 74)
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
-                .opacity(isIncluded ? 1 : 0.55)
-                .overlay {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Theme.brandGradient, lineWidth: 2.5)
-                            .padding(-4)
-                            .matchedGeometryEffect(id: "page", in: namespace)
-                    }
+            ZStack {
+                Color.white
+                if let image {
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .interpolation(.medium)
+                        .aspectRatio(contentMode: .fit)
+                        .transition(.opacity)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
                 }
-            Text(verbatim: String(number))
+            }
+            .frame(width: 62, height: 74)
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
+            .opacity(isIncluded ? 1 : 0.55)
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Theme.brandGradient, lineWidth: 2.5)
+                        .padding(-4)
+                        .matchedGeometryEffect(id: "page", in: namespace)
+                }
+            }
+            Text(verbatim: String(index + 1))
                 .font(.system(size: 10.5, weight: isSelected ? .bold : .medium).monospacedDigit())
                 .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
         }
         .padding(4)
-        .scaleEffect(hovering ? 1.05 : 1)
-        .animation(Motion.snappy, value: hovering)
+        .scaleEffect(hovering && !reduceMotion ? 1.05 : 1)
+        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: hovering)
         .onHover { hovering = $0 }
         .contentShape(Rectangle())
-        .accessibilityLabel(tr("Seite %d", number))
+        .accessibilityLabel(tr("Seite %d", index + 1))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : [.isButton])
+        .task(id: index) {
+            // Vorschaubilder erst rendern, wenn die Zelle sichtbar wird (LazyHStack).
+            guard image == nil else { return }
+            let source = self.source
+            let index = self.index
+            let rendered = await Task.detached(priority: .utility) {
+                DesignerImageBox(image: source.thumbnail(at: index))
+            }.value
+            guard !Task.isCancelled else { return }
+            withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) { image = rendered.image }
+        }
     }
 }
 

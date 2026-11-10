@@ -42,11 +42,16 @@ struct DriverView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
+                // ViewThatFits misst die Idealbreite (ungebrochene Textzeilen). Die feste Idealbreite
+                // lässt die Karten ab ausreichender Breite nebeneinander stehen; der Text bricht dann um.
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: Theme.Metrics.cardSpacing) {
                         diagnosticsCard
+                            .frame(maxWidth: .infinity, alignment: .top)
                         howItWorksCard
+                            .frame(maxWidth: .infinity, alignment: .top)
                     }
+                    .frame(minWidth: 0, idealWidth: 860, maxWidth: .infinity, alignment: .top)
                     VStack(spacing: Theme.Metrics.cardSpacing) {
                         diagnosticsCard
                         howItWorksCard
@@ -84,7 +89,7 @@ struct DriverView: View {
                     Label(tr("Aktualisieren"), systemImage: "arrow.clockwise")
                 }
                 .help(tr("Treiberstatus und Warteschlangen neu lesen"))
-                .disabled(installer.isRefreshing || isLoadingQueues)
+                .disabled(installer.isRefreshing || installer.isBusy || isLoadingQueues)
             }
         }
         .task {
@@ -92,7 +97,7 @@ struct DriverView: View {
             if installer.isInstalled { pulseFlow(3.5) }
         }
         .onChange(of: installer.successCount) { _, _ in
-            celebration += 1
+            if !reduceMotion { celebration += 1 }
             pulseFlow(5)
             Task { await loadQueues() }
         }
@@ -132,7 +137,7 @@ struct DriverView: View {
                 HStack(alignment: .top, spacing: 18) {
                     ZStack {
                         IconBadge(systemImage: statusSymbol, tint: statusTint, size: 62)
-                            .symbolEffect(.bounce, value: statusKey)
+                            .symbolEffect(.bounce, value: reduceMotion ? -1 : statusKey)
                             .contentTransition(.symbolEffect(.replace))
                         CelebrationBurst(trigger: celebration, colors: [Theme.ready, Theme.teal, Theme.violet])
                             .frame(width: 220, height: 220)
@@ -275,7 +280,7 @@ struct DriverView: View {
             Image(systemName: symbol)
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(tint)
-                .symbolEffect(.bounce, value: title)
+                .symbolEffect(.bounce, value: reduceMotion ? "" : title)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
@@ -335,10 +340,10 @@ struct DriverView: View {
                         Button {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString("./Scripts/build_app.sh", forType: .string)
-                            withAnimation(Motion.snappy) { copiedCommand = true }
+                            withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) { copiedCommand = true }
                             Task {
                                 try? await Task.sleep(for: .seconds(1.5))
-                                withAnimation(Motion.snappy) { copiedCommand = false }
+                                withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) { copiedCommand = false }
                             }
                         } label: {
                             Image(systemName: copiedCommand ? "checkmark" : "doc.on.doc")
@@ -379,6 +384,7 @@ struct DriverView: View {
                             Image(systemName: "arrow.clockwise")
                         }
                         .buttonStyle(.labelWerkPlain)
+                        .disabled(installer.isBusy)
                         .help(tr("Erneut prüfen"))
                         .transition(.opacity)
                     }
@@ -692,13 +698,11 @@ struct DriverView: View {
 
     private func loadQueues() async {
         isLoadingQueues = true
-        async let allQueues = CUPSService.queues()
-        async let labelWerkQueues = CUPSService.labelWerkQueues()
         async let stateMap = DriverQueueStatusReader.states()
-        let all = await allQueues
-        let labelWerk = await labelWerkQueues
+        // Warteschlangen nur einmal lesen (`lpstat`/`lpoptions`) und daraus die LabelWerk-Kennzeichnung ableiten.
+        let all = await CUPSService.queues()
+        let labelWerkNames = await DriverQueueClassifier.labelWerkQueueNames(in: all)
         let states = await stateMap
-        let labelWerkNames = Set(labelWerk.map(\.name))
         let items = all
             .map { DriverQueueItem(info: $0, isLabelWerk: labelWerkNames.contains($0.name), state: states[$0.name] ?? .unknown) }
             .sorted { lhs, rhs in
@@ -840,7 +844,7 @@ struct DriverView: View {
                 withAnimation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion)) {
                     session.saved.cupsQueueName = name
                 }
-                celebration += 1
+                if !reduceMotion { celebration += 1 }
                 pulseFlow(4.5)
                 if model.preferences.playSounds { SoundService.play(.success) }
                 model.toast(tr("Warteschlange eingerichtet"),

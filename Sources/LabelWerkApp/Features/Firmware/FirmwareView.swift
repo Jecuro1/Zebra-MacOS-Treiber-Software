@@ -220,6 +220,7 @@ private struct FirmwareFileCard: View {
                         systemImage: "cpu",
                         tint: Theme.violet,
                         isEnabled: controller.canChooseFile,
+                        reduceMotion: reduceMotion,
                         onDrop: { urls in
                             guard let url = urls.first else { return false }
                             controller.load(url: url, reduceMotion: reduceMotion)
@@ -273,7 +274,7 @@ private struct FirmwareFileCard: View {
             RoundedRectangle(cornerRadius: Theme.Metrics.corner, style: .continuous)
                 .fill(Theme.subtleFill)
         }
-        .shimmering(active: true)
+        .shimmering(active: !reduceMotion)
     }
 
     private func failureBanner(_ message: String) -> some View {
@@ -378,7 +379,7 @@ private struct FirmwareFileDetails: View {
                 if !file.modelHints.isEmpty {
                     KeyValueRow(tr("Modelle in der Datei"), file.modelHints.joined(separator: ", "))
                 }
-                KeyValueRow("SHA-256", file.sha256, monospaced: true, copyable: true)
+                KeyValueRow(tr("SHA-256"), file.sha256, monospaced: true, copyable: true)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(tr("Erwartete Prüfsumme (optional)"))
@@ -426,12 +427,12 @@ private struct FirmwareFileDetails: View {
         case .some(true):
             Image(systemName: "checkmark.seal.fill")
                 .foregroundStyle(Theme.ready)
-                .symbolEffect(.bounce, value: checksumState)
+                .symbolEffect(.bounce, value: reduceMotion ? nil : checksumState)
                 .transition(.scale.combined(with: .opacity))
         case .some(false):
             Image(systemName: "xmark.seal.fill")
                 .foregroundStyle(Theme.error)
-                .symbolEffect(.bounce, value: checksumState)
+                .symbolEffect(.bounce, value: reduceMotion ? nil : checksumState)
                 .transition(.scale.combined(with: .opacity))
         case .none:
             EmptyView()
@@ -571,7 +572,7 @@ private struct FirmwareSafetyCard: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(checked ? Theme.ready : Color.secondary)
                     .frame(width: 22)
-                    .symbolEffect(.bounce, value: checked)
+                    .symbolEffect(.bounce, value: reduceMotion ? false : checked)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title)
                         .font(.system(size: 13, weight: .medium))

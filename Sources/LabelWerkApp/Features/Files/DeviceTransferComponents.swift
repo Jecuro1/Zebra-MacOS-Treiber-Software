@@ -66,24 +66,29 @@ struct TransferDropZone<Actions: View>: View {
     let systemImage: String
     let tint: Color
     let isEnabled: Bool
+    /// App-Einstellung „Bewegung reduzieren“ (die Systemeinstellung wird zusätzlich berücksichtigt).
+    let reduceMotionPreference: Bool
     let onDrop: ([URL]) -> Bool
     let actions: Actions
 
     @State private var targeted = false
     @State private var dropCount = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     init(title: String, message: String, systemImage: String, tint: Color = Theme.accent,
-         isEnabled: Bool = true, onDrop: @escaping ([URL]) -> Bool,
+         isEnabled: Bool = true, reduceMotion: Bool, onDrop: @escaping ([URL]) -> Bool,
          @ViewBuilder actions: () -> Actions) {
         self.title = title
         self.message = message
         self.systemImage = systemImage
         self.tint = tint
         self.isEnabled = isEnabled
+        self.reduceMotionPreference = reduceMotion
         self.onDrop = onDrop
         self.actions = actions()
     }
+
+    private var reduceMotion: Bool { systemReduceMotion || reduceMotionPreference }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Theme.Metrics.corner, style: .continuous)
@@ -134,7 +139,7 @@ struct TransferDropZone<Actions: View>: View {
         .dropDestination(for: URL.self) { urls, _ in
             guard isEnabled, !urls.isEmpty else { return false }
             let accepted = onDrop(urls)
-            if accepted { dropCount += 1 }
+            if accepted && !reduceMotion { dropCount += 1 }
             return accepted
         } isTargeted: { inside in
             targeted = inside && isEnabled
@@ -150,12 +155,14 @@ struct TransferDropZone<Actions: View>: View {
 struct TransferSearchField: View {
     @Binding var text: String
     let prompt: String
+    let reduceMotion: Bool
 
     @FocusState private var focused: Bool
 
-    init(text: Binding<String>, prompt: String) {
+    init(text: Binding<String>, prompt: String, reduceMotion: Bool) {
         self._text = text
         self.prompt = prompt
+        self.reduceMotion = reduceMotion
     }
 
     var body: some View {
@@ -189,8 +196,8 @@ struct TransferSearchField: View {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(focused ? Theme.accent.opacity(0.6) : Theme.cardStroke, lineWidth: focused ? 1.5 : 1)
         }
-        .animation(Motion.snappy, value: focused)
-        .animation(Motion.snappy, value: text.isEmpty)
+        .animation(reduceMotion ? nil : Motion.snappy, value: focused)
+        .animation(reduceMotion ? nil : Motion.snappy, value: text.isEmpty)
     }
 }
 

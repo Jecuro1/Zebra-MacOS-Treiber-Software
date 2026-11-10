@@ -66,7 +66,6 @@ struct NetConfigConnectionDiagram: View {
         case .bluetooth, .ble: return ("dot.radiowaves.left.and.right", tr("Bluetooth"))
         case .cupsQueue: return ("printer", tr("macOS-Warteschlange"))
         case .virtual: return ("sparkles", tr("Simulation"))
-        default: return ("point.3.connected.trianglepath.dotted", tr("Verbindung"))
         }
     }
 
@@ -255,9 +254,11 @@ private struct NetConfigLink: View {
 
 struct NetConfigSignalBars: View {
     let percent: Int
+    let reduceMotion: Bool
 
-    init(percent: Int) {
+    init(percent: Int, reduceMotion: Bool) {
         self.percent = percent
+        self.reduceMotion = reduceMotion
     }
 
     private var level: Int {
@@ -286,7 +287,7 @@ struct NetConfigSignalBars: View {
                     .frame(width: 4.5, height: CGFloat(5 + index * 4))
             }
         }
-        .animation(Motion.spring, value: level)
+        .animation(reduceMotion ? nil : Motion.spring, value: level)
         .accessibilityElement()
         .accessibilityLabel(tr("Signalstärke"))
         .accessibilityValue(TransferFormat.percent(Double(percent) / 100))
@@ -485,7 +486,7 @@ struct NetConfigActiveCard: View {
                         }
                     }
                     .padding(.vertical, 4)
-                    .shimmering(active: true)
+                    .shimmering(active: !reduceMotion)
                     .transition(.opacity)
                 } else if editor.active.isEmpty {
                     TransferNote(tr("Der Drucker liefert keine Live-Werte der Schnittstelle (nur bei Link-OS-Druckern verfügbar)."),
@@ -517,7 +518,7 @@ struct NetConfigActiveCard: View {
                                     .font(.system(size: 12))
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                NetConfigSignalBars(percent: percent)
+                                NetConfigSignalBars(percent: percent, reduceMotion: reduceMotion)
                                 Text(TransferFormat.percent(Double(percent) / 100))
                                     .font(.system(size: 12.5, weight: .medium).monospacedDigit())
                                     .contentTransition(.numericText())

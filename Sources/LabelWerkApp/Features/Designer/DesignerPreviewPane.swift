@@ -80,7 +80,7 @@ struct DesignerPreviewPane: View {
                 }
                 .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
-        .buttonStyle(DesignerPressStyle())
+        .buttonStyle(DesignerPressStyle(reduceMotion: reduceMotion))
         .help(help)
         .accessibilityLabel(help)
         .accessibilityAddTraits(isOn.wrappedValue ? .isSelected : [])
@@ -419,7 +419,7 @@ struct DesignerInspector: View {
                 if warningCount > 0 && tab == .elements {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(Theme.warning)
-                        .symbolEffect(.pulse, options: .repeat(2), value: warningCount)
+                        .symbolEffect(.pulse, options: .repeat(2), value: reduceMotion ? 0 : warningCount)
                         .help(tr("Der Interpreter hat Hinweise zu diesem Etikett"))
                 }
             }
@@ -455,7 +455,8 @@ struct DesignerInspector: View {
                         ForEach(Array(label.elements.enumerated()), id: \.offset) { index, element in
                             DesignerElementRow(index: index, element: element, dotsPerMM: label.dotsPerMM,
                                                isHighlighted: preview.highlightedElement == index,
-                                               isPinned: preview.pinnedElement == index)
+                                               isPinned: preview.pinnedElement == index,
+                                               reduceMotion: reduceMotion)
                                 .id(index)
                                 .onHover { inside in
                                     if inside {
@@ -491,7 +492,7 @@ struct DesignerInspector: View {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.seal.fill")
                     .foregroundStyle(Theme.ready)
-                    .symbolEffect(.bounce, value: tab)
+                    .symbolEffect(.bounce, value: reduceMotion ? .elements : tab)
                 Text(tr("Keine Hinweise – alle Befehle wurden verstanden."))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -510,7 +511,7 @@ struct DesignerInspector: View {
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
                                 .background(Theme.warning.opacity(0.14), in: Capsule())
-                            Text(warning.message)
+                            Text(tr(warning.message))
                                 .font(.system(size: 12))
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
@@ -529,6 +530,7 @@ private struct DesignerElementRow: View {
     let dotsPerMM: Int
     let isHighlighted: Bool
     let isPinned: Bool
+    let reduceMotion: Bool
 
     var body: some View {
         let info = DesignerElementInfo.make(element)
@@ -563,7 +565,7 @@ private struct DesignerElementRow: View {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(Theme.accent)
                 .opacity(isPinned ? 1 : 0)
-                .scaleEffect(isPinned ? 1 : 0.4)
+                .scaleEffect(isPinned || reduceMotion ? 1 : 0.4)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -572,7 +574,7 @@ private struct DesignerElementRow: View {
                 .fill(isHighlighted ? Theme.accent.opacity(0.14) : Color.clear)
         )
         .contentShape(Rectangle())
-        .animation(Motion.snappy, value: isHighlighted)
-        .animation(Motion.bouncy, value: isPinned)
+        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: isHighlighted)
+        .animation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion), value: isPinned)
     }
 }

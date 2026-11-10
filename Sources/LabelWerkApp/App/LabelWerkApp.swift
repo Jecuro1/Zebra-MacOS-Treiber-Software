@@ -21,11 +21,13 @@ struct LabelWerkApp: App {
         Settings {
             AppSettingsView()
                 .environment(model)
+                .environment(\.appReduceMotion, model.preferences.reduceMotion)
         }
 
         MenuBarExtra(isInserted: $model.preferences.showMenuBarExtra) {
             MenuBarView()
                 .environment(model)
+                .environment(\.appReduceMotion, model.preferences.reduceMotion)
         } label: {
             MenuBarIcon(state: model.aggregateState, alertCount: model.activeAlertCount)
         }

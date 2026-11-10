@@ -17,6 +17,7 @@ struct DiscoveryManualForm: View {
     @State private var queues: [CUPSQueueInfo] = []
     @State private var isLoadingQueues = false
     @State private var queuesLoaded = false
+    @State private var showAllQueues = false
     @State private var deviceScanner = DiscoveryController(sources: [.usb, .bluetooth, .ble], persistsSources: false)
     @State private var modelSearch = ""
     @State private var interfaces: [NetworkInterfaceInfo] = []
@@ -41,7 +42,9 @@ struct DiscoveryManualForm: View {
             }
             .frame(width: 300)
         }
-        .onAppear(perform: prepareOnce)
+        .onAppear(perform: handleAppear)
+        // Bluetooth-Inquiry und BLE-Scan nicht im Hintergrund weiterlaufen lassen (Reiterwechsel, Sheet zu).
+        .onDisappear { deviceScanner.stop() }
         .onChange(of: draft.connection) { _, connection in
             draft.deviceID = nil
             prepare(for: connection)
@@ -137,7 +140,7 @@ struct DiscoveryManualForm: View {
             Label(tr("Erreichbar · %d ms", milliseconds), systemImage: "checkmark.circle.fill")
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(Theme.ready)
-                .symbolEffect(.bounce, value: milliseconds)
+                .symbolEffect(.bounce, value: reduceMotion ? 0 : milliseconds)
                 .transition(.scale(scale: 0.9).combined(with: .opacity))
         case .unreachable(let message):
             Label(tr("Nicht erreichbar"), systemImage: "xmark.octagon.fill")
@@ -162,17 +165,32 @@ struct DiscoveryManualForm: View {
                 DiscoveryInlineNote(systemImage: "tray",
                                     text: tr("In macOS ist noch keine Druckerwarteschlange eingerichtet."))
             } else {
-                ForEach(queues, id: \.name) { queue in
-                    let hint = DiscoveryMatcher.model(for: queue)
-                    DiscoveryOptionRow(
-                        title: queue.name,
-                        subtitle: hint?.displayName ?? queue.makeAndModel ?? queue.deviceURI,
-                        systemImage: queue.isDefault ? "star.circle.fill" : "printer",
-                        isSelected: draft.queueName == queue.name,
-                        namespace: namespace
-                    ) {
-                        selectQueue(queue)
+                ForEach(visibleQueues, id: \.name) { queue in
+                    queueRow(queue)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+                if !zebraQueues.isEmpty && !otherQueues.isEmpty {
+                    Button {
+                        withAnimation(Motion.animation(Motion.spring, reduceMotion: reduceMotion)) {
+                            showAllQueues.toggle()
+                        }
+                    } label: {
+                        Label(showAllQueues
+                              ? tr("Nur Zebra-Warteschlangen anzeigen")
+                              : tr("Alle Warteschlangen anzeigen (%d weitere)", otherQueues.count),
+                              systemImage: showAllQueues ? "chevron.up" : "chevron.down")
                     }
+                    .buttonStyle(.labelWerkPlain)
+                    .controlSize(.small)
+                    .help(tr("Warteschlangen ohne erkennbaren Zebra-Drucker (z. B. Büro- oder Tintenstrahldrucker)"))
+                }
+                if let selected = selectedQueue, !selected.looksLikeZebra {
+                    DiscoveryInlineNote(
+                        systemImage: "exclamationmark.triangle.fill",
+                        text: tr("„%@“ wurde nicht als Zebra-Drucker erkannt. LabelWerk sendet Etikettendaten (ZPL, EPL oder CPCL) als Rohdaten – ein Büro- oder Tintenstrahldrucker würde stattdessen Seiten voller Steuerzeichen drucken. Nur auswählen, wenn diese Warteschlange zu einem Zebra-Drucker führt.", selected.name),
+                        tint: Theme.warning
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             HStack(spacing: 8) {
@@ -189,6 +207,25 @@ struct DiscoveryManualForm: View {
             DiscoveryInlineNote(systemImage: "info.circle",
                                 text: tr("Über eine Warteschlange sendet LabelWerk Rohdaten an CUPS. Live-Status und Gerätewerkzeuge sind damit nicht verfügbar."))
         }
+    }
+
+    private func queueRow(_ queue: CUPSQueueInfo) -> some View {
+        let isZebra = queue.looksLikeZebra
+        let detail = DiscoveryMatcher.model(for: queue)?.displayName ?? queue.makeAndModel ?? queue.deviceURI
+        let symbol = isZebra ? (queue.isDefault ? "star.circle.fill" : "printer") : "exclamationmark.triangle.fill"
+        return DiscoveryOptionRow(
+            title: queue.name,
+            subtitle: isZebra ? detail : tr("Kein Zebra-Drucker erkannt · %@", detail),
+            systemImage: symbol,
+            tint: isZebra ? nil : Theme.warning,
+            isSelected: draft.queueName == queue.name,
+            namespace: namespace
+        ) {
+            selectQueue(queue)
+        }
+        .help(isZebra
+              ? queue.deviceURI
+              : tr("Diese Warteschlange gehört vermutlich nicht zu einem Zebra-Drucker. Etikettendaten würden dort als unlesbare Seiten gedruckt."))
     }
 
     private var usbFields: some View {
@@ -235,7 +272,7 @@ struct DiscoveryManualForm: View {
                               emptyText: String, searchingText: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if devices.isEmpty {
-                if deviceScanner.isScanning {
+                if deviceScanner.isScanningAny(of: sources) {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text(searchingText)
@@ -264,13 +301,13 @@ struct DiscoveryManualForm: View {
                 Button {
                     deviceScanner.start(sources: sources)
                 } label: {
-                    Label(deviceScanner.isScanning ? tr("Suche läuft …") : tr("Erneut suchen"),
+                    Label(deviceScanner.isScanningAny(of: sources) ? tr("Suche läuft …") : tr("Erneut suchen"),
                           systemImage: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(.labelWerkPlain)
                 .controlSize(.small)
-                .disabled(deviceScanner.isScanning)
-                if deviceScanner.isScanning && !devices.isEmpty {
+                .disabled(deviceScanner.isScanningAny(of: sources))
+                if deviceScanner.isScanningAny(of: sources) && !devices.isEmpty {
                     ProgressView().controlSize(.small)
                 }
                 Spacer(minLength: 0)
@@ -306,7 +343,7 @@ struct DiscoveryManualForm: View {
                 .padding(.vertical, 7)
                 .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.subtleFill))
                 .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.cardStroke, lineWidth: 1))
-                .animation(Motion.snappy, value: modelSearch.isEmpty)
+                .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: modelSearch.isEmpty)
 
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -322,7 +359,7 @@ struct DiscoveryManualForm: View {
                                     }
                                 } header: {
                                     HStack(spacing: 6) {
-                                        Text(group.category.displayName)
+                                        Text(tr(group.category.displayName))
                                         Text(group.models.count.formatted())
                                             .foregroundStyle(.tertiary)
                                         Spacer()
@@ -705,9 +742,27 @@ struct DiscoveryManualForm: View {
         }
     }
 
+    /// Bereits eingerichteter Drucker mit derselben Verbindung – verglichen über `stableID`, damit
+    /// Name (Bluetooth) oder Anschluss/Produktname (USB) keine Dubletten erzeugen.
     private var existingSession: PrinterSession? {
         guard let descriptor = currentDescriptor else { return nil }
-        return model.sessions.first { $0.saved.descriptor == descriptor }
+        return model.sessions.first { $0.saved.descriptor.refersToSameDevice(as: descriptor) }
+    }
+
+    private var zebraQueues: [CUPSQueueInfo] { queues.filter(\.looksLikeZebra) }
+
+    private var otherQueues: [CUPSQueueInfo] { queues.filter { !$0.looksLikeZebra } }
+
+    /// Zebra-/LabelWerk-Warteschlangen zuerst; andere nur auf Wunsch (oder wenn sie gewählt sind
+    /// bzw. keine Zebra-Warteschlange erkannt wurde – z. B. Rohdaten-Warteschlange per IP).
+    private var visibleQueues: [CUPSQueueInfo] {
+        if zebraQueues.isEmpty || showAllQueues { return zebraQueues + otherQueues }
+        return zebraQueues + otherQueues.filter { $0.name == draft.queueName }
+    }
+
+    private var selectedQueue: CUPSQueueInfo? {
+        guard let name = draft.queueName else { return nil }
+        return queues.first { $0.name == name }
     }
 
     private var validationMessage: String? {
@@ -767,8 +822,12 @@ struct DiscoveryManualForm: View {
 
     // MARK: - Aktionen
 
-    private func prepareOnce() {
-        guard !didPrepare else { return }
+    private func handleAppear() {
+        guard !didPrepare else {
+            // Erneut sichtbar (die Gerätesuche wurde beim Verschwinden beendet): bei Bedarf fortsetzen.
+            prepare(for: draft.connection)
+            return
+        }
         didPrepare = true
         draft.accentHue = AppModel.nextAccentHue(after: model.sessions.count)
         interfaces = SubnetScanner.localIPv4Interfaces()
@@ -782,13 +841,17 @@ struct DiscoveryManualForm: View {
     private func prepare(for connection: DiscoveryManualDraft.Connection) {
         switch connection {
         case .network:
-            break
+            deviceScanner.stop()
         case .queue:
+            deviceScanner.stop()
             if !queuesLoaded { Task { await loadQueues() } }
         case .usb:
-            if usbDevices.isEmpty && !deviceScanner.isScanning { deviceScanner.start(sources: [.usb]) }
+            // Eine noch laufende Bluetooth-Suche wird durch die USB-Suche ersetzt (und umgekehrt).
+            if usbDevices.isEmpty && !deviceScanner.isScanningAny(of: [.usb]) {
+                deviceScanner.start(sources: [.usb])
+            }
         case .bluetooth:
-            if bluetoothDevices.isEmpty && !deviceScanner.isScanning {
+            if bluetoothDevices.isEmpty && !deviceScanner.isScanningAny(of: [.bluetooth, .ble]) {
                 deviceScanner.start(sources: [.bluetooth, .ble])
             }
         }
@@ -802,7 +865,7 @@ struct DiscoveryManualForm: View {
 
     private func autoProbe() async {
         if reachability != .idle {
-            withAnimation(Motion.snappy) { reachability = .idle }
+            withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) { reachability = .idle }
         }
         guard draft.connection == .network else { return }
         let target = DiscoveryInput.split(draft.host)
@@ -817,12 +880,12 @@ struct DiscoveryManualForm: View {
         let target = DiscoveryInput.split(draft.host)
         let port = target.port ?? draft.port
         guard DiscoveryInput.isPlausibleHost(target.host), (1...65535).contains(port) else {
-            withAnimation(Motion.snappy) {
+            withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) {
                 reachability = .unreachable(tr("Bitte eine gültige Adresse eingeben."))
             }
             return
         }
-        withAnimation(Motion.snappy) { reachability = .checking }
+        withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) { reachability = .checking }
         let result = await DiscoveryProbe.check(host: target.host, port: port)
         // Inzwischen geänderte Eingaben verwerfen das Ergebnis.
         guard key == probeKey else { return }
@@ -836,6 +899,7 @@ struct DiscoveryManualForm: View {
         let loaded = await CUPSService.queues()
         withAnimation(Motion.animation(Motion.spring, reduceMotion: reduceMotion)) {
             queues = loaded.sorted { lhs, rhs in
+                if lhs.looksLikeZebra != rhs.looksLikeZebra { return lhs.looksLikeZebra }
                 if lhs.isDefault != rhs.isDefault { return lhs.isDefault }
                 return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
@@ -908,7 +972,7 @@ struct DiscoveryManualForm: View {
             accentHue: draft.accentHue,
             location: draft.location.trimmingCharacters(in: .whitespacesAndNewlines)
         )
-        addPulse += 1
+        if !reduceMotion { addPulse += 1 }
         let session = model.addPrinter(saved)
         onComplete(session)
     }
@@ -935,7 +999,7 @@ struct DiscoveryModelSpecs: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(printerModel.displayName)
                         .font(.system(size: 13, weight: .semibold))
-                    Text(verbatim: "\(printerModel.family) · \(printerModel.category.displayName)")
+                    Text(verbatim: "\(printerModel.family) · \(tr(printerModel.category.displayName))")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -954,10 +1018,10 @@ struct DiscoveryModelSpecs: View {
                     chip(language.displayName, tint: Theme.violet)
                 }
                 ForEach(printerModel.connectivity) { connectivity in
-                    chip(connectivity.displayName, tint: Theme.teal)
+                    chip(tr(connectivity.displayName), tint: Theme.teal)
                 }
                 ForEach(printerModel.mediaTypes) { mediaType in
-                    chip(mediaType.displayName, tint: Theme.printing)
+                    chip(tr(mediaType.displayName), tint: Theme.printing)
                 }
                 ForEach(printerModel.features, id: \.self) { feature in
                     chip(DiscoveryFeatureText.title(feature), tint: Theme.magenta)
@@ -1006,18 +1070,31 @@ struct DiscoveryOptionRow: View {
     let title: String
     let subtitle: String
     let systemImage: String
+    /// Farbe des Symbols (nicht ausgewählt); `nil` = Akzentfarbe.
+    let tint: Color?
     let isSelected: Bool
     let namespace: Namespace.ID
     let action: () -> Void
 
     @State private var hovering = false
 
+    init(title: String, subtitle: String, systemImage: String, tint: Color? = nil,
+         isSelected: Bool, namespace: Namespace.ID, action: @escaping () -> Void) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.tint = tint
+        self.isSelected = isSelected
+        self.namespace = namespace
+        self.action = action
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isSelected ? Color.white : Theme.accent)
+                    .foregroundStyle(isSelected ? Color.white : (tint ?? Theme.accent))
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
@@ -1060,12 +1137,14 @@ struct DiscoveryOptionRow: View {
 struct DiscoveryInlineNote: View {
     let systemImage: String
     let text: String
+    /// Farbe von Symbol und Hintergrund; `nil` = Akzentfarbe auf neutralem Grund.
+    var tint: Color? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: systemImage)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(tint ?? Theme.accent)
                 .frame(width: 16)
             Text(text)
                 .font(.system(size: 11.5))
@@ -1074,6 +1153,12 @@ struct DiscoveryInlineNote: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.subtleFill))
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(tint?.opacity(0.1) ?? Theme.subtleFill))
+        .overlay {
+            if let tint {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(tint.opacity(0.3), lineWidth: 1)
+            }
+        }
     }
 }
