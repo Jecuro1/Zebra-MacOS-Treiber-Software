@@ -1,117 +1,6 @@
 import SwiftUI
 import LabelWerkKit
 
-// MARK: - Abschnitte
-
-/// Abschnitte der Druckeinstellungen – entsprechen den Registerkarten „Optionen“, „Erweitertes Setup“,
-/// „Dithering“ und „Benutzerdefinierte Befehle“ des Windows-Treibers, hier auf einer Seite vereint.
-enum PrintPrefsSection: String, CaseIterable, Identifiable, Hashable {
-    case quality
-    case media
-    case position
-    case image
-    case advanced
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .quality: return tr("Qualität")
-        case .media: return tr("Medien")
-        case .position: return tr("Position")
-        case .image: return tr("Bild")
-        case .advanced: return tr("Erweitert")
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .quality: return "circle.lefthalf.filled"
-        case .media: return "square.stack.3d.up"
-        case .position: return "arrow.up.and.down.and.arrow.left.and.right"
-        case .image: return "photo"
-        case .advanced: return "gearshape.2"
-        }
-    }
-}
-
-// MARK: - Druckerrelevante Felder
-
-/// Felder, die `PrinterSession.applySettings` an den Drucker überträgt (Abgleich & Hervorhebung).
-enum PrintPrefsField: String, CaseIterable, Hashable {
-    case darkness
-    case speed
-    case mediaType
-    case tracking
-    case printMode
-    case labelTop
-    case labelLeft
-    case tearOff
-    case backfeed
-
-    var title: String {
-        switch self {
-        case .darkness: return tr("Schwärzung")
-        case .speed: return tr("Geschwindigkeit")
-        case .mediaType: return tr("Druckverfahren")
-        case .tracking: return tr("Medienerkennung")
-        case .printMode: return tr("Druckmodus")
-        case .labelTop: return tr("Oberer Versatz")
-        case .labelLeft: return tr("Linker Versatz")
-        case .tearOff: return tr("Abreißposition")
-        case .backfeed: return tr("Rückzug")
-        }
-    }
-
-    func matches(_ a: PrintSettings, _ b: PrintSettings) -> Bool {
-        switch self {
-        case .darkness: return a.darkness == b.darkness
-        case .speed: return a.speed == b.speed
-        case .mediaType: return a.mediaType == b.mediaType
-        case .tracking: return a.tracking == b.tracking
-        case .printMode: return a.printMode == b.printMode
-        case .labelTop: return a.labelTop == b.labelTop
-        case .labelLeft: return a.labelLeft == b.labelLeft
-        case .tearOff: return a.tearOffAdjust == b.tearOffAdjust
-        case .backfeed: return a.backfeed == b.backfeed
-        }
-    }
-
-    /// Ist das Feld ausdrücklich gesetzt (nicht „Druckerwert“)?
-    func isOverridden(in settings: PrintSettings) -> Bool {
-        switch self {
-        case .darkness: return settings.darkness != nil
-        case .speed: return settings.speed != nil
-        case .mediaType: return settings.mediaType != nil
-        case .tracking: return settings.tracking != nil
-        case .printMode: return settings.printMode != nil
-        case .labelTop: return settings.labelTop != nil
-        case .labelLeft: return settings.labelLeft != nil
-        case .tearOff: return settings.tearOffAdjust != nil
-        case .backfeed: return settings.backfeed != nil
-        }
-    }
-
-    static func differences(_ a: PrintSettings, _ b: PrintSettings) -> [PrintPrefsField] {
-        allCases.filter { !$0.matches(a, b) }
-    }
-
-    /// Übernimmt nur den Wert dieses Feldes aus `source` nach `target`.
-    func copy(from source: PrintSettings, into target: inout PrintSettings) {
-        switch self {
-        case .darkness: target.darkness = source.darkness
-        case .speed: target.speed = source.speed
-        case .mediaType: target.mediaType = source.mediaType
-        case .tracking: target.tracking = source.tracking
-        case .printMode: target.printMode = source.printMode
-        case .labelTop: target.labelTop = source.labelTop
-        case .labelLeft: target.labelLeft = source.labelLeft
-        case .tearOff: target.tearOffAdjust = source.tearOffAdjust
-        case .backfeed: target.backfeed = source.backfeed
-        }
-    }
-}
-
 // MARK: - Abgleichstand (überdauert Neustarts)
 
 /// Merkt sich je Drucker die zuletzt übertragenen bzw. vom Drucker gelesenen Werte, damit der
@@ -141,150 +30,6 @@ enum PrintPrefsSyncStore {
             return [:]
         }
         return entries
-    }
-}
-
-// MARK: - Werte vom Drucker (SGD)
-
-/// Liest SGD-Antworten robust in `PrintSettings` ein. Drucker melden je nach Firmware leicht
-/// unterschiedliche Schreibweisen („thermal trans“, „Thermal Transfer“, „TT“ …).
-enum PrintPrefsPrinterValues {
-    /// Abgefragte SGD-Variablen. `zpl.label_top` gibt es nicht auf jedem Modell – fehlt die Antwort,
-    /// bleibt der Wert unverändert.
-    static let variables: [String] = [
-        "print.tone", "media.speed", "ezpl.media_type", "ezpl.print_method",
-        "media.printmode", "zpl.label_top", "ezpl.tear_off", "zpl.left_position",
-    ]
-
-    struct Outcome {
-        var settings: PrintSettings
-        /// Felder, deren Wert sich durch das Einlesen geändert hat.
-        var changed: Set<PrintPrefsField>
-        /// Felder, die der Drucker gemeldet hat (nur diese sind danach mit ihm abgeglichen).
-        var read: Set<PrintPrefsField>
-        /// Anzahl erfolgreich gelesener Felder.
-        var readCount: Int { read.count }
-    }
-
-    static func merge(_ values: [String: String], into current: PrintSettings, maxSpeed: Int) -> Outcome {
-        var result = current
-        var read: Set<PrintPrefsField> = []
-        func value(_ key: String) -> String? { cleaned(values[key]) }
-
-        if let tone = number(value("print.tone")) {
-            result.darkness = clamp(Int(tone.rounded()), 0, 30)
-            read.insert(.darkness)
-        }
-        if let speed = number(value("media.speed")) {
-            result.speed = clamp(Int(speed.rounded()), 1, max(1, min(14, maxSpeed)))
-            read.insert(.speed)
-        }
-        if let type = mediaType(from: value("ezpl.print_method")) ?? mediaType(from: value("ezpl.media_type")) {
-            result.mediaType = type
-            read.insert(.mediaType)
-        }
-        if let tracking = tracking(from: value("ezpl.media_type")) ?? tracking(from: value("ezpl.print_method")) {
-            result.tracking = tracking
-            read.insert(.tracking)
-        }
-        if let mode = printMode(from: value("media.printmode")) {
-            result.printMode = mode
-            read.insert(.printMode)
-        }
-        if let top = number(value("zpl.label_top")) {
-            result.labelTop = clamp(Int(top.rounded()), -120, 120)
-            read.insert(.labelTop)
-        }
-        if let tear = number(value("ezpl.tear_off")) {
-            result.tearOffAdjust = clamp(Int(tear.rounded()), -120, 120)
-            read.insert(.tearOff)
-        }
-        if let left = number(value("zpl.left_position")) {
-            result.labelLeft = clamp(Int(left.rounded()), -9999, 9999)
-            read.insert(.labelLeft)
-        }
-        let changed = Set(read.filter { !$0.matches(result, current) })
-        return Outcome(settings: result, changed: changed, read: read)
-    }
-
-    /// Entfernt Anführungszeichen/Leerraum und verwirft „?“, „null“ & Co.
-    static func cleaned(_ raw: String?) -> String? {
-        guard let raw else { return nil }
-        let trimmed = raw.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"'")))
-        let lower = trimmed.lowercased()
-        if lower.isEmpty || ["?", "null", "nil", "unknown", "n/a", "none", "invalid"].contains(lower) { return nil }
-        return trimmed
-    }
-
-    /// Liest eine (vorzeichenbehaftete) Zahl am Anfang des Textes: „+010“, „15.0“, „-12 dots“ …
-    static func number(_ raw: String?) -> Double? {
-        guard let raw else { return nil }
-        var text = ""
-        var negative = false
-        var seenSign = false
-        var seenDigit = false
-        var seenDot = false
-        for character in raw.replacingOccurrences(of: ",", with: ".") {
-            if !seenDigit && !seenSign && (character == "-" || character == "+") {
-                seenSign = true
-                negative = character == "-"
-                continue
-            }
-            if character.isASCII && character.isNumber {
-                text.append(character)
-                seenDigit = true
-                continue
-            }
-            if character == "." && seenDigit && !seenDot {
-                text.append(character)
-                seenDot = true
-                continue
-            }
-            if character == " " && !seenDigit { continue }
-            break
-        }
-        guard seenDigit else { return nil }
-        if text.hasSuffix(".") { text.removeLast() }
-        guard let magnitude = Double(text) else { return nil }
-        return negative ? -magnitude : magnitude
-    }
-
-    static func mediaType(from raw: String?) -> MediaType? {
-        guard let text = raw?.lowercased() else { return nil }
-        let compact = text.replacingOccurrences(of: " ", with: "")
-        if compact == "dt" || text.contains("direct") { return .directThermal }
-        if compact == "tt" || text.contains("trans") { return .thermalTransfer }
-        return nil
-    }
-
-    static func tracking(from raw: String?) -> MediaTracking? {
-        guard let text = raw?.lowercased() else { return nil }
-        if text.contains("non-continuous") || text.contains("noncontinuous") || text.contains("non continuous") {
-            return .gap
-        }
-        if text.contains("continuous") || text.contains("journal") { return .continuous }
-        if text.contains("mark") || text.contains("black") || text == "bar" { return .blackMark }
-        if text.contains("gap") || text.contains("notch") || text.contains("web") || text == "label" { return .gap }
-        if text.contains("auto") { return .autoDetect }
-        return nil
-    }
-
-    static func printMode(from raw: String?) -> PrintMode? {
-        guard let text = raw?.lowercased() else { return nil }
-        let compact = text.filter { $0.isLetter }
-        if compact.count == 1, let mode = PrintMode(zplCode: compact) { return mode }
-        if compact.contains("delayed") { return .delayedCut }
-        if compact.contains("peel") { return .peelOff }
-        if compact.contains("tear") { return .tearOff }
-        if compact.contains("rewind") { return .rewind }
-        if compact.contains("applicator") { return .applicator }
-        if compact.contains("kiosk") { return .kiosk }
-        if compact.contains("cut") { return .cutter }
-        return nil
-    }
-
-    private static func clamp(_ value: Int, _ lower: Int, _ upper: Int) -> Int {
-        min(max(value, lower), upper)
     }
 }
 
@@ -319,6 +64,15 @@ struct PrintPrefsProfile: Codable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(self)
+    }
+
+    /// Vorgeschlagener Dateiname, z. B. „Büro – Druckeinstellungen.json“.
+    static func fileName(for printerName: String) -> String {
+        let cleaned = printerName
+            .components(separatedBy: CharacterSet(charactersIn: "/\\:"))
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return tr("%@ – Druckeinstellungen.json", cleaned.isEmpty ? "LabelWerk" : cleaned)
     }
 
     /// Liest ein Profil; akzeptiert auch reine `PrintSettings`-JSON-Dateien.
@@ -493,56 +247,6 @@ enum PrintPrefsSampleCodes {
                 path.addRect(CGRect(x: originX + CGFloat(x) * module, y: originY + CGFloat(y) * module,
                                     width: module + 0.02, height: module + 0.02))
             }
-        }
-        return path
-    }
-}
-
-/// Code-128-Balken als animierbare Form (Punktzuwachs über `widen`).
-struct PrintPrefsBarcodeShape: Shape {
-    var widen: CGFloat
-
-    var animatableData: CGFloat {
-        get { widen }
-        set { widen = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        PrintPrefsSampleCodes.barcodePath(in: rect, widen: widen)
-    }
-}
-
-/// QR-Code als Form.
-struct PrintPrefsQRShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        PrintPrefsSampleCodes.qrPath(in: rect)
-    }
-}
-
-/// Fehlstellen bei zu hellem Druck (deterministisch, damit nichts flimmert).
-struct PrintPrefsSpeckleShape: Shape {
-    /// 0 = keine Fehlstellen, 1 = sehr viele.
-    var amount: Double
-
-    var animatableData: Double {
-        get { amount }
-        set { amount = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let count = Int(max(0, min(1, amount)) * 260)
-        guard count > 0, rect.width > 0, rect.height > 0 else { return path }
-        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
-        func next() -> Double {
-            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-            return Double((seed >> 33) & 0xFFFF) / 65_535
-        }
-        for _ in 0..<count {
-            let x = rect.minX + CGFloat(next()) * rect.width
-            let y = rect.minY + CGFloat(next()) * rect.height
-            let r = CGFloat(0.5 + next() * 1.3)
-            path.addEllipse(in: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2))
         }
         return path
     }

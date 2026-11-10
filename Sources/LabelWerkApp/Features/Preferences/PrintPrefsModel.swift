@@ -202,6 +202,15 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         }
     }
 
+    /// Hat die Einstellung einen Standardwert des Treibers (`PrintSettings.default`)? Vorlage, Größe
+    /// und Druckersprache gehören zum Drucker bzw. Etikett und haben keinen.
+    var hasDriverDefault: Bool {
+        switch self {
+        case .template, .size, .language: return false
+        default: return true
+        }
+    }
+
     /// Meldet der Drucker diesen Wert per SGD (`PrinterClient.readPrintSettings`)?
     var isReadable: Bool {
         switch self {

@@ -32,7 +32,7 @@ SwiftUI-App für macOS 14+ (Swift-5-Sprachmodus, Observation-Framework). Quellte
 |---|---|
 | `App/LabelWerkApp.swift` | `@main`, Szenen (Fenster, Einstellungen, Menüleiste), `AppDelegate`, `MenuBarIcon`, `LabelWerkCommands` |
 | `App/Localization.swift` | `tr(_:)`, `tr(_:_:...)` |
-| `Model/AppTypes.swift` | `SavedPrinter`, `JobRecord`, `AppPreferences`, `AppearancePreference`, `PersistedState`, `Toast`, `ConnectionState`, `StatusSample` |
+| `Model/AppTypes.swift` | `SavedPrinter`, `JobRecord`, `AppPreferences` (inkl. `measurementUnit`), `AppearancePreference`, `MeasurementUnit` (mm/Zoll/Punkte), `PersistedState`, `Toast`, `ConnectionState`, `StatusSample` |
 | `Model/Navigation.swift` | `SidebarItem`, `PrinterSection` |
 | `Model/AppModel.swift` | `AppModel` (Drucker, Auswahl, Etiketten, Verlauf, Einstellungen, Toasts) |
 | `Model/PrinterSession.swift` | `PrinterSession` (Verbindung, Status, alle Geräteoperationen) |
@@ -138,7 +138,7 @@ mit RFID-Option).
 | Datei/Ordner | Root-View | Inhalt | Stand |
 |---|---|---|---|
 | `Features/Dashboard` | `DashboardView(session: PrinterSession)` | Übersicht: animierter Drucker, Status/Alarme mit Lösungsschritten, Kennzahlen, Schnellaktionen, Identität, letzte Aufträge, Demo-Steuerung | ✔ implementiert |
-| `Features/Preferences` | `PrintPreferencesView(session: PrinterSession)` | Alle `PrintSettings` mit Live-Vorschau; „An Drucker senden“, „Dauerhaft speichern“, „Als macOS-Standard“ (Standardoptionen der Warteschlange) | ✔ implementiert |
+| `Features/Preferences` | `PrintPreferencesView(session: PrinterSession)` | „Druckeinstellungen für …“ wie der Windows-Treiber ZDesigner: Seitenleiste (Seite einrichten, Druckoptionen, Bedienermodus, Grafik Optionen, Kundenspezifische Befehle, Wartung, Einheiten, Hilfe und Über) mit „Testseite drucken“, Stift-Menü je Wert (Treiberwert/Druckerwert/Vom Drucker lesen), animierte „Druckvorschau“, OK/Abbrechen/Übernehmen/Hilfe. Entwurf je Drucker (`PrintPrefsEditor`); gespeichert wird mit OK/Übernehmen in `saved.settings` und – falls vorhanden – als Standard der macOS-Warteschlange. Wartung: Senden, Dauerhaft speichern (`^JUS`), Kalibrieren, Echtzeituhr, Profil-Import/-Export (`PrinterSession+Preferences.swift`: `readPrintSettings`, `syncClock`, `printTestPage`) | ✔ implementiert |
 | `Features/Stocks` | `StocksView(session: PrinterSession)` | Etikettenformate (Katalog + eigene), Auswahl, Anlegen/Bearbeiten, Maße vom Drucker übernehmen | ✔ implementiert |
 | `Features/Tools` | `ToolsView(session: PrinterSession)` | Gerätebefehle (`PrinterAction`), Konfiguration (`^HH`), SGD-Explorer (Filter, Bearbeitung, JSON-Export), Kalibrier-Assistent, Testseite über macOS | ✔ implementiert |
 | `Features/Terminal` | `TerminalView(session: PrinterSession)` | ZPL/SGD/JSON-Konsole mit Hervorhebung, Verlauf, Autovervollständigung, Befehlsreferenz, Hex-Ansicht, Dateiversand, Export | ✔ implementiert |
