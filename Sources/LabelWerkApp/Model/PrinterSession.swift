@@ -404,8 +404,10 @@ final class PrinterSession: Identifiable {
         await run(activityText, quiet: quiet, operation)
     }
 
-    private func recordJob(_ kind: JobRecord.Kind, title: String, labels: Int, bytes: Int,
-                           success: Bool, message: String? = nil, preview: Data? = nil, payload: Data? = nil) {
+    /// Schreibt einen Auftrag in den Verlauf; gedruckte Etiketten zählen für „In dieser Sitzung“ (samt
+    /// Ton). Auch für Erweiterungen in anderen Dateien (z. B. `PrinterSession+LabelPrint.swift`).
+    func recordJob(_ kind: JobRecord.Kind, title: String, labels: Int, bytes: Int,
+                   success: Bool, message: String? = nil, preview: Data? = nil, payload: Data? = nil) {
         let stored = payload.flatMap { $0.count <= JobRecord.maxStoredPayload ? $0 : nil }
         app?.record(JobRecord(printerID: id, printerName: displayName, title: title, kind: kind,
                               labels: labels, bytes: bytes, success: success, message: message,

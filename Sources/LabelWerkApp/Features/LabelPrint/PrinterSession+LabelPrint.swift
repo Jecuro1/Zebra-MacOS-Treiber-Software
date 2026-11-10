@@ -88,11 +88,10 @@ extension PrinterSession {
         }
         var thumbnail: Data?
         if ok, let preview { thumbnail = await Self.previewPNG(image: preview) }
-        let stored = data.count <= JobRecord.maxStoredPayload ? data : nil
-        app?.record(JobRecord(printerID: id, printerName: displayName, title: title, kind: .image,
-                              labels: ok ? labels : 0, bytes: data.count, success: ok, message: message,
-                              previewPNG: thumbnail, payload: ok ? stored : nil))
-        if ok, app?.preferences.playSounds == true { SoundService.play(.printed) }
+        // Wie jeder andere Druck der App: Verlauf (Nutzdaten nur bis zur Größengrenze), Zähler
+        // „In dieser Sitzung“ und Ton.
+        recordJob(.image, title: title, labels: ok ? labels : 0, bytes: data.count, success: ok,
+                  message: message, preview: thumbnail, payload: ok ? data : nil)
         return outcome
     }
 

@@ -510,10 +510,11 @@ und der Ausdruck entspricht trotzdem der Vorschau. Ein Hinweis sagt das: *„An 
 **Einrichtung:** keine. LabelWerk legt den Eintrag bei jedem Start still für den angemeldeten Benutzer
 an bzw. aktualisiert ihn: das Skript `~/Library/PDF Services/Mit LabelWerk drucken`. Es kopiert die PDF
 des Druckdialogs nach `~/Library/Caches/com.labelwerk.app/Incoming` (macOS löscht seine eigene Datei, sobald
-das Skript endet) und öffnet die Kopie mit LabelWerk; die App räumt diese Kopien nach dem Drucken bzw.
-nach 7 Tagen auf. `uninstall.sh` entfernt den Eintrag zusammen mit der App. Wer den Eintrag nicht möchte,
-ersetzt die Datei durch eine eigene ohne die Kennzeile „LabelWerk-PDF-Dienst“ – dann lässt LabelWerk
-sie in Ruhe.
+das Skript endet) und öffnet die Kopie mit LabelWerk; die App räumt diese Kopien auf, sobald das Fenster
+„Etikettendruck“ geschlossen oder ein anderes Dokument darin geöffnet wird; übrig gebliebene Kopien löscht
+sie beim Start, sobald sie älter als 7 Tage sind. `uninstall.sh` entfernt den Eintrag zusammen mit der
+App. Wer den Eintrag nicht möchte, ersetzt die Datei durch eine eigene ohne die Kennzeile
+„LabelWerk-PDF-Dienst“ – dann lässt LabelWerk sie in Ruhe.
 
 ### Etikettentypen
 

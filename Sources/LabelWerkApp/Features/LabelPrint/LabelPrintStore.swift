@@ -76,21 +76,52 @@ final class LabelPrintStore {
     @ObservationIgnored private var renderToken = 0
     /// Referenz des Auftrags nach jeder aufbereiteten Seite (Position wie `renderedKey.pages`).
     @ObservationIgnored private var referenceTrail: [LabelFit.Reference?] = []
+    /// Zuletzt angefragte Dateien (bei mehreren Meldungen desselben Öffnens zusammengefasst) und der
+    /// Zeitpunkt der letzten Anfrage.
     @ObservationIgnored private var lastOpened: (urls: [URL], date: Date)?
+    /// Zählt Anfragen zum Öffnen (und das Schließen des Fensters): Nur das Laden der letzten Anfrage
+    /// zeigt seine Dokumente an.
+    @ObservationIgnored private var openGeneration = 0
+
+    /// Innerhalb dieser Zeit gelten bereits angefragte Dateien als dasselbe Öffnen.
+    private static let duplicateWindow: TimeInterval = 3
+    /// Innerhalb dieser Zeit gehören auch ganz andere Dateien zum selben Öffnen (`onOpenURL` meldet
+    /// mehrere Dateien einzeln und unmittelbar nacheinander).
+    private static let splitWindow: TimeInterval = 1
 
     // MARK: Dokumente
 
-    /// Öffnet Dateien (ersetzt die bisherigen). Doppelte Aufrufe mit denselben Dateien kurz
-    /// hintereinander (App-Delegate und `onOpenURL` melden dasselbe Öffnen) werden zusammengefasst.
+    /// Öffnet Dateien (ersetzt die bisherigen). Dasselbe Öffnen kann mehrfach ankommen – vom App-Delegate
+    /// alle Dateien auf einmal, über `onOpenURL` je Datei einzeln, in beliebiger Reihenfolge: Bereits
+    /// angefragte Dateien werden kurz darauf übergangen, weitere Dateien desselben Öffnens ergänzen die
+    /// Anfrage, statt sie zu ersetzen. Nur das Laden der letzten Anfrage kommt an – ein langsames früheres
+    /// (großes PDF) überschreibt nie ein späteres oder ein inzwischen geschlossenes Fenster.
     func open(_ urls: [URL]) {
-        let standardized = urls.map(\.standardizedFileURL)
-        if let last = lastOpened, last.urls == standardized, Date().timeIntervalSince(last.date) < 3 { return }
-        lastOpened = (standardized, Date())
+        var requested: [URL] = []
+        for url in urls.map(\.standardizedFileURL) where !requested.contains(url) {
+            requested.append(url)
+        }
+        guard !requested.isEmpty else { return }
+        let now = Date()
+        if let last = lastOpened, now.timeIntervalSince(last.date) < Self.duplicateWindow {
+            let new = requested.filter { !last.urls.contains($0) }
+            // Alles schon angefragt: dasselbe Öffnen noch einmal gemeldet.
+            guard !new.isEmpty else { return }
+            // Teil derselben Meldung (überschneidet sich mit der letzten Anfrage oder folgt unmittelbar):
+            // ergänzen statt die übrigen Dateien zu verwerfen.
+            if new.count < requested.count || now.timeIntervalSince(last.date) < Self.splitWindow {
+                requested = last.urls + new
+            }
+        }
+        lastOpened = (requested, now)
+        openGeneration += 1
+        let generation = openGeneration
+        let files = requested
         isLoading = true
         Task {
             var loaded: [LabelPrintDocument] = []
             var failures: [String] = []
-            for url in standardized {
+            for url in files {
                 do {
                     let document = try await Task.detached(priority: .userInitiated) { try LabelPrintDocument.load(url) }.value
                     loaded.append(document)
@@ -98,12 +129,26 @@ final class LabelPrintStore {
                     failures.append(PrinterSession.describe(error))
                 }
             }
+            // Inzwischen andere Dateien angefragt oder Fenster geschlossen: Ergebnis verwerfen.
+            guard generation == openGeneration else {
+                discardStaleLoad(loaded)
+                return
+            }
             isLoading = false
             if !failures.isEmpty {
                 model?.toast(tr("Datei konnte nicht geöffnet werden"), message: failures.joined(separator: "\n"), style: .error)
             }
             guard !loaded.isEmpty else { return }
             replaceDocuments(with: loaded)
+        }
+    }
+
+    /// Verworfenes Laden: Kopien aus „Mit LabelWerk drucken“ löschen, die weder angezeigt noch erneut
+    /// angefragt sind (eine ergänzte Anfrage lädt dieselbe Datei gerade noch einmal).
+    private func discardStaleLoad(_ loaded: [LabelPrintDocument]) {
+        let needed = Set(documents.map(\.url)).union(lastOpened?.urls ?? [])
+        for document in loaded where !needed.contains(document.url) {
+            PDFServiceInstaller.removeIncomingCopy(document.url)
         }
     }
 
@@ -138,6 +183,9 @@ final class LabelPrintStore {
 
     /// Fenster geschlossen: Dokumente freigeben (Speicher), Kopien aus dem Eingangsordner löschen.
     func closeDocuments() {
+        // Laufendes Laden verwerfen (es löscht dann seine Kopien selbst).
+        openGeneration += 1
+        isLoading = false
         renderToken += 1
         referenceTrail = []
         for document in documents { PDFServiceInstaller.removeIncomingCopy(document.url) }

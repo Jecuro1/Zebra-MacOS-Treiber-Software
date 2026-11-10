@@ -278,7 +278,12 @@ struct LabelPrintOptionsPanel: View {
                     .animation(reduceMotion ? nil : Motion.snappy, value: summary)
             }
             Button {
-                store.printLabels()
+                // „Exemplare“ ist ein Zahlenfeld: Ein getippter Wert kommt erst beim Beenden der
+                // Bearbeitung im Zustand an – Klick bzw. ⏎ beenden sie nicht von selbst.
+                afterCommittingTextEditing {
+                    guard canPrint else { return }
+                    store.printLabels()
+                }
             } label: {
                 HStack(spacing: 8) {
                     printButtonIcon

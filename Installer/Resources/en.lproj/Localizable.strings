@@ -12,6 +12,8 @@
 "Drucker hinzufügen …" = "Add Printer…";
 "Drucker installieren …" = "Install Printer…";
 "Demo-Drucker hinzufügen" = "Add Demo Printer";
+"Datei drucken …" = "Print File…";
+"Etikettendruck" = "Label Printing";
 "Drucker" = "Printer";
 "Testetikett drucken" = "Print Test Label";
 "Status aktualisieren" = "Refresh Status";
@@ -1059,6 +1061,93 @@
 "Meldung" = "Message";
 "Titel kopieren" = "Copy Title";
 
+/* MARK: Features/LabelPrint/LabelPrintOptionsPanel.swift */
+"Kein Drucker eingerichtet" = "No printer set up";
+"Richte zuerst einen Zebra-Drucker in LabelWerk ein – danach erscheint er hier." = "First set up a Zebra printer in LabelWerk – it will then appear here.";
+"Nicht direkt erreichbar – gedruckt wird dann über den macOS-Drucker „%@“." = "Not directly reachable – printing will then go through the macOS printer “%@”.";
+"Nicht verbunden – beim Drucken wird erneut verbunden." = "Not connected – LabelWerk reconnects when you print.";
+"Etikettentyp" = "Label Type";
+"Etikettentyp anlegen …" = "Create Label Type…";
+"Etikettentypen verwalten …" = "Manage Label Types…";
+"Druckeinstellungen › Etikettentypen: eigene Formate und Einstellungen, je als eigener macOS-Drucker" = "Print Settings › Label Types: your own formats and settings, each as its own macOS printer";
+"Standard des Druckers" = "Printer default";
+"macOS-Drucker „%@“" = "macOS printer “%@”";
+"Auftrag" = "Job";
+"Exemplare" = "Copies";
+"Seiten" = "Pages";
+"Die Seite des Dokuments" = "The document’s page";
+"Keine Seite markiert – links Seiten markieren." = "No page selected – select pages on the left.";
+"Seiten %@ (links markiert)" = "Pages %@ (selected on the left)";
+"An Etikett anpassen" = "Fit to label";
+"Temperatur" = "Darkness";
+"Versatz oben/links" = "Top/left offset";
+"%d / %d Punkte" = "%d / %d dots";
+"Spiegeln/Invertieren" = "Mirror/Invert";
+"Invertieren" = "Invert";
+"Druckeinstellungen öffnen …" = "Open Print Settings…";
+"1 Etikett" = "1 label";
+"%@ mm breit · Endlos" = "%@ mm wide · continuous";
+"Druckt genau die Etiketten der Vorschau (⏎)" = "Prints exactly the labels shown in the preview (⏎)";
+"Wird gedruckt …" = "Printing…";
+"Gedruckt" = "Printed";
+"An macOS übergeben" = "Handed to macOS";
+"Wird vorbereitet … %d/%d" = "Preparing… %d/%d";
+
+/* MARK: Features/LabelPrint/LabelPrintPageSidebar.swift */
+"%d Seiten" = "%d pages";
+"1 Seite" = "1 page";
+"Alle Seiten" = "All Pages";
+"%d markiert" = "%d selected";
+"Mehrere Seiten mit ⌘ oder ⇧ markieren; „Seiten: Auswahl“ druckt nur die markierten." = "Select multiple pages with ⌘ or ⇧; “Pages: Selection” prints only the selected ones.";
+"Leere Seite – wird übersprungen" = "Blank page – will be skipped";
+
+/* MARK: Features/LabelPrint/LabelPrintPreviewPane.swift */
+"Vorheriges Etikett" = "Previous Label";
+"Nächstes Etikett" = "Next Label";
+"Keine Seite ausgewählt" = "No page selected";
+"Originalseite" = "Original Page";
+"Zum Vergleich die Seite zeigen, wie das Programm sie geliefert hat" = "Show the page as the app delivered it, for comparison";
+"Verkleinern" = "Zoom Out";
+"Zoom" = "Zoom";
+"Vergrößern" = "Zoom In";
+"Ins Fenster einpassen" = "Fit to Window";
+"An Etikett angepasst" = "Fitted to label";
+"Die Seite war größer oder kleiner als das Etikett (z. B. A4 aus dem Druckdialog). LabelWerk legt den Inhalt aufrecht und formatfüllend mit 1,5 mm Rand auf das Etikett – genau wie der Treiber." = "The page was larger or smaller than the label (e.g. A4 from the print dialog). LabelWerk places the content upright on the label, filling it with a 1.5 mm margin – exactly like the driver.";
+"Inhalt ragt über das Etikett" = "Content extends beyond the label";
+"Teile der Seite liegen außerhalb des Etiketts bzw. der Druckbreite und werden nicht gedruckt." = "Parts of the page lie outside the label or the print width and will not be printed.";
+"Etiketten werden vorbereitet …" = "Preparing labels…";
+"Ansicht wie gedruckt" = "View as printed";
+"Genau die Punkte, die an den Drucker gehen: angepasst, gedreht, gerastert, mit Versatz, Spiegeln und Invertieren aus den Einstellungen des Etikettentyps." = "Exactly the dots that go to the printer: fitted, rotated, dithered, with the offset, mirroring and inversion from the label type’s settings.";
+"Wird übersprungen" = "Will be skipped";
+
+/* MARK: Features/LabelPrint/LabelPrintStore.swift */
+"Alle" = "All";
+"Auswahl" = "Selection";
+"%@ und %d weitere" = "%@ and %d more";
+"Druckauftrag konnte nicht erzeugt werden" = "The print job could not be created";
+"%d Etiketten · %@" = "%d labels · %@";
+"An macOS-Warteschlange übergeben" = "Handed to the macOS queue";
+"„%@“ war nicht direkt erreichbar. Der Auftrag liegt in der macOS-Warteschlange „%@“ und wird gedruckt, sobald der Drucker erreichbar ist – genau wie in der Vorschau." = "“%@” was not directly reachable. The job is waiting in the macOS queue “%@” and will print as soon as the printer is reachable – exactly as in the preview.";
+"Drucken fehlgeschlagen" = "Printing failed";
+
+/* MARK: Features/LabelPrint/LabelPrintView.swift */
+"Öffne ein PDF oder Bild – LabelWerk zeigt genau, wie das Etikett aus dem Drucker kommt, und druckt es mit dem gewählten Etikettentyp." = "Open a PDF or image – LabelWerk shows exactly how the label will come out of the printer and prints it with the selected label type.";
+"Im Programm wie gewohnt „Drucken …“ wählen (⌘P)." = "In the app, choose “Print…” as usual (⌘P).";
+"Unten links im Druckdialog auf „PDF ▾“ klicken." = "Click “PDF ▾” at the bottom left of the print dialog.";
+"„Mit LabelWerk drucken“ wählen – das Dokument erscheint hier mit genauer Vorschau." = "Choose “Mit LabelWerk drucken” – the document appears here with an exact preview.";
+"Oder eine Datei auf dieses Fenster ziehen." = "Or drag a file onto this window.";
+"Dokument wird geöffnet …" = "Opening document…";
+"Ablegen zum Drucken" = "Drop to Print";
+
+/* MARK: Features/LabelPrint/LabelPrintWindow.swift */
+"Etikettendruck – %@" = "Label Printing – %@";
+
+/* MARK: Features/LabelPrint/PrinterSession+LabelPrint.swift */
+"Etiketten werden gedruckt …" = "Printing labels…";
+"Der Drucker hat den Auftrag nicht angenommen." = "The printer did not accept the job.";
+"Der Drucker ist nicht erreichbar." = "The printer is not reachable.";
+"Über die macOS-Warteschlange „%@“ gesendet (Drucker nicht direkt erreichbar)." = "Sent through the macOS queue “%@” (printer not directly reachable).";
+
 /* MARK: Features/Maintenance/MaintenanceBackupPane.swift */
 "Konfiguration sichern" = "Back Up Configuration";
 "Liest sämtliche Einstellungen des Druckers und speichert sie als .lwbackup-Datei – zum Wiederherstellen nach einem Werksreset oder zum Klonen auf weitere Drucker." = "Reads all of the printer’s settings and saves them as a .lwbackup file – for restoring after a factory reset or for cloning to other printers.";
@@ -1376,7 +1465,6 @@
 "%d Einstellungen in „%@“" = "%d settings in “%@”";
 "Sicherung fehlgeschlagen" = "Backup failed";
 "Ausgewählt" = "Selected";
-"Alle" = "All";
 "Sicherung konnte nicht geöffnet werden" = "The backup could not be opened";
 "Konfiguration nicht lesbar" = "Configuration not readable";
 "„%@“ hat keine Einstellungen geliefert." = "“%@” did not return any settings.";
@@ -1726,6 +1814,12 @@
 "Befehle am Ende jedes Etiketts (ZPL: direkt vor ^XZ). CPCL sendet sie nicht." = "Commands at the end of every label (ZPL: right before ^XZ). Not sent with CPCL.";
 "Was der Drucker beim Einschalten tut (^MF): Vorschub, Kalibrieren, Länge messen, keine Bewegung oder Kurzkalibrierung. Wird nur zusammen mit der Aktion nach dem Schließen des Druckkopfs gesendet und wirkt erst beim nächsten Einschalten – dafür muss „Einstellungen im Drucker speichern“ eingeschaltet sein." = "What the printer does when powered on (^MF): feed, calibrate, measure length, no motion or short calibration. Only sent together with the head-close action and takes effect at the next power-up – this requires “Save settings on the printer” to be on.";
 "Was der Drucker nach dem Schließen des Druckkopfs tut (^MF). Wird nur zusammen mit der Aktion beim Einschalten gesendet." = "What the printer does after the print head is closed (^MF). Only sent together with the power-up action.";
+"Etikettentypen" = "Label Types";
+"Jeder Etikettentyp erscheint in macOS als eigener Drucker („<Drucker> – <Typ>“). Im Druckdialog jedes Programms einfach diesen Drucker wählen – Etikettengröße und Einstellungen kommen von hier, im Dialog ist nichts weiter einzustellen." = "Each label type appears in macOS as its own printer (“<Printer> – <Type>”). Simply choose this printer in any app’s print dialog – label size and settings come from here, nothing else needs to be set in the dialog.";
+"Abweichungen vom Drucker" = "Differences from the Printer";
+"Drehung, Temperatur, Geschwindigkeit, Versatz, Medientyp, Druckmodus und Bedienermodus stehen auf „Wie Drucker“, bis Sie einen eigenen Wert wählen. Alle übrigen Einstellungen und spätere Änderungen am Drucker gelten auch für den Typ." = "Rotation, darkness, speed, offset, media type, print mode and operation mode stay at “Same as printer” until you choose your own value. All other settings and later changes to the printer also apply to the type.";
+"macOS-Drucker des Typs" = "The Type’s macOS Printer";
+"LabelWerk richtet den Drucker beim Sichern automatisch ein und hält ihn aktuell. Wird der Typ gelöscht, entfernt LabelWerk auch seinen macOS-Drucker." = "LabelWerk sets up the printer automatically when you save and keeps it up to date. If the type is deleted, LabelWerk also removes its macOS printer.";
 "Auf Standardeinstellungen zurücksetzen" = "Reset to default settings";
 "Setzt alle Werte des Dialogs auf den Auslieferungszustand des Treibers." = "Resets all values of the dialog to the driver’s factory state.";
 "Alle Einstellungen des Druckers verwenden" = "Use all printer settings";
@@ -1752,15 +1846,63 @@
 "Zeigt Seitenverhältnis, Medientyp, Drehung, Spiegeln, Invers und Bedienermodus der aktuellen Werte." = "Shows the aspect ratio, media type, rotation, mirror, inverse and operation mode of the current values.";
 "Druckt eine Testseite mit den Werten dieses Dialogs – auch mit noch nicht gespeicherten Änderungen." = "Prints a test page with the values of this dialog – including unsaved changes.";
 
+/* MARK: Features/Preferences/PrintPrefsLabelTypesPane.swift */
+"Etikettentyp „%@“ löschen?" = "Delete label type “%@”?";
+"Der macOS-Drucker „%@“ wird ebenfalls entfernt. Das Etikettenformat bleibt erhalten." = "The macOS printer “%@” will be removed as well. The label format is kept.";
+"Brillenetikett" = "Eyewear Label";
+"Ein macOS-Drucker je Etikett" = "One macOS printer per label";
+"Jeder Etikettentyp erscheint in macOS als eigener Drucker, z. B. „%@“. Im Druckdialog einfach diesen Drucker wählen – Format und Einstellungen kommen von hier." = "Each label type appears in macOS as its own printer, e.g. “%@”. Simply choose this printer in the print dialog – format and settings come from here.";
+"Noch keine Etikettentypen" = "No label types yet";
+"Legen Sie für jedes Etikett, das Sie regelmäßig drucken – z. B. Brillen- oder Schmucketiketten –, einen Typ mit Format und Einstellungen an." = "Create a type with format and settings for every label you print regularly – e.g. eyewear or jewelry labels.";
+"Etikettentyp hinzufügen" = "Add Label Type";
+"Änderungen gelten sofort – „OK“ ist dafür nicht nötig." = "Changes apply immediately – no need to click “OK”.";
+"Der Demo-Drucker hat keinen macOS-Drucker – Etikettentypen gelten hier nur für Drucke aus LabelWerk." = "The demo printer has no macOS printer – label types here only apply to prints from LabelWerk.";
+"Der LabelWerk-Treiber ist nicht installiert. Etikettentypen erscheinen in macOS, sobald er unter „Treiber“ installiert ist." = "The LabelWerk driver is not installed. Label types appear in macOS as soon as it is installed under “Driver”.";
+"Über Bluetooth verbundene Drucker können keine macOS-Drucker erhalten. Richten Sie den Drucker per Netzwerk oder USB ein." = "Printers connected via Bluetooth cannot get macOS printers. Set up the printer via network or USB.";
+"Etikettentyp gelöscht" = "Label type deleted";
+"Bearbeiten" = "Edit";
+"„%@“ bearbeiten" = "Edit “%@”";
+"„%@“ löschen" = "Delete “%@”";
+"Bearbeiten …" = "Edit…";
+"%d Abweichungen" = "%d differences";
+"1 Abweichung" = "1 difference";
+"wie Drucker" = "same as printer";
+"Wird geprüft …" = "Checking…";
+"Nicht verfügbar" = "Not available";
+"LabelWerk prüft den macOS-Drucker gleich." = "LabelWerk will check the macOS printer shortly.";
+"Der macOS-Drucker wird eingerichtet bzw. abgeglichen." = "The macOS printer is being set up or synchronized.";
+"macOS-Warteschlange „%@“ ist eingerichtet und auf dem Stand." = "macOS queue “%@” is set up and up to date.";
+"Vom Drucker: %@" = "From printer: %@";
+"Bitte einen Namen eingeben." = "Please enter a name.";
+"Dieser Drucker hat bereits einen Etikettentyp mit diesem Namen." = "This printer already has a label type with this name.";
+"Bitte ein Etikett wählen." = "Please choose a label.";
+"Etikettentyp bearbeiten" = "Edit Label Type";
+"Neuer Etikettentyp" = "New Label Type";
+"Format und Einstellungen für einen eigenen macOS-Drucker von %@" = "Format and settings for a separate macOS printer of %@";
+"z. B. Brillenetikett" = "e.g. Eyewear Label";
+"Alle wie Drucker" = "All same as printer";
+"Versatz oben" = "Top offset";
+"Versatz links" = "Left offset";
+"Medientyp" = "Media Type";
+"Bedienermodus" = "Operation Mode";
+"Wie Drucker · %@" = "Same as printer · %@";
+"Etikett wählen" = "Choose Label";
+"Im Druckdialog" = "In the Print Dialog";
+"Alle übrigen Einstellungen (Rasterung, Befehle, …) folgen dem Drucker." = "All other settings (dithering, commands, …) follow the printer.";
+"Beim Sichern richtet LabelWerk den macOS-Drucker automatisch ein bzw. aktualisiert ihn." = "When you save, LabelWerk automatically sets up or updates the macOS printer.";
+"Mit verbundenem Drucker lässt sich die eingelegte Etikettengröße übernehmen." = "With the printer connected, you can use the size of the loaded labels.";
+"Keine Etikettengröße gemeldet" = "No label size reported";
+"Der Drucker hat keine Etikettengröße gemeldet – bitte von Hand eingeben." = "The printer did not report a label size – please enter it manually.";
+
 /* MARK: Features/Preferences/PrintPrefsModel.swift */
 "Seite einrichten" = "Page Setup";
 "Druckoptionen" = "Print Options";
-"Bedienermodus" = "Operation Mode";
 "Grafik Optionen" = "Graphic Options";
 "Kundenspezifische Befehle" = "Custom Commands";
 "Wartung" = "Maintenance";
 "Einheiten" = "Units";
 "Etikettengröße, Medientyp, Ausrichtung und Endlosmaterial" = "Label size, media type, orientation and continuous media";
+"Eigene macOS-Drucker je Etikett, z. B. für Brillen- oder Schmucketiketten" = "Separate macOS printers per label, e.g. for eyewear or jewelry labels";
 "Geschwindigkeit, Temperatur, Versatz und erweiterte Druckereinstellungen" = "Speed, darkness, offset and advanced printer settings";
 "Verhalten nach dem Druck: Abreißen, Spenden, Schneiden, Aufwickeln" = "Behavior after printing: tear off, peel off, cut, rewind";
 "Rasterung von Graustufen und Kompression der Druckdaten" = "Dithering of grayscale images and compression of print data";
@@ -1769,12 +1911,9 @@
 "Maßeinheit für alle Längenangaben" = "Unit of measure for all lengths";
 "Erklärungen zu allen Optionen, Treiber- und Druckerinformationen" = "Explanations of all options, driver and printer information";
 "Breite / Höhe" = "Width / Height";
-"Medientyp" = "Media Type";
 "Markierung Versatz" = "Mark Offset";
 "Bei letztem Element stoppen" = "Stop at last element";
 "Stoppversatz" = "Stop offset";
-"An Etikett anpassen" = "Fit to label";
-"Temperatur" = "Darkness";
 "Oben" = "Top";
 "Links" = "Left";
 "Rückzug" = "Backfeed";
@@ -1796,8 +1935,6 @@
 "Etikettenende" = "End of label";
 "Aktion beim Einschalten" = "Power-up action";
 "Aktion nach dem Schließen des Druckkopfs" = "Head-close action";
-"Versatz oben" = "Top offset";
-"Versatz links" = "Left offset";
 "Abreißversatz" = "Tear-off offset";
 "Aufträge vor dem Drucken abbrechen" = "Cancel jobs before printing";
 "Verzögerung nach dem Abbrechen" = "Delay after cancelling";
@@ -1830,7 +1967,6 @@
 "%@: %@" = "%@: %@";
 "Weiter heraus" = "Further out";
 "Weiter zurück" = "Further back";
-"Seiten" = "Pages";
 "Seiten ohne Inhalt werden nicht gedruckt" = "Pages without content are not printed";
 "Harte Schwelle: gestochen scharf – ideal für Text, Linien und Barcodes." = "Hard threshold: razor-sharp – ideal for text, lines and barcodes.";
 "Gleichmäßiges Bayer-Muster: ruhige Flächen, gut für Grafiken und Logos." = "Uniform Bayer pattern: calm areas, good for graphics and logos.";
@@ -1838,7 +1974,6 @@
 "Fehlerdiffusion: feine Verläufe, empfohlen für Fotos." = "Error diffusion: fine gradients, recommended for photos.";
 "Kontrastreiche Fehlerdiffusion: helle Bereiche bleiben sauber." = "High-contrast error diffusion: light areas stay clean.";
 "Sehr feine Fehlerdiffusion: beste Detailtreue, etwas mehr Rechenzeit." = "Very fine error diffusion: best detail, slightly more processing time.";
-"Auftrag" = "Job";
 "Vor dem ersten Etikett des Auftrags" = "Before the first label of the job";
 "Nach dem letzten Etikett des Auftrags" = "After the last label of the job";
 "Am Anfang jedes Etiketts, direkt nach ^XA" = "At the start of every label, right after ^XA";
@@ -2142,7 +2277,6 @@
 "Empfehlung" = "Recommendation";
 "Drucker: %d" = "Printer: %d";
 "Wert setzen" = "Set Value";
-"Bearbeiten" = "Edit";
 "Wert" = "Value";
 
 /* MARK: Features/RFID/RFIDView.swift */
@@ -2169,7 +2303,6 @@
 "Eingeschränkt erkannt" = "Partially detected";
 "Abgeschaltet" = "Turned off";
 "Nicht erkannt" = "Not detected";
-"Wird geprüft …" = "Checking…";
 "Nicht verbunden – Status des Kodierers unbekannt." = "Not connected – encoder status unknown.";
 "Der Tag über der Antenne wird gelesen …" = "Reading the tag above the antenna…";
 "Kodiere Tag %d von %d …" = "Encoding tag %d of %d…";
@@ -2355,7 +2488,6 @@
 
 /* MARK: Features/Setup/LabelStockChooser.swift */
 "%@ – vom Drucker erkannt" = "%@ – detected from printer";
-"Vom Drucker: %@" = "From printer: %@";
 "Benutzerdefiniert …" = "Custom …";
 "Vom Drucker übernehmen" = "Take from Printer";
 "Liest die im Drucker eingestellte Etikettengröße erneut und übernimmt sie." = "Reads the label size configured in the printer again and applies it.";
@@ -2491,7 +2623,6 @@
 "Etikett %@ × %@" = "Label %@ × %@";
 "Passt nicht auf diesen Drucker" = "Does not fit this printer";
 "Eigenes" = "Custom";
-"Bearbeiten …" = "Edit…";
 "Als eigenes Format duplizieren …" = "Duplicate as Custom Format…";
 "Duplizieren …" = "Duplicate…";
 "Maße kopieren" = "Copy Dimensions";
@@ -2500,7 +2631,6 @@
 "Breite, Länge, Lücke und Erkennung frei wählen" = "Freely choose width, length, gap and sensing";
 
 /* MARK: Features/Stocks/StockLibraryEditor.swift */
-"Bitte einen Namen eingeben." = "Please enter a name.";
 "Die Breite muss mindestens 5 mm betragen." = "The width must be at least 5 mm.";
 "Die Länge muss mindestens 3 mm betragen." = "The length must be at least 3 mm.";
 "Breiter als die Druckbreite des %@ (%@) – die Ränder bleiben unbedruckt." = "Wider than the print width of the %@ (%@) – the margins stay unprinted.";
@@ -2539,6 +2669,8 @@
 "Gängige Größen für Versand, Produkte, Barcodes und Belege" = "Common sizes for shipping, products, barcodes and receipts";
 "Etikettenformat löschen?" = "Delete Label Format?";
 "„%@“ wird aus deinen eigenen Formaten entfernt. Drucker, die es verwenden, wechseln auf ihr Standardformat." = "“%@” will be removed from your custom formats. Printers that use it switch to their default format.";
+"Auch der Etikettentyp %@ verwendet es: Er übernimmt dann das Etikett seines Druckers, und sein macOS-Drucker druckt danach in diesem Format." = "The label type %@ uses it too: it will then switch to its printer’s label, and its macOS printer will print in that format from then on.";
+"Auch die Etikettentypen %@ verwenden es: Sie übernehmen dann das Etikett ihres Druckers, und ihre macOS-Drucker drucken danach in diesem Format." = "The label types %@ use it too: they will then switch to their printer’s label, and their macOS printers will print in that format from then on.";
 "Formate durchsuchen – z. B. 100 × 150 oder Versand" = "Search formats – e.g. 100 × 150 or shipping";
 "Nur passende" = "Matching only";
 "Nur Formate, die auf den %@ passen (Druckbreite %@ mm)" = "Only formats that fit the %@ (print width %@ mm)";
@@ -2887,6 +3019,12 @@
 "Installiert ist Version %@." = "Installed version: %@.";
 "Für diese Version liegen keine Änderungsnotizen vor." = "There are no release notes for this version.";
 
+/* MARK: Model/AppModel+LabelPrint.swift */
+"Nicht unterstütztes Format" = "Unsupported format";
+"Etikettendruck öffnet PDF-Dateien und Bilder (PNG, JPEG, TIFF, HEIC). Übergangen: %@" = "Label Printing opens PDF files and images (PNG, JPEG, TIFF, HEIC). Skipped: %@";
+"Datei drucken" = "Print File";
+"PDF oder Bild wählen – LabelWerk zeigt genau, wie das Etikett gedruckt wird." = "Choose a PDF or image – LabelWerk shows exactly how the label will be printed.";
+
 /* MARK: Model/AppModel.swift */
 "Virtuell" = "Virtual";
 
@@ -2912,8 +3050,6 @@
 
 /* MARK: Model/PrinterSession.swift */
 "Etikett wird gedruckt …" = "Printing label…";
-"Gedruckt" = "Printed";
-"Druckauftrag konnte nicht erzeugt werden" = "The print job could not be created";
 "Bild wird gedruckt …" = "Printing image…";
 "Daten werden gesendet …" = "Sending data…";
 "Erneut drucken nicht möglich" = "Cannot print again";
@@ -3029,11 +3165,22 @@
 "„%@“ ist fehlgeschlagen (Code %d): %@" = "“%@” failed (code %d): %@";
 
 /* MARK: Services/QueueSyncService.swift */
+"Der LabelWerk-Treiber ist nicht installiert." = "The LabelWerk driver is not installed.";
 "„%@“ übernimmt die Einstellungen aus LabelWerk nicht: %@" = "“%@” does not take the settings from LabelWerk: %@";
 "%@ übernehmen die Einstellungen aus LabelWerk nicht: %@" = "%@ do not take the settings from LabelWerk: %@";
 "macOS-Drucker nicht aktualisiert" = "macOS printer not updated";
 "macOS-Drucker aktualisiert" = "macOS printer updated";
 "Alle Programme drucken auf „%@“ mit den Einstellungen aus LabelWerk." = "All apps print to “%@” with the settings from LabelWerk.";
+"Der Demo-Drucker hat keinen macOS-Drucker." = "The demo printer has no macOS printer.";
+"Für diese Verbindung kann kein macOS-Drucker eingerichtet werden (nur Netzwerk, USB oder eine macOS-Warteschlange)." = "No macOS printer can be set up for this connection (only network, USB or a macOS queue).";
+"macOS-Drucker nicht entfernt" = "macOS printer not removed";
+"„%@“ konnte nicht entfernt werden: %@" = "“%@” could not be removed: %@";
+"macOS-Drucker „%@“ ist eingerichtet." = "macOS printer “%@” is set up.";
+"Im Druckdialog jedes Programms einfach diesen Drucker wählen." = "Simply choose this printer in any app’s print dialog.";
+"%d macOS-Drucker für Etikettentypen eingerichtet." = "%d macOS printers set up for label types.";
+"„%@“ konnte nicht eingerichtet werden: %@" = "“%@” could not be set up: %@";
+"%@ konnten nicht eingerichtet werden: %@" = "%@ could not be set up: %@";
+"macOS-Drucker für Etikettentypen nicht eingerichtet" = "macOS printers for label types not set up";
 "Im Druckdialog heißt er jetzt „%@“." = "It is now called “%@” in the print dialog.";
 "macOS-Drucker „%@“ nutzt jetzt den LabelWerk-Treiber." = "macOS printer “%@” now uses the LabelWerk driver.";
 "Die macOS-Drucker %@ nutzen jetzt den LabelWerk-Treiber." = "The macOS printers %@ now use the LabelWerk driver.";

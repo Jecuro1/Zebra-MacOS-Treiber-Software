@@ -191,7 +191,10 @@ private struct LabelTypeCard: View {
 
     var body: some View {
         let stock = session.stock(for: type)
-        let status = model.queueSync.labelTypeStatus.status(for: type.id)
+        // Den Demo-Drucker gleicht niemand ab (kein macOS-Drucker) – sonst bliebe „Wird geprüft …“ stehen.
+        let status: LabelTypeQueueStatusStore.Status = session.isVirtual
+            ? .unavailable(QueueSyncService.virtualPrinterReason)
+            : model.queueSync.labelTypeStatus.status(for: type.id)
         HStack(alignment: .center, spacing: 12) {
             LabelTypeThumbnail(widthMM: stock.widthMM, heightMM: stock.heightMM, isContinuous: stock.isContinuous)
                 .frame(width: 46, height: 46)

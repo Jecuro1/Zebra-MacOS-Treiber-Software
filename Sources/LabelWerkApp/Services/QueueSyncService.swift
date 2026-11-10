@@ -401,6 +401,10 @@ final class QueueSyncService {
 
     // MARK: Etikettentypen
 
+    /// Grund, warum die Etikettentypen des Demo-Druckers keinen macOS-Drucker erhalten (Zustand
+    /// „Nicht verfügbar“ – auch ohne Abgleich, den es für ihn nie gibt).
+    static var virtualPrinterReason: String { tr("Der Demo-Drucker hat keinen macOS-Drucker.") }
+
     /// Ergebnis eines Abgleichs der Typ-Warteschlangen eines Druckers.
     struct LabelTypeSyncResult: Sendable {
         var printerID: UUID
@@ -422,7 +426,13 @@ final class QueueSyncService {
     private func syncLabelTypeQueues(_ session: PrinterSession, allowAdminPrompt: Bool) async -> LabelTypeSyncResult {
         let id = session.id
         let empty = LabelTypeSyncResult(printerID: id)
-        guard !session.isVirtual, !session.saved.labelTypes.isEmpty else { return empty }
+        guard !session.saved.labelTypes.isEmpty else { return empty }
+        guard !session.isVirtual else {
+            for type in session.saved.labelTypes {
+                labelTypeStatus.set(.unavailable(Self.virtualPrinterReason), for: type.id)
+            }
+            return empty
+        }
         guard CUPSService.isDriverInstalled else {
             for type in session.saved.labelTypes {
                 labelTypeStatus.set(.unavailable(tr("Der LabelWerk-Treiber ist nicht installiert.")), for: type.id)
@@ -451,6 +461,9 @@ final class QueueSyncService {
         var known = Set(queues.map { $0.name.lowercased() })
         let base = Self.baseQueueName(for: session)
         for type in session.saved.labelTypes {
+            // Drucker inzwischen entfernt: nichts mehr anlegen (seine Typ-Warteschlangen entfernt
+            // `removeLabelTypeQueues` nach diesem Abgleich).
+            guard model?.session(for: session.id) === session else { break }
             // Inzwischen gelöscht: nichts anlegen.
             guard let current = session.labelType(id: type.id) else { continue }
             let target = LabelTypeTarget(typeID: current.id, description: Self.labelTypeQueueDescription(current, of: session),
@@ -462,15 +475,21 @@ final class QueueSyncService {
                     name, deviceURI: deviceURI, description: target.description, location: session.saved.location,
                     configuration: target.configuration, allowAdminPrompt: allowAdminPrompt)
                 known.insert(name.lowercased())
-                if outcome == .created { result.created.append(target.description) }
                 if current.queueName != name, !recordLabelTypeQueue(name, typeID: current.id, in: session) {
-                    // Der Typ wurde während des Anlegens gelöscht: seine neue Warteschlange gleich wieder entfernen.
+                    // Typ bzw. Drucker wurde während des Anlegens gelöscht: die neue Warteschlange gleich
+                    // wieder entfernen (sonst bliebe sie für immer in macOS).
                     _ = try? await CUPSService.removeLabelTypeQueue(name, allowAdminPrompt: false)
                     labelTypeStatus.remove(current.id)
                     continue
                 }
+                if outcome == .created { result.created.append(target.description) }
                 labelTypeStatus.set(.ready(name), for: current.id)
             } catch {
+                // Drucker inzwischen entfernt: kein Hinweis über einen Fehler, den niemand mehr beheben kann.
+                guard model?.session(for: session.id) === session else {
+                    labelTypeStatus.remove(current.id)
+                    break
+                }
                 let message = PrinterSession.describe(error)
                 labelTypeStatus.set(.failed(message), for: current.id)
                 result.failures.append(LabelTypeFailure(description: target.description, message: message))
@@ -487,8 +506,11 @@ final class QueueSyncService {
         }
     }
 
-    /// Merkt den Namen der Warteschlange im Typ. `false`, wenn es den Typ nicht mehr gibt.
+    /// Merkt den Namen der Warteschlange im Typ. `false`, wenn es den Typ oder seinen Drucker nicht mehr
+    /// gibt – ein entfernter Drucker hält sein `PrinterSession`-Objekt hier noch, doch was darin gemerkt
+    /// würde, entfernte niemand mehr.
     private func recordLabelTypeQueue(_ name: String, typeID: UUID, in session: PrinterSession) -> Bool {
+        guard model?.session(for: session.id) === session else { return false }
         var saved = session.saved
         guard let index = saved.labelTypes.firstIndex(where: { $0.id == typeID }) else { return false }
         saved.labelTypes[index].queueName = name

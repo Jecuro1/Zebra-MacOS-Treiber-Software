@@ -137,8 +137,27 @@ struct StocksView: View {
             Button(tr("Löschen"), role: .destructive) { delete(stock) }
             Button(tr("Abbrechen"), role: .cancel) {}
         } message: { stock in
-            Text(tr("„%@“ wird aus deinen eigenen Formaten entfernt. Drucker, die es verwenden, wechseln auf ihr Standardformat.", stock.name))
+            Text(deletionMessage(for: stock))
         }
+    }
+
+    /// Etikettentypen (aller Drucker), die `stock` verwenden – „„Brillenetikett“ (Zebra ZD421t)“.
+    private func labelTypeNames(using stock: LabelStock) -> [String] {
+        model.sessions.flatMap { printer in
+            printer.labelTypes.filter { $0.stockID == stock.id }.map { "„\($0.name)“ (\(printer.displayName))" }
+        }
+    }
+
+    /// Text der Rückfrage: Nennt die Etikettentypen, deren Format (und damit deren macOS-Drucker) sich
+    /// mit dem Löschen ändert – sonst geschähe das unbemerkt.
+    private func deletionMessage(for stock: LabelStock) -> String {
+        let base = tr("„%@“ wird aus deinen eigenen Formaten entfernt. Drucker, die es verwenden, wechseln auf ihr Standardformat.", stock.name)
+        let types = labelTypeNames(using: stock)
+        guard !types.isEmpty else { return base }
+        let note = types.count == 1
+            ? tr("Auch der Etikettentyp %@ verwendet es: Er übernimmt dann das Etikett seines Druckers, und sein macOS-Drucker druckt danach in diesem Format.", types[0])
+            : tr("Auch die Etikettentypen %@ verwenden es: Sie übernehmen dann das Etikett ihres Druckers, und ihre macOS-Drucker drucken danach in diesem Format.", types.joined(separator: ", "))
+        return base + "\n\n" + note
     }
 
     // MARK: Filterleiste
