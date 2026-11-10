@@ -44,14 +44,33 @@ struct UpdateInstallerTests {
         }
     }
 
-    @discardableResult
-    static func runShell(_ command: String) throws -> Int32 {
+    /// Ergebnis eines mit `/bin/sh -c` ausgeführten Befehls.
+    struct ShellResult {
+        var status: Int32
+        var stdout: String
+        var stderr: String
+
+        /// Nicht leere Zeilen von `text`.
+        static func lines(_ text: String) -> [String] {
+            text.split(separator: "\n").map(String.init)
+        }
+    }
+
+    static func runShell(_ command: String) throws -> ShellResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", command]
+        let out = Pipe()
+        let err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
         try process.run()
+        let outData = out.fileHandleForReading.readDataToEndOfFile()
+        let errData = err.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return process.terminationStatus
+        return ShellResult(status: process.terminationStatus,
+                           stdout: String(decoding: outData, as: UTF8.self),
+                           stderr: String(decoding: errData, as: UTF8.self))
     }
 
     static func tools(_ sandbox: Sandbox, installer: URL, shasum: String = "/usr/bin/shasum") -> UpdateInstaller.Tools {
@@ -67,24 +86,62 @@ struct UpdateInstallerTests {
             || FileManager.default.isExecutableFile(atPath: "/usr/bin/openssl")
     }
 
+    /// Alle Ziele von Ausgabeumleitungen (`>`, `2>`, `>&2` …) in `command`, in der Reihenfolge.
+    static func redirectionTargets(_ command: String) -> [String] {
+        var targets: [String] = []
+        var rest = Substring(command)
+        while let index = rest.firstIndex(of: ">") {
+            var target = rest[rest.index(after: index)...].drop(while: { $0 == " " })
+            target = target.prefix(while: { $0 != " " && $0 != ";" })
+            targets.append(String(target))
+            rest = rest[rest.index(after: index)...]
+        }
+        return targets
+    }
+
     // MARK: - Shell-Befehl
 
-    @Test("Shell-Befehl: installer mit Protokoll, einfache Anführungszeichen")
+    @Test("Shell-Befehl: installer, Ausgaben im privaten Ordner, einfache Anführungszeichen")
     func shellCommandText() {
         let command = UpdateInstaller.shellCommand(
-            pkg: URL(fileURLWithPath: "/Users/anna/Library/Caches/LabelWerk/Updates/LabelWerk-1.1.0-58.pkg"),
-            logFile: URL(fileURLWithPath: "/Users/anna/Library/Logs/LabelWerk/update.log"))
-        #expect(command == "/usr/sbin/installer -pkg '/Users/anna/Library/Caches/LabelWerk/Updates/LabelWerk-1.1.0-58.pkg'"
-                + " -target / > '/Users/anna/Library/Logs/LabelWerk/update.log' 2>&1")
+            pkg: URL(fileURLWithPath: "/Users/anna/Library/Caches/LabelWerk/Updates/LabelWerk-1.1.0-58.pkg"))
+        #expect(command == "exec 3>&1 4>&2; "
+                + "d=$(/usr/bin/mktemp -d '/private/tmp/labelwerk-update.XXXXXX') || exit 1; "
+                + "exec > \"$d/install.log\" 2>&1; "
+                + "/usr/sbin/installer -pkg '/Users/anna/Library/Caches/LabelWerk/Updates/LabelWerk-1.1.0-58.pkg'"
+                + " -target /; s=$?; "
+                + "exec 1>&3 2>&4 3>&- 4>&-; "
+                + "if [ \"$s\" -eq 0 ]; then /bin/cat \"$d/install.log\"; else /bin/cat \"$d/install.log\" >&2; fi; "
+                + "/bin/rm -rf \"$d\"; exit $s")
         #expect(UpdateInstaller.shellQuote("a'b") == "'a'\\''b'")
         #expect(UpdateInstaller.shellQuote("") == "''")
         // Ungültige Prüfsumme → einfache Variante ohne Prüfung.
-        let plain = UpdateInstaller.shellCommand(pkg: URL(fileURLWithPath: "/a.pkg"), logFile: URL(fileURLWithPath: "/l"),
-                                                 expectedSHA256: "xyz")
-        #expect(plain == "/usr/sbin/installer -pkg '/a.pkg' -target / > '/l' 2>&1")
+        let plain = UpdateInstaller.shellCommand(pkg: URL(fileURLWithPath: "/a.pkg"), expectedSHA256: "xyz")
+        #expect(plain == UpdateInstaller.shellCommand(pkg: URL(fileURLWithPath: "/a.pkg")))
+        #expect(plain.contains("/usr/sbin/installer -pkg '/a.pkg' -target /; s=$?"))
     }
 
-    @Test("Shell-Befehl übergibt schwierige Pfade unverändert (mit /bin/sh ausgeführt)")
+    /// Sicherheit: Der Befehl läuft als root. Eine Umleitung in eine Datei im Benutzerordner
+    /// (z. B. `~/Library/Logs/LabelWerk/Update.log`) folgte einem dort untergeschobenen Link und
+    /// überschriebe als root beliebige Dateien (`/etc/sudoers` …). Erlaubt sind nur Umleitungen in
+    /// den mit `mktemp -d` angelegten privaten Ordner, zwischen Dateideskriptoren und nach /dev/null.
+    @Test("Als root nur in den privaten Ordner schreiben – nie in den Benutzerordner", arguments: [
+        nil, String(repeating: "ab", count: 32),
+    ])
+    func shellCommandNeverWritesUserFiles(sha: String?) {
+        let pkg = URL(fileURLWithPath: "/Users/anna/Library/Caches/com.labelwerk.app/Updates/LabelWerk-1.1.0-58.pkg")
+        let command = UpdateInstaller.shellCommand(pkg: pkg, expectedSHA256: sha)
+        let allowed: Set<String> = ["\"$d/install.log\"", "&1", "&2", "&3", "&4", "&-", "/dev/null"]
+        let targets = Self.redirectionTargets(command)
+        #expect(!targets.isEmpty)
+        #expect(targets.allSatisfy { allowed.contains($0) }, "\(targets)")
+        #expect(!command.contains("Library/Logs"))
+        // Der Benutzerordner kommt nur als zu lesendes Paket vor (installer bzw. cp).
+        #expect(command.components(separatedBy: "/Users/anna").count == 2)
+        #expect(command.contains("-d '/private/tmp/labelwerk-update.XXXXXX'"))
+    }
+
+    @Test("Shell-Befehl übergibt schwierige Pfade unverändert und legt nichts neben dem Paket ab")
     func shellCommandQuoting() throws {
         let sandbox = try Sandbox()
         let pkgDirectory = sandbox.directory.appendingPathComponent(Self.trickyName, isDirectory: true)
@@ -92,23 +149,31 @@ struct UpdateInstallerTests {
         let pkg = pkgDirectory.appendingPathComponent("LabelWerk 1.1.0 (58) \(Self.trickyName).pkg")
         let payload = Data("paket".utf8)
         try payload.write(to: pkg)
-        let log = sandbox.url("Protokoll \(Self.trickyName).log")
-        let command = UpdateInstaller.shellCommand(pkg: pkg, logFile: log, expectedSHA256: nil,
-                                                   tools: Self.tools(sandbox, installer: try sandbox.fakeInstaller()))
-        #expect(try Self.runShell(command) == 0)
-        let lines = try String(contentsOf: log, encoding: .utf8).split(separator: "\n").map(String.init)
-        #expect(lines == ["ARG:-pkg", "ARG:\(pkg.path)", "ARG:-target", "ARG:/"])
+        let installer = try sandbox.fakeInstaller()
+        let command = UpdateInstaller.shellCommand(pkg: pkg, expectedSHA256: nil,
+                                                   tools: Self.tools(sandbox, installer: installer))
+        let result = try Self.runShell(command)
+        #expect(result.status == 0)
+        #expect(ShellResult.lines(result.stdout) == ["ARG:-pkg", "ARG:\(pkg.path)", "ARG:-target", "ARG:/"])
+        #expect(result.stderr.isEmpty)
         #expect(try Data(contentsOf: sandbox.url("installiert.pkg")) == payload)
+        // Nur das Paket im Paketordner; der private Ordner ist wieder entfernt.
+        #expect(try FileManager.default.contentsOfDirectory(atPath: pkgDirectory.path) == [pkg.lastPathComponent])
+        #expect(Set(try FileManager.default.contentsOfDirectory(atPath: sandbox.directory.path))
+                == [Self.trickyName, "installer", "installiert.pkg"])
     }
 
-    @Test("Shell-Befehl meldet den Exit-Code von installer")
+    @Test("Shell-Befehl meldet den Exit-Code von installer, das Protokoll dann auf stderr")
     func shellCommandExitCode() throws {
         let sandbox = try Sandbox()
         let pkg = sandbox.url("a.pkg")
         try Data("x".utf8).write(to: pkg)
-        let command = UpdateInstaller.shellCommand(pkg: pkg, logFile: sandbox.url("log"), expectedSHA256: nil,
+        let command = UpdateInstaller.shellCommand(pkg: pkg, expectedSHA256: nil,
                                                    tools: Self.tools(sandbox, installer: try sandbox.fakeInstaller(exitCode: 1)))
-        #expect(try Self.runShell(command) == 1)
+        let result = try Self.runShell(command)
+        #expect(result.status == 1)
+        #expect(result.stdout.isEmpty)
+        #expect(ShellResult.lines(result.stderr) == ["ARG:-pkg", "ARG:\(pkg.path)", "ARG:-target", "ARG:/"])
     }
 
     @Test("Mit Prüfsumme: Kopie in privatem Ordner prüfen, dann installieren, aufräumen",
@@ -119,16 +184,16 @@ struct UpdateInstallerTests {
         let payload = Data((0..<10_000).map { UInt8(truncatingIfNeeded: $0 &* 7) })
         try payload.write(to: pkg)
         let sha = SHA256Hasher.hexDigest(payload)
-        let log = sandbox.url("update.log")
         let installer = try sandbox.fakeInstaller()
         var shasums = ["/nonexistent/shasum"]      // Rückfall auf openssl
         if FileManager.default.isExecutableFile(atPath: "/usr/bin/shasum") { shasums.append("/usr/bin/shasum") }
         for shasum in shasums {
             if shasum.hasPrefix("/nonexistent"), !FileManager.default.isExecutableFile(atPath: "/usr/bin/openssl") { continue }
-            let command = UpdateInstaller.shellCommand(pkg: pkg, logFile: log, expectedSHA256: sha.uppercased(),
+            let command = UpdateInstaller.shellCommand(pkg: pkg, expectedSHA256: sha.uppercased(),
                                                        tools: Self.tools(sandbox, installer: installer, shasum: shasum))
-            #expect(try Self.runShell(command) == 0, "\(shasum)")
-            let lines = try String(contentsOf: log, encoding: .utf8).split(separator: "\n").map(String.init)
+            let result = try Self.runShell(command)
+            #expect(result.status == 0, "\(shasum): \(result.stderr)")
+            let lines = ShellResult.lines(result.stdout)
             #expect(lines.count == 4 && lines[0] == "ARG:-pkg" && lines[2] == "ARG:-target" && lines[3] == "ARG:/")
             let installed = lines.count > 1 ? String(lines[1].dropFirst(4)) : ""
             #expect(installed.hasPrefix(sandbox.directory.path + "/labelwerk-update."))
@@ -138,21 +203,55 @@ struct UpdateInstallerTests {
             try FileManager.default.removeItem(at: sandbox.url("installiert.pkg"))
         }
 
-        // Falsche Prüfsumme: installer wird nicht aufgerufen, Exit-Code 3, Meldung im Protokoll.
+        // Falsche Prüfsumme: installer wird nicht aufgerufen, Exit-Code 3, Meldung auf stderr.
         let wrong = String(repeating: "0", count: 64)
-        let command = UpdateInstaller.shellCommand(pkg: pkg, logFile: log, expectedSHA256: wrong,
+        let command = UpdateInstaller.shellCommand(pkg: pkg, expectedSHA256: wrong,
                                                    tools: Self.tools(sandbox, installer: installer))
-        #expect(try Self.runShell(command) == 3)
-        #expect(try String(contentsOf: log, encoding: .utf8).contains("Prüfsumme"))
+        let mismatch = try Self.runShell(command)
+        #expect(mismatch.status == 3)
+        #expect(mismatch.stderr.contains("Prüfsumme"))
+        #expect(mismatch.stdout.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: sandbox.url("installiert.pkg").path))
 
         // Fehlendes Paket: Exit-Code 2.
-        let missing = UpdateInstaller.shellCommand(pkg: sandbox.url("fehlt.pkg"), logFile: log, expectedSHA256: sha,
+        let missing = UpdateInstaller.shellCommand(pkg: sandbox.url("fehlt.pkg"), expectedSHA256: sha,
                                                    tools: Self.tools(sandbox, installer: installer))
-        #expect(try Self.runShell(missing) == 2)
+        #expect(try Self.runShell(missing).status == 2)
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: sandbox.directory.path)
             .filter { $0.hasPrefix("labelwerk-update.") }
         #expect(leftovers.isEmpty)
+    }
+
+    @Test("Kein privater Ordner: Abbruch mit Exit-Code 1, ohne installer")
+    func shellCommandWithoutTemporaryDirectory() throws {
+        let sandbox = try Sandbox()
+        let pkg = sandbox.url("a.pkg")
+        try Data("x".utf8).write(to: pkg)
+        var tools = Self.tools(sandbox, installer: try sandbox.fakeInstaller())
+        tools.temporaryBase = sandbox.directory.appendingPathComponent("fehlt/nicht/da").path
+        let result = try Self.runShell(UpdateInstaller.shellCommand(pkg: pkg, expectedSHA256: nil, tools: tools))
+        #expect(result.status == 1)
+        #expect(!FileManager.default.fileExists(atPath: sandbox.url("installiert.pkg").path))
+    }
+
+    // MARK: - Protokoll
+
+    @Test("Protokoll aus der Ausgabe von osascript")
+    func installLogFromOsascript() {
+        // Erfolg: Ergebnis von do shell script (Zeilenenden \r).
+        #expect(UpdateInstaller.installLog(
+            stdout: "installer: Package name is LabelWerk\rinstaller: The install was successful.\n",
+            stderr: "", status: 0) == "installer: Package name is LabelWerk\ninstaller: The install was successful.")
+        // Fehler: Meldung ohne Position und Exit-Code.
+        #expect(UpdateInstaller.installLog(
+            stdout: "", stderr: "0:412: execution error: installer: Error - Paket ungültig.\rinstaller: Fehler (1)\n",
+            status: 1) == "installer: Error - Paket ungültig.\ninstaller: Fehler")
+        #expect(UpdateInstaller.installLog(
+            stdout: "", stderr: "0:9: execution error: LabelWerk: Die SHA-256-Prüfsumme der Update-Datei stimmt nicht. (3)",
+            status: 1) == "LabelWerk: Die SHA-256-Prüfsumme der Update-Datei stimmt nicht.")
+        // Unbekanntes Format bleibt erhalten.
+        #expect(UpdateInstaller.installLog(stdout: "", stderr: "osascript: kaputt\n", status: 1) == "osascript: kaputt")
+        #expect(UpdateInstaller.installLog(stdout: "", stderr: "", status: 1) == "")
     }
 
     // MARK: - AppleScript
@@ -228,8 +327,7 @@ struct UpdateInstallerTests {
     @Test("AppleScript umschließt den vollständigen Installationsbefehl verlustfrei")
     func appleScriptWithInstallCommand() throws {
         let pkg = URL(fileURLWithPath: "/Users/o'brien/Library/Caches/LabelWerk \"Updates\"/LabelWerk-1.1.0-58.pkg")
-        let command = UpdateInstaller.shellCommand(pkg: pkg, logFile: URL(fileURLWithPath: "/tmp/lw \\ log.txt"),
-                                                   expectedSHA256: String(repeating: "a", count: 64))
+        let command = UpdateInstaller.shellCommand(pkg: pkg, expectedSHA256: String(repeating: "a", count: 64))
         let parsed = try #require(Self.parseAppleScript(UpdateInstaller.appleScript(shellCommand: command, prompt: "Ä")))
         #expect(parsed.command == command)
         #expect(parsed.prompt == "Ä")
@@ -240,6 +338,8 @@ struct UpdateInstallerTests {
         #expect(UpdateInstaller.isUserCancellation("0:153: execution error: User canceled. (-128)"))
         #expect(UpdateInstaller.isUserCancellation("0:153: execution error: Vom Benutzer abgebrochen. (-128)\n"))
         #expect(!UpdateInstaller.isUserCancellation("0:153: execution error: installer: Error (1)"))
+        // Das Protokoll von installer steht vor dem Exit-Code – nur das Ende zählt.
+        #expect(!UpdateInstaller.isUserCancellation("0:153: execution error: installer: Fehler (-128) im Skript\rx (1)"))
     }
 
     // MARK: - Neustart

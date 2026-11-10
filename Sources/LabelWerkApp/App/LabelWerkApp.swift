@@ -78,6 +78,26 @@ struct MenuBarIcon: View {
     }
 }
 
+/// „Nach Updates suchen …“ im App-Menü. Das Ergebnis (Details-Sheet bzw. Hinweise) erscheint im
+/// Hauptfenster – ist keins offen (nur Einstellungen oder Menüleiste), wird es geöffnet, wie bei
+/// „LabelWerk öffnen“ in der Menüleiste.
+private struct CheckForUpdatesCommand: View {
+    let model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(tr("Nach Updates suchen …")) {
+            NSApp.unhide(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            if !MainWindow.bringToFront() {
+                openWindow(id: "main")
+            }
+            model.updates.checkNow(userInitiated: true)
+        }
+        .disabled(model.updates.isInstalling)
+    }
+}
+
 /// Menübefehle (Tastaturkürzel).
 struct LabelWerkCommands: Commands {
     let model: AppModel
@@ -85,12 +105,7 @@ struct LabelWerkCommands: Commands {
     var body: some Commands {
         // App-Menü unter „Über LabelWerk“: Update-Dienst (Details erscheinen im Hauptfenster).
         CommandGroup(after: .appInfo) {
-            Button(tr("Nach Updates suchen …")) {
-                NSApp.activate(ignoringOtherApps: true)
-                _ = MainWindow.bringToFront()
-                model.updates.checkNow(userInitiated: true)
-            }
-            .disabled(model.updates.isInstalling)
+            CheckForUpdatesCommand(model: model)
         }
         // Ersetzt „Neues Fenster“: Es gibt genau ein Hauptfenster (alle Fenster teilten sich sonst
         // dieselben Sheets wie „Drucker hinzufügen“). Die Menüleiste holt es nach vorn.

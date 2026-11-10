@@ -21,6 +21,9 @@ DEFAULT_BUNDLE_ID="com.labelwerk.app"
 
 APP_NAME="${DEFAULT_APP_NAME}"
 BUNDLE_ID="${DEFAULT_BUNDLE_ID}"
+# Schlüsselbund-Dienst der Zugriffstoken für Updates aus privaten Repositorys (UpdateTokenStore der
+# App; ein Eintrag je Repository).
+UPDATE_KEYCHAIN_SERVICE="com.labelwerk.app.update"
 
 ORIGINAL_ARGS="$*"
 REMOVE_QUEUES=0
@@ -59,7 +62,9 @@ Optionen:
                       (ohne diese Option bleiben sie bestehen, drucken aber nicht mehr)
   --keep-app          die App (samt lwctl-Link) behalten und nur den Treiber entfernen
   --purge-user-data   zusätzlich Einstellungen und Daten des aufrufenden Benutzers löschen
-                      (~/Library/Application Support/${APP_NAME}, Einstellungen, Caches)
+                      (~/Library/Application Support/${APP_NAME}, Einstellungen, Caches,
+                      Update-Protokoll ~/Library/Logs/${APP_NAME} und die Zugriffstoken für
+                      Updates im Schlüsselbund)
   -y, --yes           ohne Rückfrage ausführen
   -n, --dry-run       nur anzeigen, was entfernt würde
   --no-restart        CUPS danach nicht neu starten
@@ -189,11 +194,40 @@ if [[ "${PURGE_USER_DATA}" == "1" ]]; then
         "${ROOT}${user_home}/Library/Preferences/${BUNDLE_ID}.plist" \
         "${ROOT}${user_home}/Library/Caches/${BUNDLE_ID}" \
         "${ROOT}${user_home}/Library/HTTPStorages/${BUNDLE_ID}" \
-        "${ROOT}${user_home}/Library/Saved Application State/${BUNDLE_ID}.savedState"; do
+        "${ROOT}${user_home}/Library/Saved Application State/${BUNDLE_ID}.savedState" \
+        "${ROOT}${user_home}/Library/Logs/${APP_NAME}"; do
         if [[ -e "${candidate}" ]]; then
             USER_TARGETS+=("${candidate}")
         fi
     done
+fi
+
+# Führt einen Befehl als TARGET_USER in seiner Anmeldesitzung aus (Schlüsselbund) – wie das
+# postinstall: „launchctl asuser“ wechselt in die Sitzung, „sudo -H -u“ zur Kennung. Ohne
+# Administratorrechte nur für den eigenen Benutzer. Rückgabewert 1, wenn das nicht geht.
+as_target_user() {
+    local uid
+    uid="$(id -u "${TARGET_USER}" 2>/dev/null || true)"
+    case "${uid}" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    if [[ "$(id -u)" == "0" ]]; then
+        command -v launchctl >/dev/null 2>&1 || return 1
+        launchctl asuser "${uid}" sudo -H -u "${TARGET_USER}" "$@"
+    elif [[ "$(id -u)" == "${uid}" ]]; then
+        "$@"
+    else
+        return 1
+    fi
+}
+
+# Zugriffstoken des Update-Dienstes im Schlüsselbund des Benutzers (nur auf dem echten System).
+# „find-generic-password“ ohne -g liest nur die Attribute, nicht den Token.
+KEYCHAIN_TOKENS=0
+if [[ "${PURGE_USER_DATA}" == "1" && "${SYSTEM_ROOT}" == "1" ]] && command -v security >/dev/null 2>&1; then
+    if as_target_user security find-generic-password -s "${UPDATE_KEYCHAIN_SERVICE}" >/dev/null 2>&1; then
+        KEYCHAIN_TOKENS=1
+    fi
 fi
 
 # --- Übersicht und Rückfrage -----------------------------------------------------------------
@@ -202,7 +236,7 @@ step "${APP_NAME} entfernen${ROOT:+ (Wurzel: ${ROOT})}"
 if [[ -f "${DRIVER_DIR}/VERSION" ]]; then
     info "installierte Treiberversion: $(head -n 1 "${DRIVER_DIR}/VERSION")"
 fi
-if [[ ${#TARGETS[@]} -eq 0 && ${#USER_TARGETS[@]} -eq 0 && ${#QUEUES[@]} -eq 0 ]]; then
+if [[ ${#TARGETS[@]} -eq 0 && ${#USER_TARGETS[@]} -eq 0 && ${#QUEUES[@]} -eq 0 && "${KEYCHAIN_TOKENS}" == "0" ]]; then
     ok "Es ist nichts von ${APP_NAME} installiert."
     exit 0
 fi
@@ -221,6 +255,9 @@ if [[ ${#USER_TARGETS[@]} -gt 0 ]]; then
     for target in "${USER_TARGETS[@]}"; do
         info "${target}"
     done
+fi
+if [[ "${KEYCHAIN_TOKENS}" == "1" ]]; then
+    info "Zugriffstoken für Updates im Schlüsselbund von „${TARGET_USER}“ (Dienst ${UPDATE_KEYCHAIN_SERVICE})"
 fi
 if [[ ${#QUEUES[@]} -gt 0 ]]; then
     if [[ "${REMOVE_QUEUES}" == "1" ]]; then
@@ -295,8 +332,25 @@ if [[ ${#USER_TARGETS[@]} -gt 0 ]]; then
         run rm -rf "${target}"
     done
 fi
-if [[ "${DRY_RUN}" != "1" ]]; then
+if [[ ${#TARGETS[@]} -gt 0 || ${#USER_TARGETS[@]} -gt 0 ]] && [[ "${DRY_RUN}" != "1" ]]; then
     ok "$(( ${#TARGETS[@]} + ${#USER_TARGETS[@]} )) Einträge entfernt"
+fi
+if [[ "${KEYCHAIN_TOKENS}" == "1" ]]; then
+    # Ein Eintrag je Repository: löschen, solange einer gefunden wird (höchstens 50).
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        run security delete-generic-password -s "${UPDATE_KEYCHAIN_SERVICE}"
+    else
+        removed_tokens=0
+        while [[ "${removed_tokens}" -lt 50 ]] \
+            && as_target_user security delete-generic-password -s "${UPDATE_KEYCHAIN_SERVICE}" >/dev/null 2>&1; do
+            removed_tokens=$((removed_tokens + 1))
+        done
+        if as_target_user security find-generic-password -s "${UPDATE_KEYCHAIN_SERVICE}" >/dev/null 2>&1; then
+            warn "Zugriffstoken für Updates konnten nicht aus dem Schlüsselbund entfernt werden – als „${TARGET_USER}“: security delete-generic-password -s ${UPDATE_KEYCHAIN_SERVICE}"
+        else
+            ok "${removed_tokens} Zugriffstoken für Updates aus dem Schlüsselbund entfernt"
+        fi
+    fi
 fi
 
 if [[ "${SYSTEM_ROOT}" == "1" ]] && command -v pkgutil >/dev/null 2>&1; then

@@ -17,9 +17,10 @@ import LabelWerkKit
 ///   „Jetzt installieren“ ohne Wartezeit beginnt.
 /// * **Installieren**: `installer -pkg … -target /` mit Administratorrechten (macOS fragt nach dem
 ///   Passwort; Abbrechen ist kein Fehler). Der Befehl kopiert das Paket zuvor in ein nur für root
-///   beschreibbares Verzeichnis und prüft dort die Prüfsumme erneut. Protokoll:
-///   `~/Library/Logs/LabelWerk/Update.log`. Danach startet ein losgelöster Prozess die neue App,
-///   sobald diese beendet ist.
+///   beschreibbares Verzeichnis und prüft dort die Prüfsumme erneut. Er schreibt nichts in den
+///   Benutzerordner; das Protokoll `~/Library/Logs/LabelWerk/Update.log` schreibt die App als
+///   Benutzer aus seiner Ausgabe. Danach startet ein losgelöster Prozess die neue App, sobald diese
+///   beendet ist.
 /// * **Private Repositorys**: Zugriffstoken aus dem Schlüsselbund (`UpdateTokenStore`), gelesen
 ///   höchstens einmal je Programmstart und nie auf dem Main-Thread.
 @Observable
@@ -80,7 +81,8 @@ final class UpdateController {
             .appendingPathComponent("Updates", isDirectory: true)
     }
 
-    /// Protokoll des letzten Installationsversuchs.
+    /// Protokoll des letzten Installationsversuchs (schreibt nur die App als Benutzer, nie der
+    /// Installationsbefehl als root – siehe `UpdateInstaller.shellCommand`).
     static var logFile: URL {
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library", isDirectory: true)
@@ -572,9 +574,7 @@ final class UpdateController {
     }
 
     private func install(_ update: AvailableUpdate, package: URL) async {
-        let log = Self.prepareLogFile()
-        let command = UpdateInstaller.shellCommand(pkg: package, logFile: log,
-                                                   expectedSHA256: update.manifest.pkg.sha256)
+        let command = UpdateInstaller.shellCommand(pkg: package, expectedSHA256: update.manifest.pkg.sha256)
         let script = UpdateInstaller.appleScript(
             shellCommand: command,
             prompt: tr("LabelWerk möchte das Update %@ installieren.", update.manifest.appVersion.description))
@@ -586,12 +586,13 @@ final class UpdateController {
             return
         }
         guard result.succeeded else {
-            let output = result.stderr + "\n" + result.stdout
-            if UpdateInstaller.isUserCancellation(output) {
+            if UpdateInstaller.isUserCancellation(result.stderr) {
                 // Passwortdialog abgebrochen: kein Fehler, das Update bleibt bereit.
                 state = .readyToInstall(update, package)
                 return
             }
+            Self.writeLog(result)
+            let output = result.stderr + "\n" + result.stdout
             let code = Self.exitCode(fromAppleScriptError: result.stderr)
             if code == 3 {
                 // Prüfsumme der Kopie stimmt nicht: Datei verwerfen, „Jetzt installieren“ lädt neu.
@@ -600,6 +601,7 @@ final class UpdateController {
             state = .failed(Self.installFailureMessage(code: code, output: output))
             return
         }
+        Self.writeLog(result)
 
         // Liegt die neue Version wirklich in /Applications? Sonst nicht neu starten (Endlosschleife).
         let appURL = Self.installedAppURL
@@ -609,7 +611,7 @@ final class UpdateController {
         }
         guard installed >= update.manifest.appVersion else {
             state = .failed(tr("Das Paket wurde installiert, aber „%@“ hat weiterhin Version %@. Details stehen im Protokoll %@.",
-                               appURL.path, installed.description, log.path))
+                               appURL.path, installed.description, Self.logFile.path))
             return
         }
         relaunch(appURL)
@@ -725,13 +727,14 @@ final class UpdateController {
         }
     }
 
-    /// Leeres Protokoll als Benutzer anlegen: Der Installationsbefehl läuft als root und schreibt
-    /// hinein – so bleibt die Datei für die App lesbar.
-    private static func prepareLogFile() -> URL {
+    /// Schreibt das Protokoll des Installationsversuchs aus der Ausgabe von `osascript` – als
+    /// Benutzer und atomar (ersetzt die Datei, statt einem dort liegenden Link zu folgen). Der
+    /// Installationsbefehl selbst öffnet als root keine Datei im Benutzerordner.
+    private static func writeLog(_ result: ProcessRunner.Result) {
+        let text = UpdateInstaller.installLog(stdout: result.stdout, stderr: result.stderr, status: result.status)
         let url = logFile
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        _ = FileManager.default.createFile(atPath: url.path, contents: Data())
-        return url
+        try? Data((text.isEmpty ? "" : text + "\n").utf8).write(to: url, options: .atomic)
     }
 
     /// Exit-Code aus einer Fehlermeldung von `osascript` („… (3)“ am Ende).

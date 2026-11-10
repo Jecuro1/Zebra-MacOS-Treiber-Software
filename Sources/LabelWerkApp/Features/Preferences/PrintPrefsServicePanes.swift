@@ -478,7 +478,9 @@ struct PrintPrefsAboutPane: View {
                                    systemImage: "arrow.triangle.2.circlepath",
                                    tint: hasUpdate ? Theme.violet : Theme.teal,
                                    buttonTitle: hasUpdate ? tr("Update ansehen") : tr("Nach Updates suchen"),
-                                   isBusy: updates.isChecking || updates.isDownloading || updates.isInstalling,
+                                   // Laden und erneutes Suchen sperren „Update ansehen“ nicht: Das
+                                   // Details-Sheet zeigt den Fortschritt.
+                                   isBusy: updates.isInstalling || (!hasUpdate && updates.isChecking),
                                    isEnabled: !updates.isInstalling && (hasUpdate || !updates.isChecking)) {
             if hasUpdate {
                 updates.showDetails()

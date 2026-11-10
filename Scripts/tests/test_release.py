@@ -156,7 +156,7 @@ sys.exit(0)
 
 class ReleaseNamingTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lw-release-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-release-")).resolve()  # macOS: /var → /private/var
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -224,7 +224,7 @@ class ReleaseNamingTests(unittest.TestCase):
 
 class UpdateRepositoryConfigTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lw-update-config-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-update-config-")).resolve()  # macOS: /var → /private/var
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -272,7 +272,7 @@ class UpdateRepositoryConfigTests(unittest.TestCase):
 
 class ReleaseNotesTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lw-notes-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-notes-")).resolve()  # macOS: /var → /private/var
         self.repo = make_sandbox_repo(self.tmp / "repo")
         init_repo(self.repo)
 
@@ -352,7 +352,7 @@ class ReleaseNotesTests(unittest.TestCase):
 
 class ManifestTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lw-manifest-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-manifest-")).resolve()  # macOS: /var → /private/var
         self.package = self.tmp / "LabelWerk-1.1.0-58.pkg"
         self.package.write_bytes(b"xar!" + bytes(range(256)) * 4100)
         self.notes = self.tmp / "notes.md"
@@ -433,7 +433,7 @@ class ManifestTests(unittest.TestCase):
 
 class AppInfoCheckTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lw-appinfo-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-appinfo-")).resolve()  # macOS: /var → /private/var
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -460,7 +460,7 @@ class PackageInfoCheckTests(unittest.TestCase):
     """lw_check_app_package_info gegen PackageInfo-Dateien, wie pkgbuild sie schreibt."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lw-pkginfo-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-pkginfo-")).resolve()  # macOS: /var → /private/var
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -503,7 +503,7 @@ class PackageInfoCheckTests(unittest.TestCase):
 
 class CIMacOSReleaseTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="lw-ci-release-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-ci-release-")).resolve()  # macOS: /var → /private/var
         self.repo = make_sandbox_repo(self.tmp / "repo", "Scripts/ci_macos.sh")
         self.script = self.repo / "Scripts" / "ci_macos.sh"
         self.bin = fake_macos_tools(self.tmp / "bin")

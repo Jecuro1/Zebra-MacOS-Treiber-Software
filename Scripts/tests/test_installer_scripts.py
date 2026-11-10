@@ -695,6 +695,78 @@ class UninstallTests(unittest.TestCase):
                                  "/Search -read /Users/anna NFSHomeDirectory")
                 self.assertTrue(prefs.exists())
 
+    def keychain_tools(self, find_status: int) -> Path:
+        """Attrappen für ``security`` (protokolliert, ``find`` endet mit ``find_status``) sowie
+        ``launchctl asuser``/``sudo -H -u`` (führen den Rest der Befehlszeile aus)."""
+        tools = self.root.parent / f"{self.root.name}-tools"
+        self.addCleanup(shutil.rmtree, tools, True)
+        log = tools / "calls.log"
+        write_executable(tools / "security",
+                         f"#!/bin/sh\necho \"security $*\" >> '{log}'\n"
+                         f"case \"$1\" in find-generic-password) exit {find_status} ;; esac\nexit 0\n")
+        write_executable(tools / "launchctl",
+                         f"#!/bin/sh\necho \"launchctl $*\" >> '{log}'\n"
+                         "[ \"$1\" = asuser ] || exit 0\nshift 2\nexec \"$@\"\n")
+        write_executable(tools / "sudo",
+                         f"#!/bin/sh\necho \"sudo $*\" >> '{log}'\n"
+                         "[ \"$1\" = -H ] && shift\n[ \"$1\" = -u ] && shift 2\nexec \"$@\"\n")
+        write_executable(tools / "dscl", "#!/bin/sh\nexit 56\n")
+        write_executable(tools / "getent", "#!/bin/sh\nexit 2\n")     # → Ausweichweg über $HOME
+        return tools
+
+    def test_purge_user_data_includes_update_log(self):
+        # Das Update-Protokoll der App gehört zu den Benutzerdaten; mit --root wird der
+        # Schlüsselbund des echten Systems nicht angefasst.
+        tools = self.keychain_tools(find_status=0)
+        logs = self.root / "home" / "lw-test" / "Library" / "Logs" / "LabelWerk"
+        logs.mkdir(parents=True)
+        (logs / "Update.log").write_text("installer: The install was successful.\n", encoding="utf-8")
+        result = self.purge_dry_run(tools, "netzkonto", "/home/lw-test")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(logs), result.stdout)
+        self.assertTrue(logs.exists())
+        self.assertNotIn("Schlüsselbund", result.stdout)
+        self.assertFalse((tools / "calls.log").exists(), "mit --root darf security nicht laufen")
+
+        result = run([str(SCRIPTS / "uninstall.sh"), "--root", str(self.root), "--yes", "--purge-user-data"],
+                     env=dict(clean_env(SUDO_USER="netzkonto", HOME="/home/lw-test"),
+                              PATH=f"{tools}{os.pathsep}{os.environ.get('PATH', '')}"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(logs.exists())
+
+    def purge_system_dry_run(self, tools: Path) -> subprocess.CompletedProcess:
+        """``--purge-user-data --dry-run`` auf dem echten System (ohne --root) – ändert nichts."""
+        user = pwd.getpwuid(os.getuid()).pw_name
+        empty_home = self.root / "kein-home"
+        empty_home.mkdir()
+        env = clean_env(SUDO_USER=user, HOME=str(empty_home))
+        env["PATH"] = f"{tools}{os.pathsep}{env.get('PATH', '')}"
+        return run([str(SCRIPTS / "uninstall.sh"), "--purge-user-data", "--dry-run", "--no-restart"], env=env)
+
+    def test_purge_user_data_removes_update_tokens(self):
+        # Regression: Nach --purge-user-data blieb der Zugriffstoken für das private Repository im
+        # Schlüsselbund des Benutzers liegen.
+        tools = self.keychain_tools(find_status=0)
+        result = self.purge_system_dry_run(tools)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Zugriffstoken für Updates im Schlüsselbund", result.stdout)
+        self.assertIn("$ security delete-generic-password -s com.labelwerk.app.update", result.stdout)
+        calls = (tools / "calls.log").read_text(encoding="utf-8").splitlines()
+        security_calls = [line for line in calls if line.startswith("security ")]
+        # Im Probelauf nur nachsehen (Attribute, ohne -g), nichts löschen.
+        self.assertEqual(security_calls, ["security find-generic-password -s com.labelwerk.app.update"])
+        if IS_ROOT:
+            user = pwd.getpwuid(os.getuid()).pw_name
+            self.assertIn(f"launchctl asuser {os.getuid()} sudo -H -u {user} security find-generic-password "
+                          "-s com.labelwerk.app.update", calls)
+
+    def test_purge_user_data_without_update_tokens(self):
+        tools = self.keychain_tools(find_status=44)    # errSecItemNotFound: kein Eintrag
+        result = self.purge_system_dry_run(tools)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Zugriffstoken", result.stdout)
+        self.assertNotIn("delete-generic-password", result.stdout)
+
     @unittest.skipIf(IS_MACOS, "prüft das Verhalten außerhalb von macOS")
     def test_system_uninstall_refused_outside_macos(self):
         result = run([str(SCRIPTS / "uninstall.sh"), "--yes"])

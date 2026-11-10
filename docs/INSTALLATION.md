@@ -156,7 +156,8 @@ Einstellungen unter **LabelWerk › Einstellungen … (⌘,) › Updates**:
 
 Geladene Pakete liegen in `~/Library/Caches/com.labelwerk.app/Updates` (nach dem Update entfernt
 LabelWerk sie wieder), das Protokoll der letzten Installation in
-`~/Library/Logs/LabelWerk/Update.log`.
+`~/Library/Logs/LabelWerk/Update.log` (die App schreibt es aus der Ausgabe von `installer`; der mit
+Administratorrechten laufende Installationsbefehl selbst schreibt nichts in den Benutzerordner).
 
 ### Einmalig: die erste Version mit Update-Dienst
 
@@ -690,7 +691,7 @@ sudo bash /Library/Printers/LabelWerk/uninstall.sh --remove-queues    # zusätzl
 |---|---|
 | `--remove-queues` | auch alle Warteschlangen entfernen, die LabelWerk-PPDs verwenden (ohne die Option bleiben sie bestehen, drucken aber nicht mehr) |
 | `--keep-app` | die App (samt `lwctl`-Link in `/usr/local/bin`) behalten und nur den Treiber entfernen |
-| `--purge-user-data` | zusätzlich Einstellungen und Daten des Benutzers löschen (`~/Library/Application Support/LabelWerk`, Einstellungen, Caches) |
+| `--purge-user-data` | zusätzlich Einstellungen und Daten des Benutzers löschen (`~/Library/Application Support/LabelWerk`, Einstellungen, Caches samt geladenen Update-Paketen, Update-Protokoll `~/Library/Logs/LabelWerk`) und die Zugriffstoken für Updates aus seinem Schlüsselbund (Dienst `com.labelwerk.app.update`) |
 | `-y`, `--yes` | ohne Rückfrage |
 | `-n`, `--dry-run` | nur anzeigen, was entfernt würde |
 | `--no-restart` | `cupsd` danach nicht neu starten |

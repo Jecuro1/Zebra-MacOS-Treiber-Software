@@ -284,6 +284,14 @@ Verglichen werden nur `CFBundleShortVersionString`/`CFBundleVersion` der laufend
 Einstellungen › Updates eintragen. Das Protokoll der letzten Installation steht in
 `~/Library/Logs/LabelWerk/Update.log`.
 
+Der Installationsbefehl (`UpdateInstaller.shellCommand`) läuft als root. Er darf **keine** Datei im
+Benutzerordner zum Schreiben öffnen – die Shell folgte einem dort untergeschobenen symbolischen
+Link und überschriebe als root beliebige Dateien. Deshalb sammelt er die Ausgaben von `installer`
+in seinem eigenen `mktemp -d`-Ordner (wie die geprüfte Kopie des Pakets) und gibt sie am Ende auf
+stdout bzw. stderr aus; die App schreibt daraus `Update.log` als Benutzer
+(`UpdateInstaller.installLog`). `UpdateInstallerTests` prüft, dass alle Umleitungen nur in diesen
+Ordner, zwischen Dateideskriptoren oder nach `/dev/null` gehen.
+
 ### Warum die App beim Update in /Applications landet
 
 Die App-Komponente des Pakets ist **nicht verschiebbar** (`BundleIsRelocatable = NO`): Sonst
