@@ -310,6 +310,12 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(gen.select_ieee1284_model(["ZDesigner X", "Y"], 203), "Y")
         self.assertEqual(gen.select_ieee1284_model(["ZDesigner X"], 203), "ZDesigner X")
         self.assertIsNone(gen.select_ieee1284_model([], 203))
+        # G-Serie: Variantenname ohne Auflösung („MODEL:ZTC GX420d;“, Beleg in README.md).
+        gx = ["ZDesigner GX420d", "ZTC GX420-203dpi ZPL", "ZTC GX420d"]
+        self.assertEqual(gen.select_ieee1284_model(gx, 203, prefer_plain=True), "ZTC GX420d")
+        self.assertEqual(gen.select_ieee1284_model(gx, 203), "ZTC GX420-203dpi ZPL")
+        self.assertEqual(gen.select_ieee1284_model(["ZTC GX430-300dpi ZPL"], 300, prefer_plain=True),
+                         "ZTC GX430-300dpi ZPL")
 
     def test_english_stock_names_are_ascii(self):
         samples = {
@@ -583,18 +589,64 @@ class GeneratedSetTests(unittest.TestCase):
                 continue
             self.assertEqual(len(values), 1, stem)
             model = MODELS[target.model_id]
-            match = re.fullmatch(r"MFG:Zebra Technologies;CMD:([A-Z0-9,]+);MDL:([^;]+);CLS:PRINTER;", values[0])
+            # Schlüsselnamen und Reihenfolge wie die Drucker selbst (cups-driverd vergleicht sie wörtlich).
+            match = re.fullmatch(r"MANUFACTURER:Zebra Technologies( ?);COMMAND SET:([A-Z0-9,]+);"
+                                 r"MODEL:([^;]+);CLASS:PRINTER;", values[0])
             self.assertIsNotNone(match, values[0])
-            self.assertIn(match.group(2), model.ieee1284)
-            self.assertEqual(match.group(1).split(","), [gen.LANGUAGE_IEEE1284[l] for l in model.languages])
-            other_dpi = re.search(r"-(\d+)dpi", match.group(2))
+            # Link-OS-Drucker melden „Zebra Technologies ;“ (mit Leerzeichen), ältere ohne.
+            self.assertEqual(match.group(1) == " ", "linkOS" in model.features, stem)
+            self.assertIn(match.group(3), model.ieee1284)
+            self.assertEqual(match.group(2).split(","), [gen.LANGUAGE_IEEE1284[l] for l in model.languages])
+            other_dpi = re.search(r"-(\d+)dpi", match.group(3))
             if other_dpi:
                 self.assertEqual(int(other_dpi.group(1)), target.dpi, stem)
-        self.assertIn("MDL:ZTC ZD421-300dpi ZPL;", PPDS["LabelWerk-zd421t-300dpi"].attr("1284DeviceID"))
+            if model.family in gen.IEEE1284_PLAIN_MODEL_FAMILIES:
+                self.assertIsNone(other_dpi, stem)
+        # Exakt so meldet ein ZD421 (203 dpi) seine Kennung per SNMP – bis auf OPTIONS:XML.
+        self.assertEqual(PPDS["LabelWerk-zd421t-203dpi"].attr("1284DeviceID"),
+                         "MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL,EPL2;MODEL:ZTC ZD421-203dpi ZPL;"
+                         "CLASS:PRINTER;")
+        self.assertIn("MODEL:ZTC ZD421-300dpi ZPL;", PPDS["LabelWerk-zd421t-300dpi"].attr("1284DeviceID"))
+        self.assertEqual(PPDS["LabelWerk-gx420d-203dpi"].attr("1284DeviceID"),
+                         "MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL,EPL2;MODEL:ZTC GX420d;CLASS:PRINTER;")
         self.assertEqual(PPDS["LabelWerk-zd421t-300dpi"].attr_values("Product"),
                          ["(Zebra ZD421t)", "(ZTC ZD421-300dpi ZPL)", "(ZTC ZD421t)"])
         self.assertEqual(PPDS["LabelWerk-generic-zpl-203dpi"].attr_values("Product"), ["(Zebra Generic ZPL)"])
-        self.assertIn("MDL:ZTC ZD421-203dpi ZPL;", PPDS["LabelWerk-zd421t-203dpi"].attr("1284DeviceID"))
+
+    def test_1284_device_id_matches_like_cups_driverd(self):
+        """Nachbildung von ``regex_device_id`` aus CUPS ``scheduler/cups-driverd.cxx``: Aus der
+        Kennung des Geräts wird ein regulärer Ausdruck (Schlüssel wörtlich, ``KEY:.*wert.*;``,
+        ``COMMAND SET`` optional), der auf den ``*1284DeviceID`` der PPD passen muss."""
+        def regex_device_id(device_id: str) -> str:
+            parts = []
+            for field in device_id.split(";"):
+                key = field.split(":", 1)[0].upper()
+                if ":" not in field or key not in ("COMMAND SET", "CMD", "MANUFACTURER", "MFG", "MFR",
+                                                   "MODEL", "MDL"):
+                    continue
+                name, value = field.split(":", 1)
+                group = "(" + re.escape(name) + ":.*" + re.escape(value) + ".*;)"
+                parts.append(group + ("?" if key in ("COMMAND SET", "CMD") else ""))
+            return ".*".join(parts)
+
+        reported = {
+            # SNMP (HP- und Zebra-OID) eines ZD421 mit 203 dpi.
+            "LabelWerk-zd421t-203dpi": "MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;"
+                                       "MODEL:ZTC ZD421-203dpi ZPL;CLASS:PRINTER;OPTIONS:XML;",
+            "LabelWerk-zd621t-300dpi": "MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;"
+                                       "MODEL:ZTC ZD621-300dpi ZPL;",
+            "LabelWerk-gx420d-203dpi": "MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX420d;",
+            "LabelWerk-gx430t-300dpi": "MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430t;",
+        }
+        for stem, device_id in reported.items():
+            pattern = re.compile(regex_device_id(device_id), re.IGNORECASE)
+            self.assertIsNotNone(pattern.search(PPDS[stem].attr("1284DeviceID")), stem)
+        # Die Kennung eines ZD421 passt nicht auf die 300-dpi-PPD und nicht auf einen ZD420.
+        zd421 = re.compile(regex_device_id(reported["LabelWerk-zd421t-203dpi"]), re.IGNORECASE)
+        self.assertIsNone(zd421.search(PPDS["LabelWerk-zd421t-300dpi"].attr("1284DeviceID")))
+        self.assertIsNone(zd421.search(PPDS["LabelWerk-zd420t-203dpi"].attr("1284DeviceID")))
+        # Die frühere Schreibweise (MFG/MDL) hätte macOS nie zugeordnet.
+        self.assertIsNone(zd421.search("MFG:Zebra Technologies;CMD:ZPL,EPL2;MDL:ZTC ZD421-203dpi ZPL;CLS:PRINTER;"))
 
     def test_option_keywords_and_choices_unique(self):
         for stem, ppd in PPDS.items():
