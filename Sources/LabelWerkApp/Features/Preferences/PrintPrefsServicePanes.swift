@@ -34,17 +34,24 @@ struct PrintPrefsMaintenancePane: View {
                                     detail: tr("Alle Werte auf den Auslieferungszustand des Treibers – gespeichert wird erst mit „OK“ oder „Übernehmen“."),
                                     systemImage: "arrow.uturn.backward", tint: Theme.indigo,
                                     buttonTitle: tr("Zurücksetzen")) {
-                    withAnimation(context.animation) { editor.resetToDefaults() }
-                    model.toast(tr("Auf Standard zurückgesetzt"),
-                                message: tr("Mit „OK“ oder „Übernehmen“ speichern, mit „Abbrechen“ verwerfen."), style: .info)
+                    // Erst eine laufende Eingabe übernehmen, sonst überschreibt sie danach den Standardwert.
+                    afterCommittingTextEditing {
+                        withAnimation(context.animation) { editor.resetToDefaults() }
+                        model.toast(tr("Auf Standard zurückgesetzt"),
+                                    message: tr("Mit „OK“ oder „Übernehmen“ speichern, mit „Abbrechen“ verwerfen."),
+                                    style: .info)
+                    }
                 }
                 PrintPrefsActionRow(title: tr("Alle Einstellungen des Druckers verwenden"),
                                     detail: tr("Der Treiber sendet keine eigenen Werte – der Drucker behält Geschwindigkeit, Temperatur, Medientyp, Modus und Versätze."),
                                     systemImage: "printer", tint: Theme.teal,
                                     buttonTitle: tr("Festlegen")) {
-                    withAnimation(context.animation) { editor.useAllPrinterValues() }
-                    model.toast(tr("Druckerwerte festgelegt"),
-                                message: tr("Mit „OK“ oder „Übernehmen“ speichern, mit „Abbrechen“ verwerfen."), style: .info)
+                    afterCommittingTextEditing {
+                        withAnimation(context.animation) { editor.useAllPrinterValues() }
+                        model.toast(tr("Druckerwerte festgelegt"),
+                                    message: tr("Mit „OK“ oder „Übernehmen“ speichern, mit „Abbrechen“ verwerfen."),
+                                    style: .info)
+                    }
                 }
                 PrintPrefsActionRow(title: tr("Werte vom Drucker übernehmen"),
                                     detail: session.supportsStatus

@@ -266,8 +266,12 @@ char lw_print_mode_code(lw_print_mode m);             /* 'T' … 'K' / 0 (auch f
 char lw_backfeed_code(lw_backfeed b);                 /* 'A' / 'B' / 'N' / 'O' / 0 */
 /** true für die fünf Linerless-Modi (kein ^MM, SGD media.printmode). */
 bool lw_print_mode_is_linerless(lw_print_mode m);
-/** SGD-Wert für media.printmode ("tear off" … "linerless tear"); NULL bei UNSET. */
+/** SGD-Wert für media.printmode, wie getvar ihn meldet ("tear off" … "linerless tear"); NULL bei UNSET. */
 const char *lw_print_mode_sgd(lw_print_mode m);
+/** Setzwert für setvar "media.printmode" (Zebra-SGD-Referenz): "T" "P" "C" "D" "R" "A" "K",
+ *  Linerless "L" (ablösen), "U" (aufwickeln), "V" (abreißen), sonst das Wort ("linerless cut",
+ *  "linerless delayed cut" – ohne dokumentierten Buchstaben); NULL bei UNSET. */
+const char *lw_print_mode_sgd_set(lw_print_mode m);
 char lw_media_action_code(lw_media_action a);          /* 'F' 'C' 'L' 'N' 'S' / 0 */
 const char *lw_rtc_name(lw_rtc r);                     /* "JobStart" … / "-" */
 /** Wirksame Drehung: rotation ≠ 0 ? rotation : (rotate180 ? 180 : 0). */

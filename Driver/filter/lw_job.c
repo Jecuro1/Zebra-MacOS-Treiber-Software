@@ -179,9 +179,10 @@ bool lw_job_begin(lw_job *job)
     const lw_settings *s = &job->s;
     switch (s->language) {
     case LW_LANGUAGE_ZPL:
-        write_commands_line(job, s->start_commands, s->start_commands_len);
+        /* ~JA zuerst: es löscht die Daten vor sich im Eingangspuffer (sonst auch die Startbefehle). */
         if (s->cancel_before)
             write_cancel_all(job, true);
+        write_commands_line(job, s->start_commands, s->start_commands_len);
         if (s->darkness != LW_UNSET)
             sink_command(job, "~SD%02d\n", s->darkness);
         if (s->tear_off != LW_UNSET)
@@ -191,10 +192,11 @@ bool lw_job_begin(lw_job *job)
             sink_command(job, "~JS%c\n", lw_backfeed_code(s->backfeed));
         if (s->calibrate)
             sink_command(job, "~JC\n");
-        /* Linerless-Modi haben keinen ^MM-Code: Modus per SGD (unabhängig von Steuerzeichen). */
+        /* Linerless-Modi haben keinen ^MM-Code: Modus per SGD (unabhängig von Steuerzeichen),
+         * mit dem dokumentierten Setzwert ("L", "U", "V" bzw. "linerless cut" …). */
         if (lw_print_mode_is_linerless(s->print_mode))
             lw_sink_printf(job->out, "! U1 setvar \"media.printmode\" \"%s\"\r\n",
-                           lw_print_mode_sgd(s->print_mode));
+                           lw_print_mode_sgd_set(s->print_mode));
         if (s->power_up_action != LW_MEDIA_ACTION_UNSET && s->head_close_action != LW_MEDIA_ACTION_UNSET)
             sink_command(job, "^XA^MF%c,%c^XZ\n", lw_media_action_code(s->power_up_action),
                          lw_media_action_code(s->head_close_action));
@@ -202,9 +204,9 @@ bool lw_job_begin(lw_job *job)
             write_set_time(job, job_clock(job, -1));
         break;
     case LW_LANGUAGE_EPL:
-        write_commands_line(job, s->start_commands, s->start_commands_len);
         if (s->cancel_before)
             write_cancel_all(job, false);
+        write_commands_line(job, s->start_commands, s->start_commands_len);
         break;
     case LW_LANGUAGE_CPCL:
         /* CPCL kennt laut §8 keinen Auftragskopf. */

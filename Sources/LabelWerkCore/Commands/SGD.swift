@@ -130,9 +130,10 @@ public enum SGD {
     public static func manualCalibration() -> String { `do`(Variable.manualCalibration) }
 
     /// `! U1 setvar "media.printmode" "{wert}"\r\n` – Druckmodus per SGD (für Linerless-Modi die
-    /// einzige Möglichkeit, siehe ``PrintMode/usesSGD``), z. B. `"linerless peel"`.
+    /// einzige Möglichkeit, siehe ``PrintMode/usesSGD``) mit dem dokumentierten Setzwert
+    /// ``PrintMode/sgdSetValue``, z. B. `"L"` (Linerless ablösen) oder `"linerless cut"`.
     public static func setPrintMode(_ mode: PrintMode) -> String {
-        setvar(Variable.printMode, mode.sgdValue)
+        setvar(Variable.printMode, mode.sgdSetValue)
     }
 
     // MARK: - Variablennamen

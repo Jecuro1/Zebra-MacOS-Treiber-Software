@@ -411,6 +411,54 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         }
     }
 
+    /// Übernimmt genau die Felder dieser Einstellung (dieselben wie in `matches(_:_:)`) aus `s` nach `t`.
+    func copyValue(from s: PrintPrefsDraft, into t: inout PrintPrefsDraft) {
+        switch self {
+        case .template, .size:
+            // Vorlage und Größe gehören zusammen: „Benutzerdefiniert“ ohne eigene Maße gibt es nicht.
+            t.stockID = s.stockID
+            t.widthMM = s.widthMM
+            t.heightMM = s.heightMM
+            t.gapMM = s.gapMM
+        case .tracking: t.settings.tracking = s.settings.tracking
+        case .rotation:
+            t.settings.rotation = s.settings.rotation
+            t.settings.rotate180 = s.settings.rotate180
+        case .markOffset: t.settings.markOffset = s.settings.markOffset
+        case .mirror: t.settings.mirror = s.settings.mirror
+        case .negative: t.settings.negative = s.settings.negative
+        case .stopAtLast: t.settings.stopAtLastElement = s.settings.stopAtLastElement
+        case .stopOffset: t.settings.stopOffset = s.settings.stopOffset
+        case .speed: t.settings.speed = s.settings.speed
+        case .darkness: t.settings.darkness = s.settings.darkness
+        case .mediaType: t.settings.mediaType = s.settings.mediaType
+        case .labelTop: t.settings.labelTop = s.settings.labelTop
+        case .labelLeft: t.settings.labelLeft = s.settings.labelLeft
+        case .backfeed: t.settings.backfeed = s.settings.backfeed
+        case .pauseEvery: t.settings.pauseEvery = s.settings.pauseEvery
+        case .controlCharacters: t.settings.controlCharacters = s.settings.controlCharacters
+        case .rtcUpdate: t.settings.rtcUpdate = s.settings.rtcUpdate
+        case .calibrateBeforeJob: t.settings.calibrateBeforeJob = s.settings.calibrateBeforeJob
+        case .saveToPrinter: t.settings.saveToPrinter = s.settings.saveToPrinter
+        case .language: t.language = s.language
+        case .cancelJobs: t.settings.cancelJobsBeforePrint = s.settings.cancelJobsBeforePrint
+        case .cancelDelay: t.settings.cancelDelayMs = s.settings.cancelDelayMs
+        case .printMode: t.settings.printMode = s.settings.printMode
+        case .tearOff: t.settings.tearOffAdjust = s.settings.tearOffAdjust
+        case .cutEvery: t.settings.cutEvery = s.settings.cutEvery
+        case .dither: t.settings.dither = s.settings.dither
+        case .threshold: t.settings.threshold = s.settings.threshold
+        case .compression: t.settings.compression = s.settings.compression
+        case .skipBlank: t.settings.skipBlankLabels = s.settings.skipBlankLabels
+        case .startCommands: t.settings.startCommands = s.settings.startCommands
+        case .endCommands: t.settings.endCommands = s.settings.endCommands
+        case .labelStartCommands: t.settings.labelStartCommands = s.settings.labelStartCommands
+        case .labelEndCommands: t.settings.labelEndCommands = s.settings.labelEndCommands
+        case .powerUpAction: t.settings.powerUpAction = s.settings.powerUpAction
+        case .headCloseAction: t.settings.headCloseAction = s.settings.headCloseAction
+        }
+    }
+
     /// Vom Drucker gelesener Wert als Text (Anzeige hinter „Druckerwert“).
     func printerValueText(_ read: PrintSettings, length: PrintPrefsLength) -> String? {
         switch self {
@@ -556,14 +604,20 @@ final class PrintPrefsEditor {
         return PrintPrefsSetting.allCases.filter { $0.isAppliedToPrinter && !$0.matches(draft, sent) }
     }
 
-    /// Übernimmt gespeicherte Werte, solange nichts bearbeitet wurde (z. B. nach einem Formatwechsel
-    /// unter „Etiketten“ oder einer Wiederherstellung).
-    func reloadIfClean(from session: PrinterSession) {
-        guard !isDirty else { return }
+    /// Setzt den Entwurf auf den aktuell gespeicherten Stand des Druckers auf, wenn andere Teile der
+    /// App ihn inzwischen geändert haben (z. B. Formatwechsel unter „Etiketten“, Druckersprache unter
+    /// „Wartung“, Wiederherstellung einer Sicherung). Hier bearbeitete Einstellungen bleiben erhalten,
+    /// alle anderen übernehmen den neuen gespeicherten Wert – „OK“ überschreibt so nur, was der
+    /// Benutzer in diesem Dialog geändert hat.
+    func rebase(on session: PrinterSession) {
         let fresh = PrintPrefsDraft(session: session)
         guard fresh != original else { return }
-        draft = fresh
+        var merged = fresh
+        for setting in changedSettings {
+            setting.copyValue(from: draft, into: &merged)
+        }
         original = fresh
+        draft = merged
     }
 
     // MARK: Bearbeiten
@@ -632,9 +686,14 @@ final class PrintPrefsEditor {
     /// eigenes Etikettenformat angelegt bzw. aktualisiert. Liefert `true`, wenn sich etwas geändert hat.
     @discardableResult
     func commit(session: PrinterSession, model: AppModel) -> Bool {
+        // Nur die hier geänderten Werte schreiben – Änderungen von außen bleiben erhalten.
+        rebase(on: session)
         guard isDirty else { return false }
         var next = draft
         next.settings = draft.settings.clamped()
+        // Inzwischen gelöschte Vorlage → die Maße als eigenes Format speichern statt einer
+        // Kennung, die auf kein Format mehr zeigt.
+        if let id = next.stockID, model.stock(id: id) == nil { next.stockID = nil }
         let stockID = next.stockID ?? customStockID(for: next, session: session, model: model)
         next.stockID = stockID
         var saved = session.saved

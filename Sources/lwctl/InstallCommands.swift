@@ -292,9 +292,9 @@ enum InstallCommands {
                     var excluded: Set<String> = ["Resolution"]
                     if stock != nil { excluded.formUnion(["PageSize", "PageRegion"]) }
                     if explicitLanguage != nil || generic != nil { excluded.insert("lwLanguage") }
-                    keptSettings = CUPSQueues.ppdDefaults(text)
-                        .filter { !excluded.contains($0.option) }
-                        .map { "\($0.option)=\($0.value)" }
+                    // Veraltete Optionen (lwRotate180) gehen als ihre Nachfolger mit (lwRotation).
+                    keptSettings = CUPSQueues.carriedDefaults(CUPSQueues.ppdDefaults(text)
+                        .filter { !excluded.contains($0.option) })
                 } else {
                     warn("Die bisherigen Einstellungen von „\(existing.name)“ sind nicht lesbar "
                          + "(\(CUPSQueues.ppdPath(ofQueue: existing.name) ?? "PPD")) – es gelten die Standardwerte der neuen PPD.")

@@ -168,10 +168,17 @@ static const enum_entry print_mode_table[] = {
     { NULL, 0 }
 };
 
-/* SGD-Werte für media.printmode je Druckmodus (Index = lw_print_mode). */
+/* SGD-Werte für media.printmode je Druckmodus (Index = lw_print_mode), wie getvar sie meldet. */
 static const char *const print_mode_sgd[] = {
     NULL, "tear off", "peel off", "cutter", "delayed cut", "rewind", "applicator", "kiosk",
     "linerless peel", "linerless cut", "linerless delayed cut", "linerless rewind", "linerless tear"
+};
+
+/* Setzwerte für setvar "media.printmode" laut Zebra-SGD-Referenz: Kennbuchstaben; Linerless
+ * schneiden/verzögert schneiden haben keinen dokumentierten Buchstaben (dort das Wort). */
+static const char *const print_mode_sgd_set[] = {
+    NULL, "T", "P", "C", "D", "R", "A", "K",
+    "L", "linerless cut", "linerless delayed cut", "U", "V"
 };
 
 static const enum_entry rotation_table[] = {
@@ -410,6 +417,13 @@ const char *lw_print_mode_sgd(lw_print_mode m)
     if ((int)m < 0 || (size_t)m >= sizeof(print_mode_sgd) / sizeof(print_mode_sgd[0]))
         return NULL;
     return print_mode_sgd[m];
+}
+
+const char *lw_print_mode_sgd_set(lw_print_mode m)
+{
+    if ((int)m < 0 || (size_t)m >= sizeof(print_mode_sgd_set) / sizeof(print_mode_sgd_set[0]))
+        return NULL;
+    return print_mode_sgd_set[m];
 }
 
 char lw_media_action_code(lw_media_action a)
@@ -750,7 +764,7 @@ void lw_settings_log(const lw_settings *s, const lw_logger *log)
            s->cut_every, s->calibrate, s->save_settings, s->skip_blank, s->start_commands_len,
            s->end_commands_len);
     char pu = lw_media_action_code(s->power_up_action), hc = lw_media_action_code(s->head_close_action);
-    const char *sgd = lw_print_mode_is_linerless(s->print_mode) ? lw_print_mode_sgd(s->print_mode) : "-";
+    const char *sgd = lw_print_mode_is_linerless(s->print_mode) ? lw_print_mode_sgd_set(s->print_mode) : "-";
     lw_log(log, LW_LOG_DEBUG,
            "Einstellungen (erweitert): Drehung=%d Markenversatz=%s BeiLetztemStoppen=%d Stoppversatz=%d "
            "Pause=%d Steuerzeichen=%s(%c%c%c) RTC=%s Abbrechen=%d Verzögerung=%d ms "

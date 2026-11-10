@@ -141,15 +141,15 @@ public enum PrintMode: String, Codable, CaseIterable, Sendable, Identifiable {
     case rewind
     case applicator
     case kiosk
-    /// Linerless: ablösen (`media.printmode` = `linerless peel`).
+    /// Linerless: ablösen (`media.printmode`: setzen `L`, lesen `linerless peel`).
     case linerlessPeel
     /// Linerless: schneiden (`linerless cut`).
     case linerlessCut
     /// Linerless: verzögert schneiden (`linerless delayed cut`).
     case linerlessDelayedCut
-    /// Linerless: aufwickeln (`linerless rewind`).
+    /// Linerless: aufwickeln (setzen `U`, lesen `linerless rewind`).
     case linerlessRewind
-    /// Linerless: abreißen (`linerless tear`).
+    /// Linerless: abreißen (setzen `V`, lesen `linerless tear`).
     case linerlessTear
 
     public var id: String { rawValue }
@@ -208,7 +208,8 @@ public enum PrintMode: String, Codable, CaseIterable, Sendable, Identifiable {
         self = match
     }
 
-    /// Wert der SGD-Variablen `media.printmode`.
+    /// Wert der SGD-Variablen `media.printmode`, wie der Drucker ihn bei `getvar` meldet
+    /// (z. B. `tear off`, `linerless peel`). Zum Setzen dient ``sgdSetValue``.
     public var sgdValue: String {
         switch self {
         case .tearOff: return "tear off"
@@ -226,12 +227,27 @@ public enum PrintMode: String, Codable, CaseIterable, Sendable, Identifiable {
         }
     }
 
+    /// Wert für `! U1 setvar "media.printmode" "…"` laut Zebra-SGD-Referenz: die dokumentierten
+    /// Kennbuchstaben `T` `P` `C` `D` `R` `A` `K` und für Linerless `L` (ablösen), `U` (aufwickeln),
+    /// `V` (abreißen). Für Linerless schneiden bzw. verzögert schneiden dokumentiert Zebra keinen
+    /// Buchstaben – dort wird das Wort (``sgdValue``) gesendet.
+    public var sgdSetValue: String {
+        switch self {
+        case .tearOff, .peelOff, .cutter, .delayedCut, .rewind, .applicator, .kiosk: return zplCode
+        case .linerlessPeel: return "L"
+        case .linerlessRewind: return "U"
+        case .linerlessTear: return "V"
+        case .linerlessCut, .linerlessDelayedCut: return sgdValue
+        }
+    }
+
     /// Umkehrung von ``sgdValue`` (ohne Beachtung von Groß-/Kleinschreibung, Leerzeichen am
-    /// Rand, `_`/`-` statt Leerzeichen).
+    /// Rand, `_`/`-` statt Leerzeichen); nimmt auch die Kennbuchstaben aus ``sgdSetValue`` an.
     public init?(sgdValue: String) {
         let key = sgdValue.trimmingCharacters(in: .whitespaces).lowercased()
             .replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
-        guard let match = PrintMode.allCases.first(where: { $0.sgdValue == key }) else { return nil }
+        guard let match = PrintMode.allCases.first(where: { $0.sgdValue == key || $0.sgdSetValue.lowercased() == key })
+        else { return nil }
         self = match
     }
 

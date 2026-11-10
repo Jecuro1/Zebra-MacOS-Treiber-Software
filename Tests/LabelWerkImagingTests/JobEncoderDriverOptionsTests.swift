@@ -53,15 +53,15 @@ struct JobEncoderDriverOptionsTests {
 
     // MARK: - Auftragskopf
 
-    @Test("ZPL: Auftragskopf in fester Reihenfolge (Start, ~JA, ~SD, ~TA, ~JS, ~JC, SGD, ^MF, ^ST)")
+    @Test("ZPL: Auftragskopf in fester Reihenfolge (~JA, Start, ~SD, ~TA, ~JS, ~JC, SGD, ^MF, ^ST)")
     func prologueOrder() throws {
         let settings = PrintSettings(darkness: 8, printMode: .linerlessPeel, tearOffAdjust: -10, backfeed: .afterPrinting,
                                      compression: .hex, calibrateBeforeJob: true, startCommands: "~JR", endCommands: "~PS",
                                      rtcUpdate: .jobStart, cancelJobsBeforePrint: true,
                                      powerUpAction: .feed, headCloseAction: .calibrate)
         let data = try Self.encoder(settings, time: 0).encode(pages: [Self.pageA])
-        Self.expectText(data, "~JR\n~JA\n~SD08\n~TA-10\n~JSA\n~JC\n"
-            + "! U1 setvar \"media.printmode\" \"linerless peel\"\r\n"
+        Self.expectText(data, "~JA\n~JR\n~SD08\n~TA-10\n~JSA\n~JC\n"
+            + "! U1 setvar \"media.printmode\" \"L\"\r\n"
             + "^XA^MFF,C^XZ\n^XA^ST01,01,1970,00,00,00,M^XZ\n" + Self.bodyA + "~PS\n")
     }
 
@@ -156,7 +156,7 @@ struct JobEncoderDriverOptionsTests {
     @Test("Linerless: SGD media.printmode im Kopf, kein ^MM", arguments: PrintMode.allCases.filter(\.isLinerless))
     func linerless(mode: PrintMode) throws {
         let data = try Self.encoder(PrintSettings(printMode: mode, compression: .hex)).encode(pages: [Self.pageA])
-        Self.expectText(data, "! U1 setvar \"media.printmode\" \"\(mode.sgdValue)\"\r\n" + Self.bodyA)
+        Self.expectText(data, "! U1 setvar \"media.printmode\" \"\(mode.sgdSetValue)\"\r\n" + Self.bodyA)
     }
 
     @Test("Klassische Modi: ^MM im Etikett, keine SGD-Zeile", arguments: PrintMode.allCases.filter { !$0.isLinerless })
@@ -168,7 +168,7 @@ struct JobEncoderDriverOptionsTests {
 
     // MARK: - Aufträge abbrechen
 
-    @Test("~JA: nach den Startbefehlen, Länge des Auftragsanfangs für die Wartezeit")
+    @Test("~JA: am Auftragsanfang vor den Startbefehlen, Länge der Zeile für die Wartezeit")
     func cancelBeforePrint() throws {
         let plain = Self.encoder(PrintSettings(compression: .hex, cancelJobsBeforePrint: true))
         let data = try plain.encode(pages: [Self.pageA])
@@ -179,8 +179,10 @@ struct JobEncoderDriverOptionsTests {
                                                    cancelJobsBeforePrint: true, cancelDelayMs: 0))
         let started = try withStart.encode(pages: [Self.pageA])
         let split = try #require(withStart.cancelPrefixLength())
-        #expect(split == 12)
-        #expect(Self.text(started.prefix(split)) == "~JR\n~PS\n~JA\n")
+        #expect(split == 4)
+        #expect(Self.text(started.prefix(split)) == "~JA\n")
+        // ~JA löscht die Daten vor sich im Eingangspuffer: Die Startbefehle müssen danach kommen.
+        #expect(Self.text(started.dropFirst(split)).hasPrefix("~JR\n~PS\n^XA\n"))
 
         let custom = Self.encoder(PrintSettings(compression: .hex,
                                                 controlCharacters: ControlCharacters(formatPrefix: 0x24, controlPrefix: 0x23,
@@ -191,8 +193,8 @@ struct JobEncoderDriverOptionsTests {
 
         #expect(Self.encoder(PrintSettings()).cancelPrefixLength() == nil)
         let epl = Self.encoder(.epl, PrintSettings(startCommands: "S", cancelJobsBeforePrint: true))
-        #expect(epl.cancelPrefixLength() == 6)
-        #expect(Self.text(try epl.encode(pages: [Self.pageB]).prefix(6)) == "S\n~JA\n")
+        #expect(epl.cancelPrefixLength() == 4)
+        #expect(Self.text(try epl.encode(pages: [Self.pageB]).prefix(6)) == "~JA\nS\n")
         #expect(Self.encoder(.cpcl, PrintSettings(cancelJobsBeforePrint: true)).cancelPrefixLength() == nil)
     }
 
@@ -437,12 +439,12 @@ struct JobEncoderDriverOptionsTests {
 
     // MARK: - EPL
 
-    @Test("EPL: ~JA nach den Startbefehlen, Befehle je Etikett nach N bzw. vor P")
+    @Test("EPL: ~JA vor den Startbefehlen, Befehle je Etikett nach N bzw. vor P")
     func eplLabelCommands() throws {
         let settings = PrintSettings(startCommands: "S", endCommands: "E", cancelJobsBeforePrint: true,
                                      labelStartCommands: "X", labelEndCommands: "Y\nZ")
         let data = try Self.encoder(.epl, settings).encode(pages: [Self.pageB], copies: 2)
-        var expected = Data("S\n~JA\n\nN\nX\nq8\nQ2,24\nZT\nGW0,0,1,2,".utf8)
+        var expected = Data("~JA\nS\n\nN\nX\nq8\nQ2,24\nZT\nGW0,0,1,2,".utf8)
         expected.append(contentsOf: [0x00, 0x7E])
         expected.append(Data("\nY\nZ\nP2\nE\n".utf8))
         #expect(TestSupport.printable(data) == TestSupport.printable(expected))

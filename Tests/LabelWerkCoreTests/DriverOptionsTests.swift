@@ -75,6 +75,14 @@ struct DriverOptionsTests {
         #expect(PrintMode.linerlessCut.zplCode == "C", "Rückfall auf den Code des klassischen Modus")
         #expect(PrintMode(zplCode: "X") == nil)
         #expect(PrintMode(sgdValue: "linerless") == nil)
+        // Setzwerte laut Zebra-SGD-Referenz: Kennbuchstaben, Linerless schneiden ohne Buchstaben (Wort).
+        #expect(PrintMode.allCases.map(\.sgdSetValue)
+            == ["T", "P", "C", "D", "R", "A", "K", "L", "linerless cut", "linerless delayed cut", "U", "V"])
+        for mode in PrintMode.allCases {
+            #expect(PrintMode(sgdValue: mode.sgdSetValue) == mode, "Rücklesen nimmt auch den Setzwert an")
+            #expect(PrintMode(sgdValue: mode.sgdSetValue.lowercased()) == mode)
+        }
+        #expect(PrintMode(sgdValue: "F") == nil, "RFID ist kein eigener Modus")
         #expect(PrintMode.allCases.filter(\.usesCutter) == [.cutter, .delayedCut, .kiosk, .linerlessCut, .linerlessDelayedCut])
     }
 
@@ -346,7 +354,8 @@ struct DriverOptionsTests {
         #expect(ZPL.mediaFeed(powerUpAction: .shortCalibration, headCloseAction: .length).description == "^MFS,L")
         #expect(ZPL.mediaFeed(powerUp: .calibrate, headClose: .feed).description == "^MFC,F")
         #expect(SGD.setPrintMode(.linerlessDelayedCut) == "! U1 setvar \"media.printmode\" \"linerless delayed cut\"\r\n")
-        #expect(SGD.setPrintMode(.peelOff) == "! U1 setvar \"media.printmode\" \"peel off\"\r\n")
+        #expect(SGD.setPrintMode(.linerlessPeel) == "! U1 setvar \"media.printmode\" \"L\"\r\n")
+        #expect(SGD.setPrintMode(.peelOff) == "! U1 setvar \"media.printmode\" \"P\"\r\n")
         for name in ["print.tone", "media.speed", "ezpl.media_type", "ezpl.print_method", "media.printmode",
                      "zpl.label_top", "zpl.left_position", "ezpl.tear_off", "ezpl.power_up_action",
                      "ezpl.head_close_action", "zpl.caret", "zpl.control_character", "zpl.delimiter",

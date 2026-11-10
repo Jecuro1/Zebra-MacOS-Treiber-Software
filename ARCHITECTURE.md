@@ -197,10 +197,14 @@ extension MediaTracking { case notch }          // ^MNW, cupsValue "Notch"; EPL 
 extension PrintMode {                           // Windows „Bedienermodus“
     case linerlessPeel, linerlessCut, linerlessDelayedCut, linerlessRewind, linerlessTear
     // cupsValue LinerlessPeel … LinerlessTear
-    var sgdValue: String          // media.printmode: "tear off" "peel off" "cutter" "delayed cut" "rewind"
-                                  // "applicator" "kiosk" "linerless peel" "linerless cut"
-                                  // "linerless delayed cut" "linerless rewind" "linerless tear"
-    init?(sgdValue: String)       // tolerant: Groß-/Kleinschreibung, "_"/"-" statt Leerzeichen
+    var sgdValue: String          // media.printmode wie getvar ihn meldet: "tear off" "peel off" "cutter"
+                                  // "delayed cut" "rewind" "applicator" "kiosk" "linerless peel"
+                                  // "linerless cut" "linerless delayed cut" "linerless rewind" "linerless tear"
+    var sgdSetValue: String       // setvar-Wert laut Zebra-SGD-Referenz: "T" "P" "C" "D" "R" "A" "K",
+                                  // Linerless "L" (ablösen), "U" (aufwickeln), "V" (abreißen); für
+                                  // Linerless schneiden/verzögert schneiden ist kein Buchstabe dokumentiert
+                                  // → "linerless cut" / "linerless delayed cut"
+    init?(sgdValue: String)       // tolerant: Groß-/Kleinschreibung, "_"/"-" statt Leerzeichen; nimmt auch sgdSetValue an
     var isLinerless: Bool
     var usesSGD: Bool             // == isLinerless: kein ^MM, nur SGD media.printmode
     var mmCode: String?           // T P C D R A K; nil für Linerless
@@ -270,7 +274,7 @@ Befehlsbausteine: `ZPL.mediaTracking(_:markOffset:)` (`^MNM,{n}`, sonst `^MN{cod
 `ZPL.mediaFeed(powerUpAction:headCloseAction:)` (`^MF{a},{b}`), `ZPL.setRealTimeClock(_:timeZone:)`
 (`^ST{MM},{DD},{YYYY},{HH},{mm},{SS},M`), `ZPL.realTimeClockFormat(_:timeZone:)` (`^XA^ST…^XZ`),
 `ZPLCommand.rendered(with: ControlCharacters)` und `ZPL.render(_:characters:)` (eigene Steuerzeichen),
-`SGD.setPrintMode(_:)` (`! U1 setvar "media.printmode" "{sgdValue}"\r\n`),
+`SGD.setPrintMode(_:)` (`! U1 setvar "media.printmode" "{sgdSetValue}"\r\n`),
 `SGD.printSettingsVariables` (für `PrinterClient.readPrintSettings()`).
 
 ## 4. LabelWerkImaging
@@ -356,7 +360,7 @@ public struct JobEncoder: Sendable {
     public func encode(pages: [MonoBitmap], copies: Int = 1, collate: Bool = true) throws -> Data
     public func encode(images: [GrayImage], copies: Int = 1, collate: Bool = true) throws -> Data // dithert gemäß settings
     public func preprocess(_ page: MonoBitmap) -> MonoBitmap?     // Schritte (0)–(5) aus §8, z. B. für Vorschauen
-    public func cancelPrefixLength() -> Int?      // Bytes bis einschließlich der ~JA-Zeile (Aufrufer wartet dort)
+    public func cancelPrefixLength() -> Int?      // Länge der ~JA-Zeile am Auftragsanfang (Aufrufer wartet danach)
 }
 ```
 
@@ -683,7 +687,11 @@ public actor PrinterClient {
     public func printZPL(_ zpl: String) async throws
     public func printImages(_ images: [GrayImage], settings: PrintSettings, resolution: Resolution,
                             stock: LabelStock?, copies: Int = 1) async throws
-        // mit cancelJobsBeforePrint: Teil bis ~JA senden, cancelDelayMs warten, Rest senden
+        // mit cancelJobsBeforePrint: ~JA-Zeile senden, cancelDelayMs warten, Rest senden
+    public func sendJob(_ data: Data, cancelPrefixLength: Int?, delayMilliseconds: Int) async throws
+        // fertig kodierter Auftrag (App: PrinterSession.printImages/reprint): erst cancelPrefixLength
+        // Bytes, delayMilliseconds warten, dann der Rest; nil/ungültig → in einem Stück
+    public static func cancelPrefixLength(of data: Data) -> Int?   // 4 bei "<c>JA\n" am Anfang, sonst nil
     public func applySettings(_ settings: PrintSettings, permanently: Bool) async throws
         // ~SD, ~TA, ~JS, [SGD media.printmode bei Linerless], ^XA ^MT ^MN[M,offset] ^MM(klassisch) ^PR ^LT ^LS
         // ^MF(nur beide Aktionen) (+ ^JUS) ^XZ – mit den Steuerzeichen aus settings.controlCharacters
@@ -774,13 +782,14 @@ Grafikdaten in einer Zeile.
 ### ZPL
 
 ```
-{startCommands}\n                     falls nicht leer
 ~JA\n                                 falls cancelJobsBeforePrint (Filter: Ausgabe leeren, cancelDelayMs warten)
+{startCommands}\n                     falls nicht leer
 ~SD{dd}\n                             falls darkness (zweistellig, 0-gefüllt: ~SD08)
 ~TA{±ddd}\n                           falls tearOffAdjust (printf "%03d": ~TA010, ~TA-10)
 ~JS{A|B|N|O}\n                        falls backfeed (Steuerbefehl; ^JS ist die Sensorwahl)
 ~JC\n                                 falls calibrateBeforeJob
-! U1 setvar "media.printmode" "{sgd}"\r\n   falls printMode linerless (sgdValue; Zeilenende CR LF)
+! U1 setvar "media.printmode" "{sgd}"\r\n   falls printMode linerless (sgdSetValue: L | linerless cut |
+                                      linerless delayed cut | U | V; Zeilenende CR LF)
 ^XA^MF{a},{b}^XZ\n                    falls powerUpAction UND headCloseAction (F|C|L|N|S)
 ^XA^ST{MM},{DD},{YYYY},{HH},{mm},{SS},M^XZ\n   falls rtcUpdate (Ortszeit, 0-gefüllt, 24 h)
 — je Etikett (k = 0, 1, … in Auftragsreihenfolge inkl. Sortierwiederholungen) —
@@ -826,17 +835,20 @@ Grafikdaten in einer Zeile.
   `^XA^ST…^XZ`, `^LH0,0`, `^PR`, `^PQ`, `^MNM,n` und im `^GFA`-Kopf
   (`{fp}FO0{d}0{fp}GFA{d}{total}{d}{total}{d}{bpr}{d}{daten}{fp}FS`). **Nicht** ersetzt werden
   Start-/End-/Etikettenbefehle, die SGD-Zeile und die Grafikdaten (z. B. `,`/`!`/`:` in ACS).
-* **Aufträge abbrechen**: `~JA` steht nach den Startbefehlen. Der C-Filter leert danach die Ausgabe
-  und wartet `cancelDelayMs`; `JobEncoder` schreibt nur die Zeile – `PrinterClient.printImages` sendet
-  den Teil bis einschließlich `~JA\n` (`cancelPrefixLength()`), wartet und sendet den Rest.
+* **Aufträge abbrechen**: `~JA` steht am Auftragsanfang vor den Startbefehlen (ZPL-Handbuch: `~JA`
+  löscht die Daten vor sich im Eingangspuffer – stünden die Startbefehle davor, gingen sie verloren).
+  Der C-Filter leert danach die Ausgabe und wartet `cancelDelayMs`; `JobEncoder` schreibt nur die
+  Zeile – `PrinterClient.printImages` bzw. `PrinterClient.sendJob` (App) sendet die `~JA`-Zeile
+  (`cancelPrefixLength()` = Länge dieser Zeile, ZPL mit eigenem Steuerzeichen), wartet und sendet
+  den Rest.
 * Nur ZPL: `markOffset`, `pauseEvery`, Steuerzeichen, `rtcUpdate`, `^MF`, Linerless-SGD. EPL und CPCL
   ignorieren sie (Drehung 90/270 und „Bei letztem Element stoppen“ gelten für alle Sprachen).
 
 ### EPL2 (Zeilenende `\n`)
 
 ```
-{startCommands}\n                     falls nicht leer
 ~JA\n                                 falls cancelJobsBeforePrint (wörtlich, ohne eigene Steuerzeichen; Filter wartet)
+{startCommands}\n                     falls nicht leer
 — je Etikett —
 \nN\n                                  (führendes LF leert evtl. Restdaten)
 {labelStartCommands}\n                falls nicht leer
@@ -879,7 +891,7 @@ Etikett entfallen ebenso wie alle ZPL-Optionen.
 | `lwSpeed` | `Default`, `1`…`14` (PPD: bis Modellmaximum) | `^PR` |
 | `lwMediaType` | `Default` `DirectThermal` `ThermalTransfer` | `^MT` („Druckmodus“) |
 | `lwMediaTracking` | `Default` `Gap` `BlackMark` `Continuous` `Auto` `Notch` | `^MN` („Medientyp“; `Notch` = `^MNW`, EPL wie `Gap`) |
-| `lwPrintMode` | `Default` `TearOff` `PeelOff` `Cutter` `DelayedCut` `Rewind` `Applicator` `Kiosk` `LinerlessPeel` `LinerlessCut` `LinerlessDelayedCut` `LinerlessRewind` `LinerlessTear` | `^MM`; Linerless: kein `^MM`, SGD `media.printmode` im Auftragskopf (PPD: Linerless nur bei Modellen mit Linerless-Ausstattung) |
+| `lwPrintMode` | `Default` `TearOff` `PeelOff` `Cutter` `DelayedCut` `Rewind` `Applicator` `Kiosk` `LinerlessPeel` `LinerlessCut` `LinerlessDelayedCut` `LinerlessRewind` `LinerlessTear` | `^MM`; Linerless: kein `^MM`, SGD `media.printmode` im Auftragskopf mit dem dokumentierten Setzwert (`L`/`U`/`V`, für `LinerlessCut`/`LinerlessDelayedCut` das Wort; PPD: Linerless nur bei Modellen mit Linerless-Ausstattung) |
 | `lwLabelTop` | `Default`, `-120`…`120` (PPD: Schritte von 10) | `^LT` |
 | `lwLabelLeft` | `Default`, `-9999`…`9999` (PPD: −200…200, Schritte 10) | `^LS` |
 | `lwTearOff` | `Default`, `-120`…`120` (PPD: Schritte von 10) | `~TA` |

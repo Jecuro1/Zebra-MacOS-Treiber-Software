@@ -161,6 +161,11 @@ extension VirtualPrinter {
             // Die Uhr läuft weiter: gestellt wird die Abweichung zur Systemzeit.
             return setClock(sgdName: name, value: value)
         }
+        var value = value
+        if name == SGD.Variable.printMode, let mode = PrintMode(sgdValue: value) {
+            // Wie ein Link-OS-Drucker: Setzwerte wie „L“ werden als „linerless peel“ gemeldet.
+            value = SGDValueMapping.printMode(mode)
+        }
         guard store.assign(name, value) else { return false }
         switch name {
         case "device.languages":

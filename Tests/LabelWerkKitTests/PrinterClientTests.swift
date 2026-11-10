@@ -422,7 +422,7 @@ struct PrinterClientTests {
             == "\nS4\nD10\nOD,C\nR8,0\n")
         let cpcl = String(decoding: PrinterClient.settingsPayload(settings, permanently: false, language: .cpcl), as: UTF8.self)
         #expect(cpcl.contains("! U1 setvar \"print.tone\" \"20\"\r\n"))
-        #expect(cpcl.contains("! U1 setvar \"media.printmode\" \"cutter\"\r\n"))
+        #expect(cpcl.contains("! U1 setvar \"media.printmode\" \"C\"\r\n"), "dokumentierter Setzwert")
 
         // CPCL-Werte kommen per SGD im virtuellen Drucker an.
         let printer = try await KitTestSupport.makePrinter()

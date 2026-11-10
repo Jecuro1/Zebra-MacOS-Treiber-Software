@@ -432,7 +432,13 @@ final class PrinterSession: Identifiable {
             app?.toast(tr("Druckauftrag konnte nicht erzeugt werden"), message: Self.describe(error), style: .error)
             return false
         }
-        let ok = await run(tr("Bild wird gedruckt …")) { client in try await client.send(data) } != nil
+        // „Aufträge vor dem Drucken abbrechen“: ~JA allein senden, die eingestellte Verzögerung
+        // warten, dann den Rest – wie der CUPS-Filter (ARCHITECTURE.md §8).
+        let cancelPrefix = encoder.cancelPrefixLength()
+        let delay = effective.clamped().cancelDelayMs
+        let ok = await run(tr("Bild wird gedruckt …")) { client in
+            try await client.sendJob(data, cancelPrefixLength: cancelPrefix, delayMilliseconds: delay)
+        } != nil
         let preview = ok ? await Self.previewPNG(image: images[0]) : nil
         recordJob(.image, title: title, labels: images.count * max(1, copies), bytes: data.count,
                   success: ok, message: ok ? nil : lastError, preview: preview, payload: data)
@@ -466,7 +472,13 @@ final class PrinterSession: Identifiable {
             app?.toast(tr("Erneut drucken nicht möglich"), message: tr("Für diesen Auftrag wurden keine Druckdaten gespeichert."), style: .warning)
             return false
         }
-        let ok = await run(tr("Auftrag wird erneut gesendet …")) { client in try await client.send(payload) } != nil
+        // Bildaufträge mit „Aufträge vor dem Drucken abbrechen“ beginnen mit der ~JA-Zeile: wie beim
+        // ersten Druck nach ihr warten (Verzögerung aus den aktuellen Treibereinstellungen).
+        let cancelPrefix = job.kind == .image ? PrinterClient.cancelPrefixLength(of: payload) : nil
+        let delay = saved.settings.clamped().cancelDelayMs
+        let ok = await run(tr("Auftrag wird erneut gesendet …")) { client in
+            try await client.sendJob(payload, cancelPrefixLength: cancelPrefix, delayMilliseconds: delay)
+        } != nil
         recordJob(job.kind, title: job.title, labels: job.labels, bytes: payload.count, success: ok,
                   message: ok ? nil : lastError, preview: job.previewPNG, payload: payload)
         if ok { app?.toast(tr("Erneut gedruckt"), message: job.title, style: .success) }

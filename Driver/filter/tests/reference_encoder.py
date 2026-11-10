@@ -752,10 +752,11 @@ ZPL_CODES = {
 }
 
 
-#: SGD-Werte für media.printmode der Linerless-Modi (kein ^MM-Code).
-LINERLESS_SGD = {"LinerlessPeel": "linerless peel", "LinerlessCut": "linerless cut",
-                 "LinerlessDelayedCut": "linerless delayed cut", "LinerlessRewind": "linerless rewind",
-                 "LinerlessTear": "linerless tear"}
+#: Setzwerte für setvar "media.printmode" der Linerless-Modi (kein ^MM-Code) laut Zebra-SGD-Referenz:
+#: Kennbuchstaben L/U/V; für Linerless schneiden/verzögert schneiden ist keiner dokumentiert (Wort).
+LINERLESS_SGD = {"LinerlessPeel": "L", "LinerlessCut": "linerless cut",
+                 "LinerlessDelayedCut": "linerless delayed cut", "LinerlessRewind": "U",
+                 "LinerlessTear": "V"}
 
 
 def preprocess(page: Bitmap, s: Settings, max_width: int) -> Optional[Bitmap]:
@@ -831,9 +832,9 @@ def encode_job(pages: Sequence[Bitmap], settings: Settings, *, resolution_dpi: i
             out.extend(data + b"\n")
 
     if s.language == "ZPL":
-        raw_line(s.start_commands)
-        if s.cancel_before:
+        if s.cancel_before:          # ~JA zuerst: löscht die Daten vor sich im Eingangspuffer
             cmd("~JA\n")
+        raw_line(s.start_commands)
         if s.darkness is not None:
             cmd("~SD%02d\n" % s.darkness)
         if s.tear_off is not None:
@@ -893,9 +894,9 @@ def encode_job(pages: Sequence[Bitmap], settings: Settings, *, resolution_dpi: i
             cmd("^XZ\n")
         raw_line(s.end_commands)
     elif s.language == "EPL":
-        raw_line(s.start_commands)
         if s.cancel_before:
             out.extend(b"~JA\n")     # wörtlich, wie die Startbefehle (keine eigenen Steuerzeichen)
+        raw_line(s.start_commands)
         for index, qty in seq:
             bm = processed[index]
             out.extend(b"\n")

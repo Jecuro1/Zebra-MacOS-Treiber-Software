@@ -864,7 +864,7 @@ def run_refresh_queues(lpadmin: str, cups_ppd_dir: Path, ppd_dir: Path,
              f"LPADMIN={shlex.quote(lpadmin)}\n" \
              f"CUPS_PPD_DIR={shlex.quote(str(cups_ppd_dir))}\n" \
              f"PPD_DIR={shlex.quote(str(ppd_dir))}\n" \
-             + shell_functions(DRIVER_POSTINSTALL, "queue_defaults", "refresh_queues") \
+             + shell_functions(DRIVER_POSTINSTALL, "queue_defaults", "carried_defaults", "refresh_queues") \
              + "\nrefresh_queues\n"
     return run([SYSTEM_BASH, "-c", script], env=env)
 
@@ -937,9 +937,36 @@ printf -- '--\\n' >> "{self.calls}"
         self.assertEqual(self.lpadmin_calls(), [[
             "-p", "Lager", "-P", str(self.new_ppd),
             "-o", "PageSize=w288h288", "-o", "Resolution=203dpi", "-o", "lwDarkness=15",
-            "-o", "lwRotate180=True",
+            # lwRotate180 steht nicht mehr in der PPD (lpadmin verwürfe es): als lwRotation=180
+            "-o", "lwRotation=180",
         ]])
         self.assertIn("„Lager“ auf LabelWerk-zd421t-203dpi.ppd.gz aktualisiert (4 Standardwerte übernommen)",
+                      result.stdout)
+
+    def test_legacy_rotate180_is_mapped_to_rotation(self):
+        """lwRotate180 → lwRotation: False entfällt, True wird 180 – eine Drehung ≠ 0 hat Vorrang."""
+        rotation = ("*OpenUI *lwRotation/Drehung: PickOne\r\n*DefaultlwRotation: %s\r\n"
+                    "*CloseUI: *lwRotation\r\n")
+        cases = [
+            ("Aus", QUEUE_PPD.replace("*DefaultlwRotate180: True", "*DefaultlwRotate180: False"), []),
+            ("Neunzig", QUEUE_PPD + rotation % "90", ["-o", "lwRotation=90"]),
+            ("Null", QUEUE_PPD + rotation % "0", ["-o", "lwRotation=180"]),
+            ("Nur0", QUEUE_PPD.replace("*DefaultlwRotate180: True", "*DefaultlwRotate180: False")
+             + rotation % "0", ["-o", "lwRotation=0"]),
+            ("Klein", QUEUE_PPD.replace("*DefaultlwRotate180: True", "*DefaultlwRotate180: true"),
+             ["-o", "lwRotation=180"]),
+        ]
+        for name, text, _ in cases:
+            (self.cups_ppd / ("%s.ppd" % name)).write_text(text, encoding="utf-8")
+        result = run_refresh_queues(str(self.lpadmin), self.cups_ppd, self.ppds)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = {call[1]: call for call in self.lpadmin_calls()}
+        base = ["-o", "PageSize=w288h288", "-o", "Resolution=203dpi", "-o", "lwDarkness=15"]
+        for name, _, rotation_options in cases:
+            with self.subTest(name):
+                self.assertEqual(calls[name], ["-p", name, "-P", str(self.new_ppd)] + base + rotation_options)
+                self.assertNotIn("lwRotate180", " ".join(calls[name]))
+        self.assertIn("„Aus“ auf LabelWerk-zd421t-203dpi.ppd.gz aktualisiert (3 Standardwerte übernommen)",
                       result.stdout)
 
     def test_queue_without_options_and_foreign_queues(self):

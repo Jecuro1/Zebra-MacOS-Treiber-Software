@@ -202,7 +202,8 @@ Warteschlangen es schon gibt (CUPS unterscheidet bei Namen keine Groß-/Kleinsch
   in LabelWerk oder unter **„Optionen & Zubehör“** gewählt wurden (Schwärzung, Geschwindigkeit,
   Etikettenformat, Medientyp, Druckmodus, Versatz …), Standort, Beschreibung und Freigabe. Neu
   gesetzt werden nur die Werte dieses Aufrufs (`--stock`, `--language`, `--location`, `--name`) und
-  die Auflösung der gewählten PPD.
+  die Auflösung der gewählten PPD. Die veraltete Option `lwRotate180=True` älterer PPDs wird dabei
+  (wie beim Update per Installationspaket) als `lwRotation=180` übernommen.
 * Eine Warteschlange gleichen Namens, die einen anderen Treiber verwendet oder auf ein anderes Gerät
   druckt (etwa ein Bürodrucker „Versand“), wird **nicht** angetastet: `lwctl install` bricht mit
   Rückgabewert 1 ab. Einen anderen Namen wählen oder sie mit `--replace` bewusst ersetzen.
@@ -347,7 +348,8 @@ Die wichtigsten Optionen (vollständig in ARCHITECTURE.md §9):
 | `lwLabelTop`, `lwLabelLeft`, `lwTearOff` | Punkte | Position und Abreißkante (`^LT`, `^LS`, `~TA`) |
 | `lwDither` | `Threshold`, `Ordered`, `Halftone`, `FloydSteinberg`, `Atkinson`, `Stucki` | Rasterverfahren |
 | `lwCompression` | `Z64`, `ACS`, `Hex` | Grafikkompression |
-| `lwMirror`, `lwNegative`, `lwRotate180`, `lwSkipBlank` | `True`, `False` | Bildbearbeitung |
+| `lwMirror`, `lwNegative`, `lwSkipBlank` | `True`, `False` | Bildbearbeitung |
+| `lwRotation` | `0`, `90`, `180`, `270` | Drehung im Uhrzeigersinn (ersetzt das veraltete `lwRotate180`) |
 
 `Default` bedeutet: Der Drucker behält seinen eigenen Wert.
 

@@ -120,15 +120,14 @@ public struct JobEncoder: Sendable {
         preprocess(page, settings: settings.clamped())
     }
 
-    /// Anzahl Bytes vom Auftragsanfang bis einschließlich der `~JA`-Zeile („Aufträge vor dem
-    /// Drucken abbrechen“), `nil` ohne `~JA` (Einstellung aus oder CPCL). Der Aufrufer sendet
-    /// diesen Teil, wartet `cancelDelayMs` und sendet dann den Rest – wie der CUPS-Filter.
+    /// Anzahl Bytes der `~JA`-Zeile am Auftragsanfang („Aufträge vor dem Drucken abbrechen“),
+    /// `nil` ohne `~JA` (Einstellung aus oder CPCL). Der Aufrufer sendet diesen Teil, wartet
+    /// `cancelDelayMs` und sendet dann den Rest (Startbefehle und Etiketten) – wie der CUPS-Filter.
     public func cancelPrefixLength() -> Int? {
         let s = settings.clamped()
         guard s.cancelJobsBeforePrint, language != .cpcl else { return nil }
-        let start = s.startCommands.isEmpty ? 0 : s.startCommands.utf8.count + 1
         let prefix = language == .zpl ? s.effectiveControlCharacters.controlPrefixString : "~"
-        return start + prefix.utf8.count + 3   // "JA\n"
+        return prefix.utf8.count + 3   // "JA\n"
     }
 
     // MARK: - Vorverarbeitung
@@ -196,8 +195,10 @@ public struct JobEncoder: Sendable {
         let z = ZPLDialect(s.effectiveControlCharacters)
         var clock = RTCClock(update: s.rtcUpdate, now: now, timeStep: timeStepSeconds, timeZone: timeZone, dialect: z)
 
-        if !s.startCommands.isEmpty { out.line(s.startCommands) }
+        // ~JA zuerst: Es löscht die Daten vor sich im Eingangspuffer – stünden die Startbefehle
+        // davor, würfe der Drucker sie mit weg.
         if s.cancelJobsBeforePrint { out.line(z.control("JA")) }
+        if !s.startCommands.isEmpty { out.line(s.startCommands) }
         if let darkness = s.darkness { out.line(z.control("SD", Self.zeroPadded(darkness, width: 2))) }
         if let tearOff = s.tearOffAdjust { out.line(z.control("TA", Self.zeroPadded(tearOff, width: 3))) }
         // Rückzugsfolge ist der Steuerbefehl ~JS (^JS wäre die Sensorwahl).
@@ -279,9 +280,9 @@ public struct JobEncoder: Sendable {
     private func encodeEPL(_ pages: [MonoBitmap], sequence: LabelSequence,
                            settings s: PrintSettings) -> Data {
         var out = JobWriter(lineEnding: [0x0A])
-        if !s.startCommands.isEmpty { out.line(s.startCommands) }
-        // Wie ZPL: ~JA nach den Startbefehlen (ohne Ersatz-Steuerzeichen – die gelten nur für ZPL).
+        // Wie ZPL: ~JA vor den Startbefehlen (ohne Ersatz-Steuerzeichen – die gelten nur für ZPL).
         if s.cancelJobsBeforePrint { out.line("~JA") }
+        if !s.startCommands.isEmpty { out.line(s.startCommands) }
         let gap = stock.map { $0.gapDots(resolution) } ?? Self.defaultGapDots
         var graphics = [Data?](repeating: nil, count: pages.count)
         for item in sequence {

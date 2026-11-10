@@ -130,6 +130,33 @@ enum CUPSQueues {
 
     // MARK: - Standardwerte
 
+    /// Standardwerte einer alten Warteschlangen-PPD als `Option=Wert` für `lpadmin -o`, mit
+    /// veralteten Optionen auf ihre Nachfolger abgebildet – derselbe Algorithmus wie
+    /// `carried_defaults` im postinstall des Treibers: `lwRotate180` steht nicht mehr in der PPD
+    /// (lpadmin verwürfe `-o lwRotate180=True` stillschweigend, die Warteschlange druckte mit 0°).
+    /// `True` wird zu `lwRotation=180`, außer die alte PPD hatte schon eine Drehung ≠ 0 (die hat
+    /// wie im Filter Vorrang); `False` entfällt. `lwRotation` steht immer am Ende.
+    static func carriedDefaults(_ entries: [(option: String, value: String)]) -> [String] {
+        var rotate180 = false
+        var rotation: String?
+        var result: [String] = []
+        for entry in entries {
+            switch entry.option {
+            case CUPSOptionName.rotate180: rotate180 = entry.value.lowercased() == "true"
+            case CUPSOptionName.rotation: rotation = entry.value
+            default: result.append("\(entry.option)=\(entry.value)")
+            }
+        }
+        if let rotation, rotation != "0" {
+            result.append("\(CUPSOptionName.rotation)=\(rotation)")
+        } else if rotate180 {
+            result.append("\(CUPSOptionName.rotation)=180")
+        } else if let rotation {
+            result.append("\(CUPSOptionName.rotation)=\(rotation)")
+        }
+        return result
+    }
+
     /// Standardwerte aller Optionen (`*OpenUI`) einer PPD in Dateireihenfolge, z. B.
     /// `("lwDarkness", "15")` – derselbe Algorithmus wie `queue_defaults` im postinstall des Treibers.
     static func ppdDefaults(_ text: String) -> [(option: String, value: String)] {

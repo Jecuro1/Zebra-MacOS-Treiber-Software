@@ -66,7 +66,7 @@ struct LwctlDriverOptionsTests {
         let text = String(decoding: data, as: UTF8.self)
         #expect(text.contains("$XA$ST11;14;2023;22;13;20;M$XZ\n"))
         #expect(text.contains("$XA$ST11;14;2023;22;14;50;M$XZ\n"))
-        #expect(text.hasPrefix("~JR\n#JA\n#SD09\n! U1 setvar \"media.printmode\" \"linerless delayed cut\"\r\n$XA$MFS;N$XZ\n"))
+        #expect(text.hasPrefix("#JA\n~JR\n#SD09\n! U1 setvar \"media.printmode\" \"linerless delayed cut\"\r\n$XA$MFS;N$XZ\n"))
         #expect(text.contains("$XA\n^FX a\n$MNM;-12\n$PW3\n$LL4\n"), "270°: 4 × 3 → 3 × 4, kein ^MM")
         #expect(text.contains("$PQ1;5;0;N\n^FX b\n$XZ\n"))
     }

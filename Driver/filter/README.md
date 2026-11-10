@@ -65,7 +65,7 @@ PPD-Auswahl liegen (auch als `Custom.37`) und werden auf gültige Bereiche begre
 | `lwSpeed` | `Default`, 1…14 | ZPL `^PR`, EPL `S` (1…6), CPCL `SPEED` (0…5) |
 | `lwMediaType` | `Default` `DirectThermal` `ThermalTransfer` | ZPL `^MT`, EPL `O[D]` |
 | `lwMediaTracking` | `Default` `Gap` `BlackMark` `Continuous` `Auto` `Notch` | ZPL `^MN` (`Notch` = `^MNW`), EPL `Q` (Kerben wie Lücke), CPCL ohne `FORM` bei Endlos |
-| `lwPrintMode` | `Default` `TearOff` `PeelOff` `Cutter` `DelayedCut` `Rewind` `Applicator` `Kiosk`, `LinerlessPeel` `LinerlessCut` `LinerlessDelayedCut` `LinerlessRewind` `LinerlessTear` | ZPL `^MM` bzw. Linerless: `! U1 setvar "media.printmode" "linerless …"` im Kopf, kein `^MM`; EPL `O…C/P` |
+| `lwPrintMode` | `Default` `TearOff` `PeelOff` `Cutter` `DelayedCut` `Rewind` `Applicator` `Kiosk`, `LinerlessPeel` `LinerlessCut` `LinerlessDelayedCut` `LinerlessRewind` `LinerlessTear` | ZPL `^MM` bzw. Linerless: `! U1 setvar "media.printmode" "…"` im Kopf (Setzwert laut Zebra-SGD-Referenz: `L` ablösen, `U` aufwickeln, `V` abreißen; ohne dokumentierten Buchstaben `linerless cut` bzw. `linerless delayed cut`), kein `^MM`; EPL `O…C/P` |
 | `lwLabelTop` / `lwLabelLeft` / `lwTearOff` | `Default`, −120…120 / −9999…9999 / −120…120 | `^LT` / `^LS` / `~TA` |
 | `lwBackfeed` | `Default` `After` `Before` `Normal` `Off` | `~JS` |
 | `lwMirror` `lwNegative` `lwRotate180` | `True`/`False` (auch yes/no/on/off/1/0) | ZPL `^PM`/`^PO`, EPL `ZB`, sonst Bitmap |
@@ -81,11 +81,11 @@ PPD-Auswahl liegen (auch als `Custom.37`) und werden auf gültige Bereiche begre
 | `lwPauseEvery` | 0…9999 | `^PQn,p,0,N` (Vorrang vor `lwCutEvery`), nur ZPL |
 | `lwControlChars` | `Standard` `Printer` | `Printer` („Intern“): `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` (ASCII 33…126, ungültig/fehlend → `^`/`~`/`,`) ersetzen die Zeichen in allen selbst erzeugten ZPL-Befehlen – nicht in Grafikdaten, SGD-Zeile und Rohbefehlen; auch `commandtolabelwerk` (`~WC`, `~JC`) |
 | `lwRTC` | `Default` `JobStart` `EveryLabel` `EveryMinute` | `^XA^STmm,dd,yyyy,hh,mm,ss,M^XZ` (Ortszeit) im Kopf, bei `EveryLabel` vor jedem weiteren Etikett, bei `EveryMinute` vor einem Etikett, sobald ≥ 60 s vergangen sind; nur ZPL |
-| `lwCancelBefore` / `lwCancelDelay` | `True`/`False` / 0…10000 ms (Standard 1000) | `~JA` nach den Startbefehlen (ZPL; EPL wörtlich), danach Ausgabe leeren und warten |
+| `lwCancelBefore` / `lwCancelDelay` | `True`/`False` / 0…10000 ms (Standard 1000) | `~JA` am Auftragsanfang vor den Startbefehlen (ZPL; EPL wörtlich; `~JA` löscht die Daten vor sich im Eingangspuffer), danach Ausgabe leeren und warten |
 | `lwLabelStartCmd` `lwLabelEndCmd` | Base64url wie `lwStartCmd` | Rohbefehle je Etikett: ZPL nach `^XA` bzw. vor `^XZ`, EPL nach `N` bzw. vor `P` (CPCL: keine) |
 | `lwPowerUpAction` `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` | `^XA^MFa,b^XZ` im Kopf – nur wenn beide gesetzt, nur ZPL |
 
-Reihenfolge des ZPL-Auftragskopfs: Startbefehle, `~JA`, `~SD`, `~TA`, `~JS`, `~JC`, SGD
+Reihenfolge des ZPL-Auftragskopfs: `~JA`, Startbefehle, `~SD`, `~TA`, `~JS`, `~JC`, SGD
 `media.printmode` (Linerless), `^MF`, `^ST`. Je Etikett: (`^ST`), `^XA`, Etikettenanfang, `^MM`,
 `^MN`, `^MT`, `^PR`, `^PW`, `^LL`, `^LH`, `^LT`, `^LS`, `^PO`, `^PM`, Grafik, `^PQ`, `^JUS`,
 Etikettenende, `^XZ`. Vorverarbeitung: (0) Drehung 90/270, (1) Abschneiden, (1b) Bei letztem

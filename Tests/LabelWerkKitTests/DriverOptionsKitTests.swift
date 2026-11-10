@@ -30,7 +30,7 @@ struct DriverOptionsKitTests {
         ~SD22
         ~TA010
         ~JSB
-        ! U1 setvar "media.printmode" "linerless peel"\r
+        ! U1 setvar "media.printmode" "L"\r
         ^XA
         ^MTD
         ^MNM,15
@@ -49,7 +49,7 @@ struct DriverOptionsKitTests {
         #expect(Self.payload(classic) == "~SD22\n~TA010\n~JSB\n^XA\n^MTD\n^MNM\n^MMC\n^PR5,5,5\n^LT12\n^LS-16\n^XZ\n",
                 "Ohne beide Aktionen kein ^MF, ohne Versatz ^MNM")
         #expect(Self.payload(PrintSettings(printMode: .linerlessTear))
-            == "! U1 setvar \"media.printmode\" \"linerless tear\"\r\n", "Nur SGD: kein leeres ^XA…^XZ")
+            == "! U1 setvar \"media.printmode\" \"V\"\r\n", "Nur SGD: kein leeres ^XA…^XZ")
         #expect(Self.payload(PrintSettings(tracking: .notch, markOffset: 9)) == "^XA\n^MNW\n^XZ\n")
         #expect(Self.payload(PrintSettings(powerUpAction: .noMotion, headCloseAction: .shortCalibration))
             == "^XA\n^MFN,S\n^XZ\n")
@@ -82,7 +82,7 @@ struct DriverOptionsKitTests {
                                            headCloseAction: .feed), .epl) == "\nOD\n")
         let cpcl = Self.payload(PrintSettings(printMode: .linerlessRewind, labelTop: 7, powerUpAction: .shortCalibration,
                                               headCloseAction: .noMotion), .cpcl)
-        #expect(cpcl == "! U1 setvar \"media.printmode\" \"linerless rewind\"\r\n"
+        #expect(cpcl == "! U1 setvar \"media.printmode\" \"U\"\r\n"
                 + "! U1 setvar \"zpl.label_top\" \"7\"\r\n"
                 + "! U1 setvar \"ezpl.power_up_action\" \"short cal\"\r\n"
                 + "! U1 setvar \"ezpl.head_close_action\" \"no motion\"\r\n")
@@ -236,7 +236,9 @@ struct DriverOptionsKitTests {
         try await client.printImages([image], settings: settings, resolution: .dpi203, stock: nil)
         let writes = await connection.writes
         #expect(writes.count == 2)
-        #expect(String(decoding: writes[0].data, as: UTF8.self) == "~JR\n~JA\n")
+        // ~JA allein vorweg (es löscht die Daten vor sich), die Startbefehle kommen nach der Wartezeit.
+        #expect(String(decoding: writes[0].data, as: UTF8.self) == "~JA\n")
+        #expect(String(decoding: writes[1].data, as: UTF8.self).hasPrefix("~JR\n^XA\n"))
         let expected = try JobEncoder(language: .zpl, resolution: .dpi203, settings: settings).encode(images: [image])
         #expect(writes.reduce(Data()) { $0 + $1.data } == expected)
         #expect(writes[1].time.timeIntervalSince(writes[0].time) >= 0.29)
@@ -251,6 +253,41 @@ struct DriverOptionsKitTests {
         try await PrinterClient(connection: cpcl, language: .cpcl).printImages(
             [image], settings: PrintSettings(cancelJobsBeforePrint: true), resolution: .dpi203, stock: nil)
         #expect(await cpcl.writes.count == 1)
+    }
+
+    @Test("sendJob: kodierten Auftrag nach ~JA teilen und warten (App-Druckweg, Erneut drucken)")
+    func sendJobSplitsAfterCancel() async throws {
+        let settings = PrintSettings(compression: .hex, startCommands: "~JR",
+                                     controlCharacters: ControlCharacters(formatPrefix: 0x24, controlPrefix: 0x23, delimiter: 0x3B),
+                                     cancelJobsBeforePrint: true, cancelDelayMs: 200)
+        let encoder = JobEncoder(language: .zpl, resolution: .dpi203, settings: settings)
+        let data = try encoder.encode(images: [GrayImage(width: 8, height: 2, fill: 0)])
+        #expect(PrinterClient.cancelPrefixLength(of: data) == encoder.cancelPrefixLength())
+
+        let connection = TimedConnection()
+        let client = PrinterClient(connection: connection, language: .zpl)
+        try await client.sendJob(data, cancelPrefixLength: encoder.cancelPrefixLength(), delayMilliseconds: 200)
+        let writes = await connection.writes
+        #expect(writes.count == 2)
+        #expect(String(decoding: writes[0].data, as: UTF8.self) == "#JA\n")
+        #expect(writes.reduce(Data()) { $0 + $1.data } == data)
+        #expect(writes[1].time.timeIntervalSince(writes[0].time) >= 0.19)
+
+        // Ohne bzw. mit ungültiger Teilungsstelle: ein Schreibvorgang
+        for split in [nil, 0, data.count + 1] as [Int?] {
+            let single = TimedConnection()
+            try await PrinterClient(connection: single).sendJob(data, cancelPrefixLength: split, delayMilliseconds: 50)
+            #expect(await single.writes.count == 1)
+        }
+
+        // Erkennung am Auftragsanfang
+        #expect(PrinterClient.cancelPrefixLength(of: Data("~JA\n^XA\n".utf8)) == 4)
+        #expect(PrinterClient.cancelPrefixLength(of: Data("^XA\n~JA\n".utf8)) == nil)
+        #expect(PrinterClient.cancelPrefixLength(of: Data("~JA".utf8)) == nil)
+        #expect(PrinterClient.cancelPrefixLength(of: Data(" JA\n".utf8)) == nil)
+        let plain = try JobEncoder(language: .zpl, resolution: .dpi203, settings: PrintSettings(startCommands: "~JA"))
+            .encode(images: [GrayImage(width: 8, height: 2, fill: 0)])
+        #expect(PrinterClient.cancelPrefixLength(of: plain) == 4, "Startbefehl ~JA wird ebenfalls erkannt")
     }
 
     @Test("Wartezeit 0: zwei Schreibvorgänge ohne Pause, Daten unverändert")

@@ -4,8 +4,10 @@ import LabelWerkKit
 // MARK: - Umrechnung
 
 /// Rechnet Längen zwischen Druckpunkten bzw. Millimetern und der gewählten Anzeigeeinheit um
-/// („Einheiten“ → „Standard-Maßeinheiten“). Millimeter mit einer, Zoll mit zwei Nachkommastellen,
-/// Punkte ganzzahlig – jeweils für die Auflösung des Druckers.
+/// („Einheiten“ → „Standard-Maßeinheiten“). Etikettenmaße: Millimeter mit einer, Zoll mit zwei
+/// Nachkommastellen, Punkte ganzzahlig. Werte in Druckpunkten (Versätze) bekommen so viele
+/// Nachkommastellen, dass jeder Punktwert bei der Auflösung des Druckers eingegeben werden kann
+/// (siehe `dotDigits`).
 struct PrintPrefsLength: Equatable {
     var unit: MeasurementUnit
     var resolution: Resolution
@@ -18,6 +20,22 @@ struct PrintPrefsLength: Equatable {
     var digits: Int { unit.fractionDigits }
     var symbol: String { unit.symbol }
 
+    /// Nachkommastellen für Werte in Druckpunkten: mindestens `digits`, aber so viele, dass der
+    /// Rundungsfehler der Anzeige unter einem halben Punkt bleibt – dann ergibt jeder angezeigte
+    /// Wert wieder genau denselben Punktwert, und jeder Punktwert lässt sich eintippen
+    /// (z. B. 300 dpi: 0,01 mm statt 0,1 mm; Zoll: 0,001).
+    var dotDigits: Int {
+        let dotsPerUnit: Double
+        switch unit {
+        case .dots: return 0
+        case .millimeters: dotsPerUnit = resolution.exactDotsPerMM
+        case .inches: dotsPerUnit = Double(resolution.rawValue)
+        }
+        var result = digits
+        while result < 4, dotsPerUnit >= pow(10, Double(result)) { result += 1 }
+        return result
+    }
+
     // Druckpunkte ↔ Anzeige
 
     func display(dots: Int) -> Double {
@@ -28,12 +46,15 @@ struct PrintPrefsLength: Equatable {
         }
     }
 
+    /// Anzeigewert → Druckpunkte. Begrenzt vor der Umwandlung in `Int`, die bei sehr großen
+    /// Eingaben (z. B. „99999999999999999999“) sonst das Programm beendet.
     func dots(fromDisplay value: Double) -> Int {
         guard value.isFinite else { return 0 }
+        let v = min(max(value, -1_000_000), 1_000_000)
         switch unit {
-        case .millimeters: return resolution.dots(fromMM: value)
-        case .inches: return resolution.dots(fromInches: value)
-        case .dots: return Int(value.rounded())
+        case .millimeters: return resolution.dots(fromMM: v)
+        case .inches: return resolution.dots(fromInches: v)
+        case .dots: return Int(v.rounded())
         }
     }
 
@@ -68,12 +89,16 @@ struct PrintPrefsLength: Equatable {
     // Text
 
     func number(_ value: Double) -> String {
+        number(value, digits: digits)
+    }
+
+    func number(_ value: Double, digits: Int) -> String {
         value.formatted(.number.precision(.fractionLength(digits)))
     }
 
-    /// „12,5 mm“, „0,49 Zoll“, „100 Punkte“.
+    /// „12,5 mm“, „0,492 Zoll“, „100 Punkte“ (Nachkommastellen wie im Eingabefeld, `dotDigits`).
     func text(dots: Int) -> String {
-        number(display(dots: dots)) + " " + symbol
+        number(display(dots: dots), digits: dotDigits) + " " + symbol
     }
 
     func text(mm: Double) -> String {
@@ -113,19 +138,30 @@ struct PrintPrefsMeasureField: View {
         self.fromDisplay = fromDisplay
     }
 
+    private var format: FloatingPointFormatStyle<Double> {
+        .number.precision(.fractionLength(digits))
+    }
+
     private var displayBinding: Binding<Double> {
-        Binding(
+        let format = self.format
+        return Binding(
             get: { toDisplay(canonical) },
             set: { newValue in
                 guard newValue.isFinite else { return }
-                canonical = fromDisplay(newValue).clamped(to: range)
+                // Das Feld übernimmt beim Beenden der Bearbeitung auch einen unveränderten Text. Ein
+                // Wert, der genauso angezeigt wird wie der gespeicherte, ändert nichts – sonst würde
+                // aus dem gerundeten Text zurückgerechnet (57,15 mm → „57,2“ → 57,2 mm, Vorlage
+                // „Benutzerdefiniert“; 104 mm → „831“ Punkte → 103,98 mm). Verglichen wird mit
+                // demselben Format wie in der Anzeige, damit dessen Rundung genau berücksichtigt ist.
+                if format.format(newValue) == format.format(toDisplay(canonical)) { return }
+                canonical = fromDisplay(newValue.clamped(to: -1e9...1e9)).clamped(to: range)
             }
         )
     }
 
     var body: some View {
         HStack(spacing: 6) {
-            TextField("", value: displayBinding, format: .number.precision(.fractionLength(digits)))
+            TextField("", value: displayBinding, format: format)
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()
@@ -153,7 +189,7 @@ extension PrintPrefsMeasureField {
                                set: { dots.wrappedValue = Int($0.rounded()).clamped(to: range) }),
             range: Double(range.lowerBound)...Double(range.upperBound),
             step: 1,
-            digits: length.digits,
+            digits: length.dotDigits,
             unit: length.symbol,
             width: width,
             toDisplay: { length.display(dots: Int($0.rounded())) },

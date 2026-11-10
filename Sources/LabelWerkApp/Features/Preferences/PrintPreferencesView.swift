@@ -84,11 +84,11 @@ struct PrintPreferencesView: View {
         }
         .sensoryFeedback(.success, trigger: saveTrigger)
         .onAppear {
-            editor.reloadIfClean(from: session)
+            editor.rebase(on: session)
             appeared = true
         }
         .onChange(of: session.saved) { _, _ in
-            editor.reloadIfClean(from: session)
+            editor.rebase(on: session)
         }
     }
 
@@ -395,17 +395,20 @@ struct PrintPreferencesView: View {
                     .frame(width: 200, height: 140)
                     .allowsHitTesting(false)
             }
+            // Nicht deaktivieren, solange der Entwurf unverändert ist: Ein gerade getippter Wert
+            // kommt erst beim Beenden der Bearbeitung im Entwurf an – ein deaktivierter Knopf ließe
+            // sich dann weder speichern noch verwerfen. Ohne Änderung tun beide nichts.
             Button(tr("Abbrechen")) {
-                withAnimation(spring) { editor.revert() }
+                afterCommittingTextEditing {
+                    withAnimation(spring) { editor.revert() }
+                }
             }
             .buttonStyle(.labelWerkSecondary)
-            .disabled(!editor.isDirty)
             .help(tr("Nicht gespeicherte Änderungen verwerfen"))
             Button(tr("Übernehmen")) {
                 save(closing: false)
             }
             .buttonStyle(.labelWerkSecondary)
-            .disabled(!editor.isDirty)
             .keyboardShortcut("s", modifiers: [.command])
             .help(tr("Speichern, ohne den Dialog zu verlassen (⌘S)"))
             Button(tr("Hilfe")) {

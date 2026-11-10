@@ -29,6 +29,28 @@ extension PrinterClient {
         }
     }
 
+    /// Sendet einen bereits kodierten Auftrag (z. B. aus ``JobEncoder``) – mit
+    /// „Aufträge vor dem Drucken abbrechen“ in zwei Teilen: zuerst die ersten `cancelPrefixLength`
+    /// Bytes (die `~JA`-Zeile, siehe `JobEncoder.cancelPrefixLength()`), dann nach
+    /// `delayMilliseconds` Millisekunden der Rest – wie der CUPS-Filter. Ohne gültige Teilungsstelle
+    /// (`nil`, ≤ 0 oder größer als die Daten) wird der Auftrag in einem Stück gesendet.
+    public func sendJob(_ data: Data, cancelPrefixLength: Int?, delayMilliseconds: Int) async throws {
+        try await guarded {
+            try await self.transmitJob(data, cancelPrefixLength: cancelPrefixLength,
+                                       delayMilliseconds: delayMilliseconds)
+        }
+    }
+
+    /// Länge der `~JA`-Zeile am Anfang eines gespeicherten Auftrags (`~JA\n` bzw. mit eigenem
+    /// Steuerzeichen `<c>JA\n` aus ``JobEncoder``), sonst `nil` – damit „Erneut drucken“ wie der
+    /// ursprüngliche Druck nach dem Abbrechen warten kann.
+    public static func cancelPrefixLength(of data: Data) -> Int? {
+        let bytes = [UInt8](data.prefix(4))
+        guard bytes.count == 4, ControlCharacters.validRange.contains(bytes[0]),
+              bytes[1] == 0x4A, bytes[2] == 0x41, bytes[3] == 0x0A else { return nil }   // "JA\n"
+        return 4
+    }
+
     /// Sendet einen kodierten Auftrag; mit `cancelPrefixLength` in zwei Teilen mit Wartezeit.
     func transmitJob(_ data: Data, cancelPrefixLength: Int?, delayMilliseconds: Int) async throws {
         guard let split = cancelPrefixLength, split > 0, split <= data.count else {
@@ -225,7 +247,8 @@ extension PrinterClient {
 /// Abbildung der Druckeinstellungen auf Link-OS-SGD-Werte (gemeinsam für ``PrinterClient`` und
 /// ``VirtualPrinter``).
 enum SGDValueMapping {
-    /// `media.printmode`.
+    /// `media.printmode`, wie der Drucker ihn meldet (`getvar`); gesetzt wird mit
+    /// ``PrintMode/sgdSetValue`` (Kennbuchstaben wie `T` oder `L`).
     static func printMode(_ mode: PrintMode) -> String { mode.sgdValue }
 
     static func printMode(sgd value: String) -> PrintMode? {
@@ -289,7 +312,7 @@ enum SGDValueMapping {
         if let speed = s.speed { result.append((SGD.Variable.speed, String(speed))) }
         if let mediaType = s.mediaType { result.append((SGD.Variable.printMethod, printMethod(mediaType))) }
         if let tracking = s.tracking, let value = mediaTracking(tracking) { result.append((SGD.Variable.mediaType, value)) }
-        if let mode = s.printMode { result.append((SGD.Variable.printMode, printMode(mode))) }
+        if let mode = s.printMode { result.append((SGD.Variable.printMode, mode.sgdSetValue)) }
         if let tearOff = s.tearOffAdjust { result.append((SGD.Variable.tearOff, String(tearOff))) }
         if let left = s.labelLeft { result.append((SGD.Variable.leftPosition, String(left))) }
         if let top = s.labelTop { result.append((SGD.Variable.labelTop, String(top))) }

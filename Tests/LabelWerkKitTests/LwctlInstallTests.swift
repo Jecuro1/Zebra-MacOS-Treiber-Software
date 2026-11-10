@@ -576,12 +576,13 @@ struct LwctlInstallTests {
         let plan = try decodePlan(result)
         #expect(plan.existing && plan.installed)
         // Die Auflösung steckt in der gewählten PPD und wird nicht übernommen.
+        // lwRotate180 steht nicht mehr in der PPD (lpadmin verwürfe es): als lwRotation=180 übernommen.
         #expect(plan.keptSettings == ["PageSize=w144h288", "PageRegion=w144h288", "lwLanguage=ZPL", "lwDarkness=15",
-                                      "lwRotate180=True"])
+                                      "lwRotation=180"])
         #expect(try loggedCalls(log) == [[
             "lpadmin", "-p", "Etiketten", "-E", "-v", "socket://192.0.2.10:9100", "-P", ppd, "-D", "etiketten",
             "-o", "PageSize=w144h288", "-o", "PageRegion=w144h288", "-o", "lwLanguage=ZPL", "-o", "lwDarkness=15",
-            "-o", "lwRotate180=True",
+            "-o", "lwRotation=180",
         ]])
 
         // Ausdrücklich gewählte Werte (--stock, --language) gelten statt der bisherigen.
@@ -591,9 +592,9 @@ struct LwctlInstallTests {
                                                environment: environment)
         #expect(explicit.status == 0, "\(explicit.errors)")
         let explicitPlan = try decodePlan(explicit)
-        #expect(explicitPlan.keptSettings == ["lwDarkness=15", "lwRotate180=True"])
+        #expect(explicitPlan.keptSettings == ["lwDarkness=15", "lwRotation=180"])
         #expect(explicitPlan.commands.first.map { Array($0.suffix(8)) } == [
-            "-o", "lwDarkness=15", "-o", "lwRotate180=True", "-o", "PageSize=\(stock.ppdKeyword)", "-o", "lwLanguage=EPL",
+            "-o", "lwDarkness=15", "-o", "lwRotation=180", "-o", "PageSize=\(stock.ppdKeyword)", "-o", "lwLanguage=EPL",
         ])
 
         // PPD der Warteschlange nicht lesbar: Hinweis statt stillem Zurücksetzen.

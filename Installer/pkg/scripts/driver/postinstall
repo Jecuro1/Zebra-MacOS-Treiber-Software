@@ -129,8 +129,37 @@ queue_defaults() {
     ' "$1"
 }
 
+# Wie queue_defaults, bildet aber veraltete Optionen auf ihre Nachfolger ab: lwRotate180 steht
+# nicht mehr in der PPD (lpadmin würde „-o lwRotate180=True“ stillschweigend verwerfen und die
+# Warteschlange druckte mit 0°). „True“ wird zu lwRotation=180 – außer die alte PPD hatte schon
+# eine Drehung ≠ 0 (die hat wie im Filter Vorrang); „False“ entfällt.
+carried_defaults() {
+    local default rotate180=0 rotation=""
+    local -a entries=()
+    while IFS= read -r default; do
+        entries+=("${default}")
+        case "${default}" in
+            lwRotate180=[Tt][Rr][Uu][Ee]) rotate180=1 ;;
+            lwRotation=*) rotation="${default#lwRotation=}" ;;
+        esac
+    done < <(queue_defaults "$1")
+    for default in ${entries[@]+"${entries[@]}"}; do
+        case "${default}" in
+            lwRotate180=*|lwRotation=*) continue ;;
+        esac
+        printf '%s\n' "${default}"
+    done
+    if [[ -n "${rotation}" && "${rotation}" != "0" ]]; then
+        printf 'lwRotation=%s\n' "${rotation}"
+    elif (( rotate180 )); then
+        printf 'lwRotation=180\n'
+    elif [[ -n "${rotation}" ]]; then
+        printf 'lwRotation=%s\n' "${rotation}"
+    fi
+}
+
 # Aktualisiert Warteschlangen, deren PPD von LabelWerk stammt (*lwModel), auf die neue PPD und
-# behält dabei ihre Standardoptionen (siehe oben).
+# behält dabei ihre Standardoptionen (siehe oben, veraltete Optionen umgesetzt).
 refresh_queues() {
     local queue_ppd queue model dpi new_ppd default carried updated=0 skipped=0
     local -a carry
@@ -152,7 +181,7 @@ refresh_queues() {
         while IFS= read -r default; do
             carry+=(-o "${default}")
             carried=$((carried + 1))
-        done < <(queue_defaults "${queue_ppd}")
+        done < <(carried_defaults "${queue_ppd}")
         if "${LPADMIN}" -p "${queue}" -P "${new_ppd}" ${carry[@]+"${carry[@]}"} >/dev/null 2>&1; then
             log "Warteschlange „${queue}“ auf $(basename "${new_ppd}") aktualisiert (${carried} Standardwerte übernommen)."
             updated=$((updated + 1))

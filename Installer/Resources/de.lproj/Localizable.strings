@@ -1733,7 +1733,7 @@
 "Profil" = "Profil";
 "Importiert oder exportiert alle Werte als JSON-Datei." = "Importiert oder exportiert alle Werte als JSON-Datei.";
 "Standard-Maßeinheiten" = "Standard-Maßeinheiten";
-"Millimeter (eine Nachkommastelle), Zoll (zwei Nachkommastellen) oder Druckpunkte der Auflösung. Gilt für alle Längenangaben dieses Dialogs." = "Millimeter (eine Nachkommastelle), Zoll (zwei Nachkommastellen) oder Druckpunkte der Auflösung. Gilt für alle Längenangaben dieses Dialogs.";
+"Millimeter, Zoll oder Druckpunkte der Auflösung. Etikettenmaße zeigen eine (mm) bzw. zwei (Zoll) Nachkommastellen, Versätze so viele, dass sich jeder Druckpunkt eingeben lässt. Gilt für alle Längenangaben dieses Dialogs." = "Millimeter, Zoll oder Druckpunkte der Auflösung. Etikettenmaße zeigen eine (mm) bzw. zwei (Zoll) Nachkommastellen, Versätze so viele, dass sich jeder Druckpunkt eingeben lässt. Gilt für alle Längenangaben dieses Dialogs.";
 "Hilfe und Über" = "Hilfe und Über";
 "Öffnet diese Hilfe und zeigt App-, Treiber- und Druckerinformationen." = "Öffnet diese Hilfe und zeigt App-, Treiber- und Druckerinformationen.";
 "Hilfe – Druckeinstellungen" = "Hilfe – Druckeinstellungen";

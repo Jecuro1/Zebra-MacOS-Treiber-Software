@@ -124,7 +124,7 @@ struct PrintPrefsHelpSheet: View {
             ], at: 0)
         case .units:
             list.append(Topic(id: "units", title: tr("Standard-Maßeinheiten"),
-                              text: tr("Millimeter (eine Nachkommastelle), Zoll (zwei Nachkommastellen) oder Druckpunkte der Auflösung. Gilt für alle Längenangaben dieses Dialogs.")))
+                              text: tr("Millimeter, Zoll oder Druckpunkte der Auflösung. Etikettenmaße zeigen eine (mm) bzw. zwei (Zoll) Nachkommastellen, Versätze so viele, dass sich jeder Druckpunkt eingeben lässt. Gilt für alle Längenangaben dieses Dialogs.")))
         case .about:
             list.append(Topic(id: "about", title: tr("Hilfe und Über"),
                               text: tr("Öffnet diese Hilfe und zeigt App-, Treiber- und Druckerinformationen.")))

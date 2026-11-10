@@ -1567,6 +1567,12 @@ static void test_parse_new_values(void)
     CHECK(lw_print_mode_sgd(LW_PRINT_MODE_UNSET) == NULL);
     for (int m = 1; m <= LW_PRINT_MODE_LINERLESS_TEAR; m++)
         CHECK(strcmp(lw_print_mode_sgd((lw_print_mode)m), sgd[m]) == 0);
+    /* Setzwerte laut Zebra-SGD-Referenz (Buchstaben; Linerless schneiden ohne Buchstaben: Wort). */
+    static const char *const sgd_set[] = { NULL, "T", "P", "C", "D", "R", "A", "K", "L", "linerless cut",
+                                           "linerless delayed cut", "U", "V" };
+    CHECK(lw_print_mode_sgd_set(LW_PRINT_MODE_UNSET) == NULL);
+    for (int m = 1; m <= LW_PRINT_MODE_LINERLESS_TEAR; m++)
+        CHECK(strcmp(lw_print_mode_sgd_set((lw_print_mode)m), sgd_set[m]) == 0);
 
     int rot = -1;
     CHECK_INT(lw_parse_rotation("270", &rot), LW_PARSE_OK); CHECK_INT(rot, 270);
@@ -1847,14 +1853,14 @@ static void test_job_zpl_extended(void)
     wait_capture wc;
     run_job_clock(&cap, &wc, &s, 0, 1, true, &page, 1, T0, 0);
     static const char expected[] =
-        "S\n~JA\n~SD08\n~TA-05\n~JSB\n~JC\n! U1 setvar \"media.printmode\" \"linerless cut\"\r\n"
+        "~JA\nS\n~SD08\n~TA-05\n~JSB\n~JC\n! U1 setvar \"media.printmode\" \"linerless cut\"\r\n"
         "^XA^MFF,S^XZ\n^XA^ST11,14,2023,22,13,20,M^XZ\n"
         "^XA\nLS\n^MNM,-7\n^MTD\n^PR4,4,4\n^PW10\n^LL2\n^LH0,0\n^LT20\n^LS-30\n^PON\n^PMN\n"
         "^FO0,0^GFA,4,4,2,C0400000^FS\n^PQ1,3,0,N\n^JUS\nLE\n^XZ\nE\n";
     CHECK_BYTES(cap.out.data, cap.out.len, expected, sizeof(expected) - 1);
     CHECK_INT(wc.calls, 1);
     CHECK_INT(wc.last_ms, 250);
-    CHECK_INT(wc.out_len, strlen("S\n~JA\n"));     /* gewartet wird direkt nach ~JA */
+    CHECK_INT(wc.out_len, strlen("~JA\n"));   /* gewartet wird direkt nach ~JA, vor den Startbefehlen */
     lw_buf_free(&cap.out);
 
     /* Eigene Steuerzeichen (vertauscht ^/~, Trennzeichen ;): nur selbst erzeugte Befehle, nicht
@@ -1873,7 +1879,7 @@ static void test_job_zpl_extended(void)
     sample_page(&page);
     run_job_clock(&cap, &wc, &s, 0, 2, true, &page, 1, T0, 0);
     static const char mapped[] =
-        "^S,~\n^JA\n^SD08\n^TA-05\n^JSB\n^JC\n! U1 setvar \"media.printmode\" \"linerless cut\"\r\n"
+        "^JA\n^S,~\n^SD08\n^TA-05\n^JSB\n^JC\n! U1 setvar \"media.printmode\" \"linerless cut\"\r\n"
         "~XA~MFF;S~XZ\n~XA~ST11;14;2023;22;13;20;M~XZ\n"
         "~XA\n^L,S\n~MNM;-7\n~MTD\n~PR4;4;4\n~PW10\n~LL2\n~LH0;0\n~LT20\n~LS-30\n~PON\n~PMN\n"
         "~FO0;0~GFA;4;4;2;C040,~FS\n~PQ2;3;0;N\n~JUS\n~L,E\n~XZ\nE\n";
@@ -1908,7 +1914,7 @@ static void test_job_zpl_extended(void)
     run_job_clock(&cap, &wc, &s, 0, 1, true, pages, 3, T0, 0);
     CHECK_INT(wc.calls, 0);
     CHECK_INT(count_occurrences(&cap.out, "~JA\n"), 1);
-    CHECK_INT(count_occurrences(&cap.out, "! U1 setvar \"media.printmode\" \"linerless tear\"\r\n"), 1);
+    CHECK_INT(count_occurrences(&cap.out, "! U1 setvar \"media.printmode\" \"V\"\r\n"), 1);
     CHECK_INT(count_occurrences(&cap.out, "^MM"), 0);
     lw_buf_free(&cap.out);
     free_pages(pages, 3);
@@ -2188,11 +2194,11 @@ static void test_job_epl_cpcl_extended(void)
     job_capture cap;
     wait_capture wc;
     run_job_clock(&cap, &wc, &s, 0, 1, true, &page, 1, T0, 60);
-    static const char epl[] = "S\n~JA\n\nN\n^L,S\nq10\nQ2,24\nZT\nO\nGW0,0,2,2,\x3F\xBF\xFF\xFF\nLE\nP1\nE\n";
+    static const char epl[] = "~JA\nS\n\nN\n^L,S\nq10\nQ2,24\nZT\nO\nGW0,0,2,2,\x3F\xBF\xFF\xFF\nLE\nP1\nE\n";
     CHECK_BYTES(cap.out.data, cap.out.len, epl, sizeof(epl) - 1);
     CHECK_INT(wc.calls, 1);
     CHECK_INT(wc.last_ms, 40);
-    CHECK_INT(wc.out_len, 6);                  /* "S\n~JA\n" */
+    CHECK_INT(wc.out_len, 4);                  /* "~JA\n" (vor den Startbefehlen) */
     lw_buf_free(&cap.out);
 
     /* CPCL: weder ~JA noch Etikettenbefehle (wie Start-/Endbefehle); Kerben → FORM */
