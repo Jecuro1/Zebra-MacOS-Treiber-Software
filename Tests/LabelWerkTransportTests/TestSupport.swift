@@ -211,10 +211,15 @@ final class TestTCPServer: @unchecked Sendable {
     }
 }
 
-/// Hält einen TCP-Port auf 127.0.0.1 belegt (gebunden, aber ohne `listen`), solange das Objekt
-/// lebt: Verbindungen dorthin werden garantiert abgelehnt (RST). Weil der Port gebunden bleibt,
-/// kann ihn weder ein parallel laufender Test per `bind(0)` bekommen noch ein ausgehender
-/// `connect` als lokalen Port wählen (sonst verbände sich der Client mit sich selbst).
+/// Ein TCP-Port auf 127.0.0.1, an dem Verbindungen abgelehnt werden (RST), solange das Objekt lebt.
+///
+/// Linux: Der Port bleibt gebunden, aber ohne `listen` – ein SYN dorthin beantwortet der Kernel
+/// mit RST. Weil er gebunden bleibt, kann ihn weder ein parallel laufender Test per `bind(0)`
+/// bekommen noch ein ausgehender `connect` als lokalen Port wählen (Selbstverbindung).
+///
+/// macOS verwirft SYNs an einen gebundenen, nicht lauschenden Socket dagegen stillschweigend
+/// (Zeitüberschreitung statt Ablehnung). Dort wird der Port daher wie bisher kurz belegt und
+/// wieder freigegeben (`TestTCPServer.unusedPort()`).
 final class ClosedTCPPort: @unchecked Sendable {
     let port: Int
     private let fd: Int32
@@ -223,19 +228,16 @@ final class ClosedTCPPort: @unchecked Sendable {
 
     init() throws {
         #if canImport(Darwin)
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        self.port = try TestTCPServer.unusedPort()
+        self.fd = -1
         #else
         let fd = socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
-        #endif
         guard fd >= 0 else { throw TestServerError(description: "socket() fehlgeschlagen") }
         // Bewusst ohne SO_REUSEADDR: Kein anderer Socket darf diesen Port mitbenutzen.
         var address = sockaddr_in()
         address.sin_family = sa_family_t(AF_INET)
         address.sin_port = 0
         address.sin_addr.s_addr = inet_addr("127.0.0.1")
-        #if canImport(Darwin)
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        #endif
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
@@ -251,6 +253,7 @@ final class ClosedTCPPort: @unchecked Sendable {
         }
         self.port = Int(UInt16(bigEndian: address.sin_port))
         self.fd = fd
+        #endif
     }
 
     func release() {
@@ -258,7 +261,7 @@ final class ClosedTCPPort: @unchecked Sendable {
         defer { lock.unlock() }
         guard !released else { return }
         released = true
-        _ = TestTCPServer.closeFD(fd)
+        if fd >= 0 { _ = TestTCPServer.closeFD(fd) }
     }
 
     deinit { release() }
