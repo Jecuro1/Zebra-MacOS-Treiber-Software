@@ -65,6 +65,12 @@ public enum ZPLGraphicEncoder {
     ///   - bytesPerRow: Bytes je Zeile; die Bitmap ist `bytesPerRow × 8` Punkte breit.
     ///   - data: Grafikdaten.
     /// - Returns: Bitmap mit `ceil(totalBytes / bytesPerRow)` Zeilen; fehlende Daten sind weiß.
+    /// - Throws: `ImagingError.invalidArgument` bei `bytesPerRow ≤ 0` oder `totalBytes < 0`;
+    ///   `ImagingError.imageTooLarge`, wenn die Grafik breiter oder höher als 65 536 Punkte bzw.
+    ///   größer als 2²⁸ Punkte wäre (geprüft vor jeder Datenauswertung und Speicherreservierung,
+    ///   überlaufsicher auch bei Werten bis `Int.max` aus fremdem ZPL);
+    ///   `ImagingError.unsupportedGraphicFormat`, `.invalidGraphicData`, `.invalidBase64`,
+    ///   `.checksumMismatch`, `.decompressionFailed` bei unbrauchbaren Daten.
     public static func decodeGraphicField(format: String, totalBytes: Int, bytesPerRow: Int,
                                           data: String) throws -> MonoBitmap {
         guard bytesPerRow > 0 else {
@@ -73,8 +79,10 @@ public enum ZPLGraphicEncoder {
         guard totalBytes >= 0 else {
             throw ImagingError.invalidArgument("Gesamtbytes dürfen nicht negativ sein (\(totalBytes)).")
         }
-        let height = (totalBytes + bytesPerRow - 1) / bytesPerRow
-        try ImagingLimits.check(width: max(1, bytesPerRow * 8), height: max(1, height))
+        // Maße überlaufsicher bestimmen und begrenzen, bevor damit gerechnet wird. Danach gilt
+        // width × height ≤ 2²⁸ und damit totalBytes ≤ paddedCount ≤ ImagingLimits.maxGraphicBytes.
+        let (width, height) = ImagingLimits.graphicSize(totalBytes: totalBytes, bytesPerRow: bytesPerRow)
+        try ImagingLimits.check(width: width, height: max(1, height))
         let paddedCount = height * bytesPerRow
 
         var bytes: [UInt8]
@@ -107,7 +115,7 @@ public enum ZPLGraphicEncoder {
         // Auf exakte Größe bringen: fehlende Bytes weiß, überzählige verwerfen.
         if bytes.count > totalBytes { bytes.removeSubrange(totalBytes...) }
         if bytes.count < paddedCount { bytes.append(contentsOf: repeatElement(0, count: paddedCount - bytes.count)) }
-        return MonoBitmap(trustedWidth: bytesPerRow * 8, height: height, data: bytes)
+        return MonoBitmap(trustedWidth: width, height: height, data: bytes)
     }
 }
 

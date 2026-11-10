@@ -366,14 +366,46 @@ struct JobEncoderTests {
         #expect(t999.contains("^GFA,1,1,1,FC^FS"))     // T = 254: alles außer 254, 255
     }
 
-    @Test("Fehler: Seite ohne Fläche")
-    func zeroSizedPage() {
-        #expect(throws: ImagingError.self) {
-            try Self.zpl(PrintSettings()).encode(pages: [MonoBitmap(width: 0, height: 5)])
+    /// Regression: Seiten ohne Fläche ließen früher den ganzen Auftrag scheitern, während der
+    /// C-Filter (`lw_job_add_page`) sie mit einer Warnung überspringt. Alle erwarteten Bytes
+    /// stammen aus `rastertolabelwerk` (lw_job.c) mit denselben Eingaben.
+    @Test("Seiten ohne Fläche werden wie im C-Filter übersprungen und nicht gezählt")
+    func zeroSizedPagesAreSkipped() throws {
+        let page = MonoBitmap(width: 8, height: 1, data: [0xFF])
+        let label = "^XA\n^PW8\n^LL1\n^LH0,0\n^PON\n^PMN\n^FO0,0^GFA,1,1,1,FF^FS\n"
+        // [8×1 FF, 0×0], ZPL, Hex, 1 Kopie, Sortieren → vollständiger Auftrag statt Fehler
+        let single = try Self.zpl(PrintSettings(compression: .hex))
+            .encode(pages: [page, MonoBitmap(width: 0, height: 0)], copies: 1, collate: true)
+        #expect(Self.text(single) == label + "^PQ1\n^XZ\n")
+        // Übersprungene Seiten zählen nicht: eine verbleibende Seite → Menge = Kopien
+        for zero in [MonoBitmap(width: 0, height: 5), MonoBitmap(width: 7, height: 0), MonoBitmap(width: 0, height: 0)] {
+            let three = try Self.zpl(PrintSettings(compression: .hex)).encode(pages: [page, zero], copies: 3, collate: true)
+            #expect(Self.text(three) == label + "^PQ3\n^XZ\n", "\(zero.width) × \(zero.height)")
         }
-        #expect(throws: ImagingError.self) {
-            try JobEncoder(language: .epl, resolution: .dpi203, settings: PrintSettings()).encode(pages: [MonoBitmap(width: 8, height: 0)])
-        }
+        // Zwei verbleibende Seiten → Seitenfolge wiederholen, je ^PQ1
+        let pageB = MonoBitmap(width: 8, height: 2, data: [0xFF, 0x81])
+        let labelB = "^XA\n^PW8\n^LL2\n^LH0,0\n^PON\n^PMN\n^FO0,0^GFA,2,2,1,FF81^FS\n^PQ1\n^XZ\n"
+        let collated = try Self.zpl(PrintSettings(compression: .hex))
+            .encode(pages: [page, MonoBitmap(width: 0, height: 0), pageB], copies: 2, collate: true)
+        #expect(Self.text(collated) == (label + "^PQ1\n^XZ\n" + labelB) + (label + "^PQ1\n^XZ\n" + labelB))
+        // EPL und CPCL
+        let epl = JobEncoder(language: .epl, resolution: .dpi203, settings: PrintSettings())
+        Self.expectEqual(try epl.encode(pages: [page, MonoBitmap(width: 0, height: 3)], copies: 2, collate: true),
+                         TestSupport.data(.text("\nN\nq8\nQ1,24\nZT\nGW0,0,1,1,"), .bytes([0x00]), .text("\nP2\n")))
+        let cpcl = JobEncoder(language: .cpcl, resolution: .dpi203, settings: PrintSettings(negative: true))
+        Self.expectEqual(try cpcl.encode(pages: [MonoBitmap(width: 9, height: 0), MonoBitmap(width: 8, height: 1, data: [0x0F])],
+                                         copies: 2, collate: true),
+                         TestSupport.data(.text("! 0 200 200 1 2\r\nPAGE-WIDTH 8\r\nCG 1 1 0 0 "), .bytes([0xF0]),
+                                          .text("\r\nFORM\r\nPRINT\r\n")))
+        // Nur Seiten ohne Fläche → nur Auftragskopf und Endbefehle (wie bei lauter leeren Seiten)
+        let none = try Self.zpl(PrintSettings(darkness: 8, compression: .hex, startCommands: "~JA", endCommands: "~PS"))
+            .encode(pages: [MonoBitmap(width: 0, height: 0), MonoBitmap(width: 0, height: 4)])
+        #expect(Self.text(none) == "~JA\n~SD08\n~PS\n")
+        // Auch ohne skipBlankLabels liefert die Vorschau-Vorverarbeitung nil
+        let preview = JobEncoder(language: .epl, resolution: .dpi203, settings: PrintSettings(mirror: true, negative: true))
+        #expect(preview.preprocess(MonoBitmap(width: 0, height: 2)) == nil)
+        #expect(preview.preprocess(MonoBitmap(width: 5, height: 0)) == nil)
+        #expect(preview.preprocess(page) == MonoBitmap(width: 8, height: 1))
     }
 
     // MARK: - EPL2

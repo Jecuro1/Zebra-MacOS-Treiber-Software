@@ -81,8 +81,13 @@ public enum ACS {
     /// verworfen. `:` in der ersten Zeile ergibt eine leere Zeile; `:` mitten in einer Zeile
     /// übernimmt den Rest der Zeile aus der Vorzeile.
     ///
+    /// `bytesPerRow` darf größer als `totalBytes` sein (die Daten bilden dann eine einzige,
+    /// unvollständige Zeile). `totalBytes` ist auf 32 MiB begrenzt – so groß wie die größte
+    /// Grafik, die `ZPLGraphicEncoder.decodeGraphicField` zulässt.
+    ///
     /// - Throws: `ImagingError.invalidArgument` bei `bytesPerRow ≤ 0` oder `totalBytes < 0`,
-    ///   `ImagingError.invalidGraphicData` bei unzulässigen Zeichen.
+    ///   `ImagingError.imageTooLarge` bei `totalBytes` über 32 MiB (geprüft, bevor Speicher
+    ///   reserviert wird), `ImagingError.invalidGraphicData` bei unzulässigen Zeichen.
     public static func decode(_ string: String, bytesPerRow: Int, totalBytes: Int) throws -> [UInt8] {
         guard bytesPerRow > 0 else {
             throw ImagingError.invalidArgument("bytesPerRow muss größer als 0 sein (\(bytesPerRow)).")
@@ -90,11 +95,20 @@ public enum ACS {
         guard totalBytes >= 0 else {
             throw ImagingError.invalidArgument("totalBytes darf nicht negativ sein (\(totalBytes)).")
         }
+        guard totalBytes <= ImagingLimits.maxGraphicBytes else {
+            let size = ImagingLimits.graphicSize(totalBytes: totalBytes, bytesPerRow: bytesPerRow)
+            throw ImagingError.imageTooLarge(width: size.width, height: size.height)
+        }
         var output = [UInt8](repeating: 0, count: totalBytes)
         guard totalBytes > 0 else { return output }
-        let rowNibbles = bytesPerRow * 2
+        // Ab hier gilt 0 < totalBytes ≤ 2²⁵. Eine Zeile, die länger als alle Daten ist, wirkt
+        // genau wie eine Zeile der Länge totalBytes (`,` `!` `:` enden dann stets am Datenende);
+        // die Begrenzung hält alle Zeilenrechnungen (≤ 2 × totalNibbles) überlaufsicher.
+        let rowNibbles = min(bytesPerRow, totalBytes) * 2
         let totalNibbles = totalBytes * 2
         var pos = 0
+        // Summe der Wiederholungszähler; auf `totalNibbles` begrenzt (mehr kann ohnehin nicht
+        // geschrieben werden), damit auch beliebig lange Zählerketten nicht überlaufen.
         var pending = 0
 
         try output.withUnsafeMutableBufferPointer { out in
@@ -141,9 +155,9 @@ public enum ACS {
                     put(c &- UInt8(ascii: "a") &+ 10, pending == 0 ? 1 : pending)
                     pending = 0
                 case UInt8(ascii: "G")...UInt8(ascii: "Y"):
-                    pending += Int(c - UInt8(ascii: "G")) + 1
+                    pending = min(pending + Int(c - UInt8(ascii: "G")) + 1, totalNibbles)
                 case UInt8(ascii: "g")...UInt8(ascii: "z"):
-                    pending += (Int(c - UInt8(ascii: "g")) + 1) * 20
+                    pending = min(pending + (Int(c - UInt8(ascii: "g")) + 1) * 20, totalNibbles)
                 case UInt8(ascii: ","), UInt8(ascii: "!"):
                     pending = 0
                     let rowEnd = (pos / rowNibbles + 1) * rowNibbles

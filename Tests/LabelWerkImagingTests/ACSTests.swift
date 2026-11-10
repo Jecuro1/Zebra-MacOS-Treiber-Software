@@ -87,6 +87,69 @@ struct ACSTests {
         #expect(throws: ImagingError.self) { try ACS.decode("12", bytesPerRow: 1, totalBytes: -1) }
     }
 
+    // MARK: Robustheit gegen unzulässige Größenangaben (Regression: Überlauf/Absturz statt Fehler)
+
+    @Test("totalBytes über der Obergrenze wirft imageTooLarge statt abzustürzen")
+    func oversizedTotalBytes() throws {
+        let limit = ImagingLimits.maxGraphicBytes
+        #expect(limit == 33_554_432)
+        // Knapp darüber: Fehler, ohne den Ausgabepuffer anzulegen
+        #expect(throws: ImagingError.imageTooLarge(width: 8, height: limit + 1)) {
+            try ACS.decode("F", bytesPerRow: 1, totalBytes: limit + 1)
+        }
+        // totalBytes × 2 liefe über bzw. die Allokation scheiterte (früher SIGABRT)
+        #expect(throws: ImagingError.imageTooLarge(width: 8, height: Int.max / 2 + 1)) {
+            try ACS.decode("F", bytesPerRow: 1, totalBytes: Int.max / 2 + 1)
+        }
+        #expect(throws: ImagingError.imageTooLarge(width: 16, height: Int.max / 2 + 1)) {
+            try ACS.decode("F", bytesPerRow: 2, totalBytes: Int.max)
+        }
+        // Breite bytesPerRow × 8 läuft über → als Int.max gemeldet
+        #expect(throws: ImagingError.imageTooLarge(width: Int.max, height: 1)) {
+            try ACS.decode("F", bytesPerRow: Int.max, totalBytes: Int.max)
+        }
+        // Genau an der Obergrenze wird weiterhin dekodiert
+        let atLimit = try ACS.decode("FF!:", bytesPerRow: 4096, totalBytes: limit)
+        #expect(atLimit.count == limit)
+        #expect(atLimit[0] == 0xFF && atLimit[4095] == 0xFF && atLimit[8191] == 0xFF)
+        #expect(atLimit[8192] == 0x00 && atLimit[limit - 1] == 0x00)
+    }
+
+    @Test("bytesPerRow größer als die Daten: eine einzige Teilzeile, kein Überlauf",
+          arguments: [3, 4, 1_000, Int.max / 4, Int.max / 2, Int.max / 2 + 1, Int.max])
+    func hugeBytesPerRow(bytesPerRow: Int) throws {
+        // früher: bytesPerRow * 2 → Überlauf (SIGILL)
+        #expect(try ACS.decode("FF", bytesPerRow: bytesPerRow, totalBytes: 1) == [0xFF])
+        #expect(try ACS.decode("A,", bytesPerRow: bytesPerRow, totalBytes: 3) == [0xA0, 0x00, 0x00])
+        #expect(try ACS.decode("12!", bytesPerRow: bytesPerRow, totalBytes: 3) == [0x12, 0xFF, 0xFF])
+        #expect(try ACS.decode("1:", bytesPerRow: bytesPerRow, totalBytes: 2) == [0x10, 0x00])
+        #expect(try ACS.decode(":5", bytesPerRow: bytesPerRow, totalBytes: 2) == [0x00, 0x00])
+        #expect(try ACS.decode("K7", bytesPerRow: bytesPerRow, totalBytes: 3) == [0x77, 0x77, 0x70])
+    }
+
+    @Test("Sehr viele Wiederholungszähler summieren sich ohne Überlauf")
+    func manyRepeatCounters() throws {
+        let counters = String(repeating: "z", count: 100_000) + "F" + "1"
+        #expect(try ACS.decode(counters, bytesPerRow: 4, totalBytes: 16) == [UInt8](repeating: 0xFF, count: 16))
+        // Zähler über die Daten hinaus werden auf das Ende begrenzt; danach folgende Ziffern entfallen
+        #expect(try ACS.decode("zzzzzz8", bytesPerRow: 2, totalBytes: 4) == [0x88, 0x88, 0x88, 0x88])
+    }
+
+    #if compiler(>=6.2)
+    /// Läuft in einem Kindprozess: Ein Rückfall in einen Absturz (Trap) lässt nur diesen Test
+    /// scheitern statt den ganzen Testlauf zu beenden.
+    @Test("Unzulässige Größenangaben beenden den Prozess nicht (Exit-Test)")
+    func oversizedParametersDoNotTrap() async {
+        await #expect(processExitsWith: .success) {
+            _ = try? ACS.decode("FF", bytesPerRow: Int.max, totalBytes: 1)
+            _ = try? ACS.decode("F", bytesPerRow: 1, totalBytes: Int.max / 2 + 1)
+            _ = try? ACS.decode("F", bytesPerRow: 1, totalBytes: Int.max)
+            _ = try? ACS.decode(",!:", bytesPerRow: Int.max / 2 + 1, totalBytes: 5)
+            _ = try? ACS.decode(String(repeating: "z", count: 50_000) + "F", bytesPerRow: Int.max, totalBytes: 7)
+        }
+    }
+    #endif
+
     // MARK: Kodierung
 
     @Test("Kodierung: exakte Ausgaben")

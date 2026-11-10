@@ -99,6 +99,55 @@ struct GraphicEncoderTests {
         }
     }
 
+    /// Regression: Übergroße `bytesPerRow`/`totalBytes` aus fremdem ZPL führten zu einem
+    /// Ganzzahlüberlauf (Trap), bevor die Größenprüfung greifen konnte.
+    @Test("decodeGraphicField: übergroße Größenangaben werfen imageTooLarge statt abzustürzen")
+    func decodeOversizedParameters() throws {
+        func decode(_ format: String = "A", total: Int, bpr: Int, _ data: String = "FF") throws -> MonoBitmap {
+            try ZPLGraphicEncoder.decodeGraphicField(format: format, totalBytes: total, bytesPerRow: bpr, data: data)
+        }
+        // Breite bytesPerRow × 8 über 65 536 Punkten – auch wenn die Multiplikation überläuft
+        #expect(throws: ImagingError.imageTooLarge(width: 65_544, height: 1)) { try decode(total: 8, bpr: 8193) }
+        #expect(throws: ImagingError.imageTooLarge(width: Int.max, height: 1)) { try decode(total: 8, bpr: Int.max / 4) }
+        #expect(throws: ImagingError.imageTooLarge(width: Int.max, height: 1)) { try decode(total: Int.max, bpr: Int.max) }
+        // Höhe ⌈totalBytes / bytesPerRow⌉ ohne Überlauf in „totalBytes + bytesPerRow − 1“
+        #expect(throws: ImagingError.imageTooLarge(width: 8, height: Int.max)) { try decode(total: Int.max, bpr: 1) }
+        #expect(throws: ImagingError.imageTooLarge(width: 16, height: Int.max / 2 + 1)) { try decode(total: Int.max, bpr: 2) }
+        #expect(throws: ImagingError.imageTooLarge(width: 800, height: 100_000_000)) {
+            try decode(total: 9_999_999_999, bpr: 100)
+        }
+        // Die Prüfung erfolgt vor jeder Datenauswertung – für alle Formate
+        #expect(throws: ImagingError.imageTooLarge(width: 8, height: Int.max)) { try decode("B", total: Int.max, bpr: 1, "\u{FF}") }
+        #expect(throws: ImagingError.imageTooLarge(width: 8, height: Int.max)) {
+            try decode(total: Int.max, bpr: 1, ZPLGraphicEncoder.graphicData(Self.pageA, compression: .z64))
+        }
+        #expect(throws: ImagingError.imageTooLarge(width: 8, height: Int.max)) { try decode(total: Int.max, bpr: 1, ":B64:/w==") }
+        // Grenzen: 65 536 Punkte breit bzw. hoch, höchstens 2²⁸ Punkte
+        let widest = try decode(total: 8192, bpr: 8192, "F!")
+        #expect(widest.width == 65_536 && widest.height == 1 && widest.blackPixelCount == 65_536)
+        let tallest = try decode(total: 65_536, bpr: 1, "")
+        #expect(tallest.width == 8 && tallest.height == 65_536 && tallest.isBlank)
+        #expect(throws: ImagingError.imageTooLarge(width: 8, height: 65_537)) { try decode(total: 65_537, bpr: 1) }
+        #expect(throws: ImagingError.imageTooLarge(width: 65_536, height: 4_097)) { try decode(total: 8192 * 4096 + 1, bpr: 8192) }
+    }
+
+    #if compiler(>=6.2)
+    /// Läuft in einem Kindprozess: Ein Rückfall in einen Absturz (Trap) lässt nur diesen Test
+    /// scheitern statt den ganzen Testlauf zu beenden.
+    @Test("decodeGraphicField: übergroße Größenangaben beenden den Prozess nicht (Exit-Test)")
+    func decodeOversizedParametersDoNotTrap() async {
+        await #expect(processExitsWith: .success) {
+            for format in ["A", "B", "C", "X"] {
+                for (total, bpr) in [(Int.max, 1), (8, Int.max / 4), (Int.max, Int.max), (Int.max - 1, Int.max), (9_999_999_999, 100)] {
+                    _ = try? ZPLGraphicEncoder.decodeGraphicField(format: format, totalBytes: total, bytesPerRow: bpr, data: "FF")
+                    _ = try? ZPLGraphicEncoder.decodeGraphicField(format: format, totalBytes: total, bytesPerRow: bpr,
+                                                                  data: ":Z64:eJz7/wcAAgAB/w==")
+                }
+            }
+        }
+    }
+    #endif
+
     @Test("Rundlauf graphicField → decodeGraphicField für alle Kompressionen", arguments: GraphicCompression.allCases)
     func roundTrip(compression: GraphicCompression) throws {
         var rng = SplitMix64(seed: 0x6F)

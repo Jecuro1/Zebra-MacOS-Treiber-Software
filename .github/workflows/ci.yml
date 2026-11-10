@@ -4,7 +4,7 @@
 #          Tests), CUPS-Filter (C-Unit- und End-to-End-Tests), PPD-Generator mit cupstestppd,
 #          Python-/Shell-Werkzeuge, Treiberbaum und Probeläufe der macOS-Skripte.
 #   macos  ist teuer (macOS-Minuten) und läuft deshalb nur manuell (workflow_dispatch) sowie bei
-#          Pushes auf „main“ und „claude/**“: Swift-Tests inkl. App, Universal-Filter, App-Bundle,
+#          Pushes auf „main“ und Versions-Tags: Swift-Tests inkl. App, Universal-Filter, App-Bundle,
 #          Installationspaket, Probeinstallation mit Testdruck über CUPS; lädt App (ZIP) und
 #          Paket als Artefakte hoch.
 #
@@ -84,10 +84,12 @@ jobs:
 
   macos:
     name: macOS (App, Universal-Filter, Paket)
+    # Nur manuell (Actions → CI → „Run workflow“), auf „main“ und für Versions-Tags –
+    # macOS-Minuten sind in privaten Repositories knapp.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' &&
-       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/claude/')))
+       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: macos-15
     timeout-minutes: 90
     steps:

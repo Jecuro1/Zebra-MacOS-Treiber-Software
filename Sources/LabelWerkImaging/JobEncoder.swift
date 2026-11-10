@@ -8,7 +8,9 @@ import LabelWerkCore
 /// und einer über CUPS sind dadurch byte-gleich.
 ///
 /// Ablauf je Seite (Vorverarbeitung):
-/// 1. Breite > `maxPrintWidthDots` → rechts abschneiden.
+/// 1. Breite > `maxPrintWidthDots` → rechts abschneiden. Seiten ohne Fläche (Breite oder
+///    Höhe 0) werden danach übersprungen – wie im C-Filter (`lw_job_add_page`), der sie mit
+///    einer Warnung auslässt, statt den ganzen Auftrag scheitern zu lassen.
 /// 2. `negative` → invertieren.
 /// 3. `skipBlankLabels` und Seite leer → Seite überspringen.
 /// 4. Nur EPL/CPCL: `mirror` → horizontal spiegeln (ZPL nutzt `^PM`).
@@ -53,19 +55,15 @@ public struct JobEncoder: Sendable {
     ///   - pages: Seiten (je Seite ein Etikett).
     ///   - copies: Anzahl Kopien (Werte < 1 werden als 1 behandelt).
     ///   - collate: Sortieren (ganze Seitenfolge wiederholen) statt Kopien je Seite.
-    /// - Throws: `ImagingError.invalidArgument` bei Seiten ohne Fläche (Breite oder Höhe 0
-    ///   nach dem Abschneiden), `ImagingError.compressionFailed` falls zlib scheitert.
+    ///
+    /// Seiten ohne Fläche (Breite oder Höhe 0 nach dem Abschneiden) und – bei
+    /// `skipBlankLabels` – leere Seiten werden übersprungen und zählen für die Kopien-Regel
+    /// nicht mit. Bleibt keine Seite übrig, enthält der Auftrag nur Kopf- und Endbefehle.
+    ///
+    /// - Throws: `ImagingError` (z. B. `.compressionFailed`), falls die Z64-Kompression scheitert.
     public func encode(pages: [MonoBitmap], copies: Int = 1, collate: Bool = true) throws -> Data {
         let s = settings.clamped()
-        var processed: [MonoBitmap] = []
-        processed.reserveCapacity(pages.count)
-        for (index, page) in pages.enumerated() {
-            guard let bitmap = preprocess(page, settings: s) else { continue }
-            guard bitmap.width > 0, bitmap.height > 0 else {
-                throw ImagingError.invalidArgument("Seite \(index + 1) hat keine druckbare Fläche (\(bitmap.width) × \(bitmap.height)).")
-            }
-            processed.append(bitmap)
-        }
+        let processed = pages.compactMap { preprocess($0, settings: s) }
 
         let quantity = min(max(copies, 1), Self.maxQuantity)
         let sequence = collate && processed.count > 1
@@ -88,7 +86,8 @@ public struct JobEncoder: Sendable {
     }
 
     /// Wendet die Vorverarbeitung (Schritte 1–5) auf eine Seite an, z. B. für eine
-    /// Druckvorschau. Liefert `nil`, wenn die Seite als leer übersprungen würde.
+    /// Druckvorschau. Liefert `nil`, wenn die Seite übersprungen würde (keine Fläche nach dem
+    /// Abschneiden oder leer bei `skipBlankLabels`).
     public func preprocess(_ page: MonoBitmap) -> MonoBitmap? {
         preprocess(page, settings: settings.clamped())
     }
@@ -101,6 +100,8 @@ public struct JobEncoder: Sendable {
         if let maxWidth = maxPrintWidthDots, maxWidth > 0, bitmap.width > maxWidth {
             bitmap = bitmap.cropped(x: 0, y: 0, width: maxWidth, height: bitmap.height)
         }
+        // Seiten ohne Fläche überspringen (wie der C-Filter, unabhängig von skipBlankLabels)
+        if bitmap.width == 0 || bitmap.height == 0 { return nil }
         // (2) Negativ
         if s.negative { bitmap = bitmap.inverted() }
         // (3) Leere Seiten überspringen

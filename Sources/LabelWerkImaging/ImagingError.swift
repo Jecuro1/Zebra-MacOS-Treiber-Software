@@ -68,16 +68,35 @@ enum ImagingLimits {
     static let maxDimension = 1 << 16
     /// Maximale Pixelanzahl eines dekodierten Bildes (≈ 268 Megapixel).
     static let maxPixelCount = 1 << 28
+    /// Maximale Größe einer 1-Bit-Grafik in Bytes (`maxPixelCount / 8` = 32 MiB). Jede Grafik,
+    /// die `check` besteht, passt hinein; größere Angaben (z. B. `^GF`-Gesamtbytes) werden
+    /// abgewiesen, bevor Speicher reserviert wird.
+    static let maxGraphicBytes = maxPixelCount / 8
 
     /// Prüft Bildmaße gegen die Obergrenzen.
     static func check(width: Int, height: Int) throws {
         guard width > 0, height > 0 else {
             throw ImagingError.invalidArgument("Bildmaße \(width) × \(height) sind ungültig.")
         }
+        let pixels = width.multipliedReportingOverflow(by: height)
         guard width <= maxDimension, height <= maxDimension,
-              width.multipliedReportingOverflow(by: height).partialValue <= maxPixelCount
+              !pixels.overflow, pixels.partialValue <= maxPixelCount
         else {
             throw ImagingError.imageTooLarge(width: width, height: height)
         }
+    }
+
+    /// Maße einer 1-Bit-Grafik aus ZPL-Größenangaben (`^GF`, `~DG`), ohne Ganzzahlüberlauf.
+    ///
+    /// Breite = `bytesPerRow × 8` Punkte (läuft das über, wird `Int.max` geliefert, was jede
+    /// Prüfung abweist), Höhe = `⌈totalBytes / bytesPerRow⌉` – bewusst nicht als
+    /// `(totalBytes + bytesPerRow − 1) / bytesPerRow`, weil die Summe bei fremden Eingaben
+    /// überlaufen kann.
+    ///
+    /// - Precondition: `bytesPerRow > 0` und `totalBytes ≥ 0` (vom Aufrufer bereits geprüft).
+    static func graphicSize(totalBytes: Int, bytesPerRow: Int) -> (width: Int, height: Int) {
+        let width = bytesPerRow.multipliedReportingOverflow(by: 8)
+        let height = totalBytes / bytesPerRow + (totalBytes % bytesPerRow == 0 ? 0 : 1)
+        return (width.overflow ? Int.max : width.partialValue, height)
     }
 }
