@@ -171,12 +171,17 @@ fi
 USER_TARGETS=()
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 if [[ "${PURGE_USER_DATA}" == "1" ]]; then
+    # /Search findet auch Verzeichnisdienst-Konten (AD/LDAP), nicht nur lokale. Werte mit
+    # Leerzeichen gibt dscl in einer Folgezeile aus („NFSHomeDirectory:“, dann „ /Users/A B“).
+    # „|| true“: Eine fehlgeschlagene Abfrage darf das Skript (set -e, pipefail) nicht beenden,
+    # damit die Ausweichwege greifen.
     user_home=""
     if command -v dscl >/dev/null 2>&1; then
-        user_home="$(dscl . -read "/Users/${TARGET_USER}" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p')"
+        user_home="$(dscl /Search -read "/Users/${TARGET_USER}" NFSHomeDirectory 2>/dev/null \
+            | sed -n -e 's/^NFSHomeDirectory: //p' -e '/^NFSHomeDirectory:$/{n;s/^ //p;}' || true)"
     fi
     if [[ -z "${user_home}" ]] && command -v getent >/dev/null 2>&1; then
-        user_home="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
+        user_home="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f6 || true)"
     fi
     [[ -n "${user_home}" ]] || user_home="${HOME}"
     for candidate in \

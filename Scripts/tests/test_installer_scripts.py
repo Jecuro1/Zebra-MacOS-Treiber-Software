@@ -632,6 +632,50 @@ class UninstallTests(unittest.TestCase):
         result = run([str(SCRIPTS / "uninstall.sh"), "--root", str(self.root / "fehlt"), "--yes"])
         self.assertEqual(result.returncode, 64)
 
+    def purge_dry_run(self, tools: Path, user: str, home: str) -> subprocess.CompletedProcess:
+        """``--purge-user-data --dry-run`` mit Attrappen aus ``tools`` vorn im PATH."""
+        env = clean_env(SUDO_USER=user, HOME=home)
+        env["PATH"] = f"{tools}{os.pathsep}{env.get('PATH', '')}"
+        return run([str(SCRIPTS / "uninstall.sh"), "--root", str(self.root), "--purge-user-data", "--dry-run"],
+                   env=env)
+
+    def test_purge_user_data_survives_failed_account_lookup(self):
+        # Regression: Ein Konto, das dscl nicht kennt (z. B. Netzwerkkonto, eDSRecordNotFound = 56),
+        # beendete das Skript wegen set -e/pipefail ohne jede Meldung.
+        tools = self.root.parent / f"{self.root.name}-tools"
+        self.addCleanup(shutil.rmtree, tools, True)
+        write_executable(tools / "dscl", "#!/bin/sh\necho 'eDSRecordNotFound' >&2\nexit 56\n")
+        write_executable(tools / "getent", "#!/bin/sh\nexit 2\n")
+        data = self.root / "home" / "lw-test" / "Library" / "Application Support" / "LabelWerk"
+        data.mkdir(parents=True)
+        result = self.purge_dry_run(tools, "netzkonto", "/home/lw-test")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(data), result.stdout, "Ausweichweg über $HOME wurde nicht genutzt")
+        self.assertIn("Probelauf", result.stdout)
+        self.assertTrue(data.exists())
+
+    def test_purge_user_data_reads_home_from_dscl(self):
+        tools = self.root.parent / f"{self.root.name}-tools"
+        self.addCleanup(shutil.rmtree, tools, True)
+        log = tools / "dscl.log"
+        # dscl gibt Werte mit Leerzeichen in einer Folgezeile aus.
+        shapes = {
+            "/Users/anna": "NFSHomeDirectory: /Users/anna",
+            "/Users/Anna Maier": "NFSHomeDirectory:\n /Users/Anna Maier",
+        }
+        for home, output in shapes.items():
+            with self.subTest(home=home):
+                write_executable(tools / "dscl", f"#!/bin/sh\necho \"$*\" > '{log}'\nprintf '%s\\n' '{output}'\n")
+                prefs = self.root / home.lstrip("/") / "Library" / "Preferences" / "com.labelwerk.app.plist"
+                prefs.parent.mkdir(parents=True)
+                prefs.write_text("x", encoding="utf-8")
+                result = self.purge_dry_run(tools, "anna", "/var/empty/lw-kein-home")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(str(prefs), result.stdout)
+                self.assertEqual(log.read_text(encoding="utf-8").strip(),
+                                 "/Search -read /Users/anna NFSHomeDirectory")
+                self.assertTrue(prefs.exists())
+
     @unittest.skipIf(IS_MACOS, "prüft das Verhalten außerhalb von macOS")
     def test_system_uninstall_refused_outside_macos(self):
         result = run([str(SCRIPTS / "uninstall.sh"), "--yes"])
