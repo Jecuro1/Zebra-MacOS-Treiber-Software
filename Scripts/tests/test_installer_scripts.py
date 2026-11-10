@@ -16,7 +16,9 @@ Geprüft werden – auf jedem System, also auch unter Linux in der CI –
   libcups und zlib vorhanden sind),
 * ``build_driver.sh``: das Zielverzeichnis wird nur gelöscht, wenn es neu, leer oder ein früherer
   Treiberbaum ist,
-* ``uninstall.sh`` gegen ein Testwurzelverzeichnis (``--root``),
+* ``uninstall.sh`` gegen ein Testwurzelverzeichnis (``--root``), auch das Entfernen des
+  PDF-Dienstes „Mit LabelWerk drucken“,
+* der PDF-Dienst selbst (Skript aus ``PDFServiceInstaller.swift``, POSIX-sh) mit einer Beispiel-PDF,
 * die Installer-Skripte (preinstall, postinstall) gegen ein Testvolume,
 * ``postinstall``: Beim Umstellen vorhandener Warteschlangen auf neue PPDs bleiben deren
   Standardoptionen erhalten (Attrappe von ``lpadmin``; zusätzlich gegen einen privaten ``cupsd``,
@@ -772,6 +774,189 @@ class UninstallTests(unittest.TestCase):
         result = run([str(SCRIPTS / "uninstall.sh"), "--yes"])
         self.assertEqual(result.returncode, 2)
         self.assertIn("nur auf macOS", result.stderr)
+
+    def pdf_service_setup(self) -> tuple:
+        """PDF-Dienst der App und eine fremde Datei in ~/Library/PDF Services des Testbenutzers
+        (Heimatordner über $HOME, weil die Attrappen von dscl/getent nichts finden)."""
+        tools = self.root.parent / f"{self.root.name}-tools"
+        self.addCleanup(shutil.rmtree, tools, True)
+        write_executable(tools / "dscl", "#!/bin/sh\nexit 56\n")
+        write_executable(tools / "getent", "#!/bin/sh\nexit 2\n")
+        services = self.root / "home" / "lw-test" / "Library" / "PDF Services"
+        services.mkdir(parents=True)
+        ours = services / "Mit LabelWerk drucken"
+        ours.write_text(pdf_service_script(), encoding="utf-8")
+        ours.chmod(0o755)
+        foreign = services / "In Ordner sichern"
+        foreign.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        env = dict(clean_env(SUDO_USER="netzkonto", HOME="/home/lw-test"),
+                   PATH=f"{tools}{os.pathsep}{os.environ.get('PATH', '')}")
+        return ours, foreign, env
+
+    def test_removes_pdf_service_with_the_app(self):
+        ours, foreign, env = self.pdf_service_setup()
+        result = run([str(SCRIPTS / "uninstall.sh"), "--root", str(self.root), "--dry-run"], env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(ours), result.stdout)
+        self.assertTrue(ours.exists())
+        result = run([str(SCRIPTS / "uninstall.sh"), "--root", str(self.root), "--yes"], env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(ours.exists(), "der PDF-Dienst der App muss mit der App verschwinden")
+        self.assertTrue(foreign.exists(), "andere PDF-Dienste bleiben")
+
+    def test_keep_app_keeps_pdf_service(self):
+        ours, _, env = self.pdf_service_setup()
+        result = run([str(SCRIPTS / "uninstall.sh"), "--root", str(self.root), "--yes", "--keep-app"], env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(ours.exists())
+        self.assertNotIn("PDF Services", result.stdout)
+
+    def test_foreign_file_with_same_name_is_kept(self):
+        ours, _, env = self.pdf_service_setup()
+        ours.write_text("#!/bin/sh\n# eigenes Skript des Benutzers\n", encoding="utf-8")
+        result = run([str(SCRIPTS / "uninstall.sh"), "--root", str(self.root), "--yes"], env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(ours.exists(), "ohne Kennzeile der App wird die Datei nicht angefasst")
+
+
+# ------------------------------------------------------------------------------------------------
+# PDF-Dienst „Mit LabelWerk drucken“ (Sources/LabelWerkApp/Services/PDFServiceInstaller.swift)
+# ------------------------------------------------------------------------------------------------
+
+PDF_SERVICE_SWIFT = REPO_ROOT / "Sources" / "LabelWerkApp" / "Services" / "PDFServiceInstaller.swift"
+
+
+def pdf_service_script(bundle_id: str = "com.labelwerk.app", version: str = "1") -> str:
+    """Das Skript, das die App installiert: ``scriptTemplate`` aus PDFServiceInstaller.swift (Text
+    zwischen ``#\"\"\"`` und ``\"\"\"#``) mit denselben Ersetzungen wie ``script(bundleID:)``."""
+    text = PDF_SERVICE_SWIFT.read_text(encoding="utf-8")
+    match = re.search(r'static let scriptTemplate = #"""\n(.*?)\n"""#', text, re.S)
+    assert match, "scriptTemplate nicht gefunden"
+    version_match = re.search(r"static let version = (\d+)", text)
+    assert version_match and version_match.group(1) == version, "Version des PDF-Dienstes geändert?"
+    return match.group(1).replace("@BUNDLE_ID@", bundle_id).replace("@VERSION@", version) + "\n"
+
+
+# Kleinste gültige PDF-Datei (eine leere Seite, 104 × 76,2 mm).
+SAMPLE_PDF = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+              b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+              b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 294.8 216]>>endobj\n"
+              b"trailer<</Root 1 0 R>>\n%%EOF\n")
+
+
+class PDFServiceScriptTests(unittest.TestCase):
+    """Das Skript läuft wie unter macOS: ``$1`` Titel, ``$2`` CUPS-Optionen, ``$3`` vorübergehende
+    PDF-Datei (macOS löscht sie nach dem Ende des Skripts). Mit ``LW_PDF_SERVICE_NO_OPEN=1`` ohne
+    ``open``; unter Linux ist ``/bin/sh`` meist die Dash – das prüft gleich, dass es POSIX-sh ist."""
+
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp(prefix="lw-pdf-service-"))
+        self.addCleanup(shutil.rmtree, self.temp, True)
+        self.home = self.temp / "home"
+        self.home.mkdir()
+        self.script = self.temp / "Mit LabelWerk drucken"
+        self.script.write_text(pdf_service_script(), encoding="utf-8")
+        self.script.chmod(0o755)
+        self.pdf = self.temp / "tmp" / "Druckauftrag.pdf"
+        self.pdf.parent.mkdir()
+        self.pdf.write_bytes(SAMPLE_PDF)
+        self.incoming = self.home / "Library" / "Caches" / "com.labelwerk.app" / "Incoming"
+
+    def service(self, *args: str, no_open: bool = True, shell: Optional[str] = None) -> subprocess.CompletedProcess:
+        env = clean_env(HOME=str(self.home))
+        if no_open:
+            env["LW_PDF_SERVICE_NO_OPEN"] = "1"
+        argv = [shell, str(self.script)] if shell else [str(self.script)]
+        return run([*argv, *args], env=env)
+
+    def copies(self) -> List[Path]:
+        return sorted(self.incoming.glob("*.pdf")) if self.incoming.exists() else []
+
+    def test_header_and_marker(self):
+        text = pdf_service_script()
+        self.assertTrue(text.startswith("#!/bin/sh\n"))
+        self.assertIn("# LabelWerk-PDF-Dienst „Mit LabelWerk drucken“, Version 1", text)
+        self.assertNotRegex(text, r"@[A-Z_]+@", "alle Platzhalter ersetzt")
+        self.assertIn("/usr/bin/open -b \"$bundle_id\"", text)
+        self.assertIn("bundle_id='com.labelwerk.app'", text)
+
+    def test_copies_pdf_with_title_and_prints_path(self):
+        title = "Brillenetikett – Müller/Optik: Fassung 12"
+        result = self.service(title, "copies=1 media=A4", str(self.pdf))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        copies = self.copies()
+        self.assertEqual(len(copies), 1)
+        copy = copies[0]
+        self.assertEqual(copy.read_bytes(), SAMPLE_PDF)
+        self.assertEqual(result.stdout.strip(), str(copy))
+        self.assertRegex(copy.name, r"^\d{8}-\d{6}-[A-Za-z0-9 ._-]+\.pdf$")
+        self.assertIn("Brillenetikett", copy.name)
+        self.assertNotIn("/", copy.name[16:])
+        # Der vollständige Titel liegt daneben (die App zeigt ihn an).
+        self.assertEqual(copy.with_suffix(".title").read_text(encoding="utf-8"), title + "\n")
+        # Nur für den Benutzer lesbar (umask 077).
+        self.assertEqual(mode(self.incoming) & 0o077, 0)
+        self.assertEqual(mode(copy) & 0o077, 0)
+        # Die vorübergehende Datei bleibt unberührt (macOS löscht sie selbst).
+        self.assertTrue(self.pdf.exists())
+
+    def test_same_title_twice_gives_two_copies(self):
+        for _ in range(2):
+            result = self.service("Etikett", "", str(self.pdf))
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.copies()), 2)
+
+    def test_empty_or_hostile_title(self):
+        for title in ("", "../../..", "-n", "$(touch boese)", "'\"`;|&"):
+            with self.subTest(title=title):
+                result = self.service(title, "", str(self.pdf))
+                self.assertEqual(result.returncode, 0, result.stderr)
+        names = [path.name for path in self.copies()]
+        self.assertEqual(len(names), 5)
+        self.assertTrue(any(name.endswith("-Dokument.pdf") for name in names), names)
+        for name in names:
+            self.assertRegex(name, r"^\d{8}-\d{6}-[A-Za-z0-9 ._-]+\.pdf$")
+            self.assertFalse(name[16:].startswith(("-", ".", " ")), name)
+        self.assertFalse((self.temp / "boese").exists())
+        self.assertFalse(list(self.home.glob("boese")))
+        self.assertEqual([p for p in self.home.rglob("*") if p.is_file() and self.incoming not in p.parents], [])
+
+    def test_missing_or_absent_pdf(self):
+        for args in ((), ("Titel", ""), ("Titel", "", str(self.temp / "fehlt.pdf"))):
+            with self.subTest(args=args):
+                result = self.service(*args)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("keine PDF-Datei", result.stderr)
+        self.assertEqual(self.copies(), [])
+
+    def test_runs_with_posix_shells(self):
+        shells = [shell for shell in ("dash", "sh", "bash") if shutil.which(shell)]
+        for shell in shells:
+            with self.subTest(shell=shell):
+                argv_shell = [shell, "--posix"] if shell == "bash" else [shell]
+                env = clean_env(HOME=str(self.home), LW_PDF_SERVICE_NO_OPEN="1")
+                result = run([*argv_shell, str(self.script), f"Etikett {shell}", "", str(self.pdf)], env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.copies()), len(shells))
+
+    @unittest.skipIf(IS_MACOS, "würde unter macOS LabelWerk öffnen")
+    def test_without_open_tool_reports_error_but_keeps_copy(self):
+        result = self.service("Etikett", "", str(self.pdf), no_open=False)
+        if os.path.exists("/usr/bin/open"):
+            self.skipTest("/usr/bin/open vorhanden")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("LabelWerk konnte nicht geöffnet werden", result.stderr)
+        self.assertEqual(len(self.copies()), 1)
+
+    @unittest.skipUnless(shutil.which("shellcheck"), "shellcheck nicht installiert")
+    def test_shellcheck_posix(self):
+        result = run(["shellcheck", "-s", "sh", str(self.script)])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which("checkbashisms"), "checkbashisms nicht installiert")
+    def test_no_bashisms(self):
+        result = run(["checkbashisms", "-f", str(self.script)])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -2060,6 +2245,18 @@ class ResourceTests(unittest.TestCase):
         for key in ("NSBluetoothAlwaysUsageDescription", "NSLocalNetworkUsageDescription", "NSHumanReadableCopyright"):
             self.assertTrue(info.get(key), key)
         self.assertIn("Bluetooth", info["NSBluetoothAlwaysUsageDescription"])
+
+    def test_info_plist_document_types(self):
+        # Etikettendruck: PDFs (auch aus „Mit LabelWerk drucken“) und Bilder öffnen, ohne je
+        # Standardprogramm zu werden.
+        types = self.info_plist()["CFBundleDocumentTypes"]
+        content_types = set()
+        for entry in types:
+            self.assertEqual(entry["CFBundleTypeRole"], "Viewer")
+            self.assertEqual(entry["LSHandlerRank"], "Alternate")
+            self.assertTrue(entry["CFBundleTypeName"])
+            content_types.update(entry["LSItemContentTypes"])
+        self.assertLessEqual({"com.adobe.pdf", "public.png", "public.jpeg"}, content_types)
 
     def test_entitlements(self):
         entitlements = plistlib.loads((INSTALLER / "LabelWerk.entitlements").read_bytes())

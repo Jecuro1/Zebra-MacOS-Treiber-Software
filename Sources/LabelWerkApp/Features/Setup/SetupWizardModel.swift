@@ -756,9 +756,12 @@ final class PrinterSetupWizardModel {
         matchGeneration += 1
         let generation = matchGeneration
         let serviceName = selectedServiceName
+        // Warteschlangen von Etikettentypen nie als Warteschlange des Druckers vorschlagen.
+        let excluded = app?.labelTypeQueueNames ?? []
         isLoadingQueueMatches = true
         Task { [weak self] in
-            let matches = await PrinterInstallService.existingQueues(for: descriptor, serviceName: serviceName)
+            let matches = await PrinterInstallService.existingQueues(for: descriptor, serviceName: serviceName,
+                                                                     excluding: excluded)
             guard let self, generation == self.matchGeneration else { return }
             self.animate(Motion.spring) {
                 let previous = self.queueMatches.map(\.id)

@@ -258,15 +258,16 @@ final class LabelPrintStore {
             let turned = abs(stock.widthMM - heightMM) <= tolerance && abs(stock.heightMM - widthMM) <= tolerance
             return !stock.isContinuous && (straight || turned)
         }
-        // Zuerst der zuletzt benutzte bzw. gewählte Drucker, dann alle übrigen.
+        // Zuerst der zuletzt benutzte bzw. gewählte Drucker, dann alle übrigen; je Drucker zuerst seine
+        // Etikettentypen, dann sein eigenes Format.
         let ordered = model.sessions.filter { $0.id == printerID } + model.sessions.filter { $0.id != printerID }
         for session in ordered {
             if let type = session.labelTypes.first(where: { matches(session.stock(for: $0)) }) {
                 return (session, type)
             }
-        }
-        for session in ordered where matches(session.stock) {
-            return (session, nil)
+            if matches(session.stock) {
+                return (session, nil)
+            }
         }
         return nil
     }

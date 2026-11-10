@@ -71,6 +71,41 @@
 		<string>_printer._tcp</string>
 		<string>_ipp._tcp</string>
 	</array>
+	<!--
+	  Etikettendruck: PDFs und Bilder mit LabelWerk öffnen („Öffnen mit“, Dock, „Mit LabelWerk
+	  drucken“ im PDF-Menü des Druckdialogs ruft „open -b“ mit der PDF-Kopie auf). „Alternate“:
+	  LabelWerk wird nie Standardprogramm für diese Dateien.
+	-->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>PDF-Dokument</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Bild</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.png</string>
+				<string>public.jpeg</string>
+				<string>public.tiff</string>
+				<string>public.heic</string>
+			</array>
+		</dict>
+	</array>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>

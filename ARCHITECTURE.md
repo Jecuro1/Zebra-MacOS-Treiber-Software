@@ -1407,6 +1407,9 @@ Format und Einstellungen kommen aus LabelWerk.
 * **Entfernen:** Typ löschen bzw. Drucker aus LabelWerk entfernen → `lpadmin -x <queueName>`, nur für den
   gemerkten Namen und nur mit LabelWerk-Treiber. Andere Warteschlangen ändert die Funktion nie (für die
   Warteschlange des Druckers gelten weiter die Regeln oben und „Übernahme von macOS-Warteschlangen“).
+  Umgekehrt schlagen Installationsassistent und „Auch als macOS-Drucker installieren“ die Warteschlange
+  eines Typs nie als Warteschlange des Druckers vor (`PrinterInstallService.existingQueues(excluding:)` mit
+  `AppModel.labelTypeQueueNames`), obwohl sie zum selben Gerät führt.
 * **Zustand** je Typ (`QueueSyncService.labelTypeStatus`): wird geprüft, wird eingerichtet, bereit (Name),
   Fehler (Meldung, „Erneut versuchen“), nicht verfügbar (Grund: kein Treiber, keine passende Verbindung).
   Neu eingerichtete macOS-Drucker meldet ein Hinweis („macOS-Drucker „Zebra ZD421t – Brillenetikett“ ist
@@ -1446,5 +1449,14 @@ Der Filter verarbeitet alle Rasterformate robust (1/8/16 Bit, W/SW/K/RGB → Lum
 * Update-Dienst: `UpdateController` (`Services/`, Oberfläche in `Features/Updates/`) auf dem Kern
   `LabelWerkKit/Update` – sucht, lädt und installiert Releases des Repositorys aus
   `LWUpdateRepository` (Info.plist); Ablauf in `docs/DEVELOPMENT.md` („Release und Updates“).
+* Etikettendruck („Mit LabelWerk drucken“, `Features/LabelPrint/`): eigenes Fenster mit genauer Vorschau.
+  Der PDF-Dienst `~/Library/PDF Services/Mit LabelWerk drucken` (POSIX-sh, `PDFServiceInstaller`, beim
+  Start still angelegt bzw. aktualisiert; `$1` Titel, `$2` CUPS-Optionen, `$3` vorübergehende PDF) kopiert
+  die PDF des Druckdialogs nach `~/Library/Caches/<Bundle-ID>/Incoming` und öffnet sie mit `open -b`;
+  `CFBundleDocumentTypes` (PDF, Bilder, `LSHandlerRank` „Alternate“). Vorschau = Druck: jede Seite in
+  Druckerauflösung → `JobEncoder.fitted(_:pageSize:reference:)` (Schritt F mit Referenz des Auftrags) →
+  `dithered` → angezeigt nach `preprocess` (+ `^LS`/`^LT`/`^PM`/`^PO` des Druckers), gedruckt mit
+  `encode(pages:)` – byte-gleich zu `encode(images:pageSizes:)`. Gesendet direkt über die Verbindung des
+  Druckers, sonst als Rohauftrag (`lp -o raw`) über die Warteschlange des Etikettentyps.
 * Persistenz: JSON in `~/Library/Application Support/LabelWerk/`.
 * Lokalisierung: `tr("Deutscher Text")` → `Bundle.main` (`en.lproj/Localizable.strings`).

@@ -33,6 +33,8 @@ final class LabelPrintWindowController: NSObject, NSWindowDelegate {
     private func makeWindow(model: AppModel) -> NSWindow {
         let root = LabelPrintWindowRoot(store: store).environment(model)
         let hosting = NSHostingController(rootView: root)
+        // Nur die Mindestgröße folgt dem SwiftUI-Inhalt; die Fenstergröße bestimmt der Benutzer.
+        hosting.sizingOptions = [.minSize]
         let window = NSWindow(contentViewController: hosting)
         window.title = tr("Etikettendruck")
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]

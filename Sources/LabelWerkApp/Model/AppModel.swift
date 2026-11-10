@@ -346,6 +346,12 @@ final class AppModel {
         removeLabelType(id: id, from: session)
     }
 
+    /// Namen der macOS-Warteschlangen aller Etikettentypen (klein geschrieben). Sie gehören zu ihrem Typ und
+    /// werden nie die Warteschlange eines Druckers (Installationsassistent, vorhandene Warteschlangen).
+    var labelTypeQueueNames: Set<String> {
+        Set(sessions.flatMap { session in session.saved.labelTypes.compactMap { $0.queueName?.lowercased() } })
+    }
+
     /// Name eines Etikettentyps ohne Leerraum am Rand; leer → „Etikettentyp“.
     static func labelTypeName(_ name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)

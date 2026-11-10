@@ -44,7 +44,6 @@ struct LabelPrintPreviewPane: View {
                 }
                 .disabled((position ?? 0) <= 0)
                 .help(tr("Vorheriges Etikett"))
-                .keyboardShortcut(.leftArrow, modifiers: [])
                 Button {
                     step(1)
                 } label: {
@@ -52,10 +51,9 @@ struct LabelPrintPreviewPane: View {
                 }
                 .disabled((position ?? jobPages.count) >= jobPages.count - 1)
                 .help(tr("Nächstes Etikett"))
-                .keyboardShortcut(.rightArrow, modifiers: [])
             }
             .buttonStyle(.labelWerkPlain)
-            Text(position.map { tr("Etikett %d von %d", $0 + 1, jobPages.count) } ?? tr("Keine Seite gewählt"))
+            Text(position.map { tr("Etikett %d von %d", $0 + 1, jobPages.count) } ?? tr("Keine Seite ausgewählt"))
                 .font(.system(size: 13, weight: .semibold))
                 .monospacedDigit()
                 .contentTransition(.numericText())
@@ -159,7 +157,9 @@ struct LabelPrintPreviewPane: View {
             let rendered = store.renderedKey?.pages.contains(page) == true ? store.rendered[page] : nil
             let widthDots = target.labelWidthDots
             let heightDots = rendered?.label?.height ?? target.labelHeightDots ?? max(1, target.labelWidthDots / 2)
-            let size = Self.fitted(width: CGFloat(widthDots), height: CGFloat(heightDots), in: available, zoom: store.zoom)
+            // Platz für Trägerpapier und angeschnittene Nachbaretiketten oben und unten lassen.
+            let room = CGSize(width: max(60, available.width - 48), height: max(60, available.height - 120))
+            let size = Self.fitted(width: CGFloat(widthDots), height: CGFloat(heightDots), in: room, zoom: store.zoom)
             LabelPrintLabelStage(
                 label: rendered?.label,
                 isPending: rendered == nil,
@@ -192,7 +192,7 @@ struct LabelPrintPreviewPane: View {
                 }
             }
         } else {
-            Text(tr("Keine Seite gewählt"))
+            Text(tr("Keine Seite ausgewählt"))
                 .foregroundStyle(.secondary)
         }
     }
@@ -358,8 +358,8 @@ struct LabelPrintLabelStage: View {
                                      startPoint: .top, endPoint: .bottom))
                 .opacity(isContinuous ? 0 : 1)
         )
-        .onAppear { image = label.flatMap(ImageImport.cgImage(from:)) }
-        .onChange(of: label) { _, newValue in image = newValue.flatMap(ImageImport.cgImage(from:)) }
+        .onAppear { image = label.flatMap { ImageImport.cgImage(from: $0) } }
+        .onChange(of: label) { _, newValue in image = newValue.flatMap { ImageImport.cgImage(from: $0) } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tr("Etikettenvorschau"))
     }
@@ -392,10 +392,10 @@ struct LabelPrintLabelStage: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: image == nil)
     }
 
-    private enum Edge { case top, bottom }
+    private enum NeighborEdge { case top, bottom }
 
     /// Angeschnittenes Nachbaretikett (zeigt die Lücke auf dem Trägerpapier).
-    private func neighbor(height: CGFloat, radius: CGFloat, edge: Edge) -> some View {
+    private func neighbor(height: CGFloat, radius: CGFloat, edge: NeighborEdge) -> some View {
         RoundedRectangle(cornerRadius: radius, style: .continuous)
             .fill(Theme.labelPaper.opacity(0.75))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)

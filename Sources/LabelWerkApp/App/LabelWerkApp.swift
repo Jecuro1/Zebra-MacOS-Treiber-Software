@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import LabelWerkKit
 
 @main
@@ -13,6 +14,17 @@ struct LabelWerkApp: App {
                 .environment(model)
                 .frame(minWidth: 1040, minHeight: 680)
                 .onAppear { appDelegate.model = model }
+                // PDFs und Bilder (Finder „Öffnen mit“, „Mit LabelWerk drucken“, Dock) öffnen den
+                // Etikettendruck. Das vorhandene Hauptfenster nimmt das Ereignis an, statt dass
+                // SwiftUI ein zweites öffnet; doppelte Meldungen (auch über den App-Delegate)
+                // fasst `LabelPrintStore.open` zusammen.
+                .onOpenURL { url in model.openForLabelPrint([url]) }
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+                // Dateien auf das Hauptfenster ziehen → Etikettendruck (Bereiche mit eigener
+                // Ablagefläche wie der Designer haben Vorrang).
+                .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                    model.handleLabelPrintDrop(providers)
+                }
         }
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1320, height: 860)
@@ -30,12 +42,16 @@ struct LabelWerkApp: App {
                 .environment(\.appReduceMotion, model.preferences.reduceMotion)
         } label: {
             MenuBarIcon(state: model.aggregateState, alertCount: model.activeAlertCount)
+                // Auch ohne Hauptfenster (Start nur in der Menüleiste) kennt der Delegate das Modell –
+                // sonst blieben beim Start übergebene Dokumente liegen.
+                .onAppear { appDelegate.model = model }
         }
         .menuBarExtraStyle(.window)
     }
 }
 
-/// App-Delegate: Fenster nach Schließen weiter im Hintergrund (Menüleiste), sauberes Speichern.
+/// App-Delegate: Fenster nach Schließen weiter im Hintergrund (Menüleiste), sauberes Speichern,
+/// Dokumente öffnen (Etikettendruck), PDF-Dienst „Mit LabelWerk drucken“ einrichten.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Schreiben in eine Pipe/einen Socket, dessen Gegenstelle beendet ist (z. B. `lp`, das
@@ -43,7 +59,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         signal(SIGPIPE, SIG_IGN)
     }
 
-    weak var model: AppModel?
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // „PDF ▾ › Mit LabelWerk drucken“ in jedem Druckdialog: still anlegen bzw. aktualisieren (nur
+        // für diesen Benutzer, ohne Rückfrage) und alte Kopien im Eingangsordner aufräumen.
+        Task.detached(priority: .utility) {
+            _ = try? PDFServiceInstaller.installIfNeeded()
+            PDFServiceInstaller.cleanUpIncoming()
+        }
+    }
+
+    /// Wird gesetzt, sobald die erste Ansicht erscheint. Vorher übergebene Dokumente warten in
+    /// `pendingURLs`.
+    weak var model: AppModel? {
+        didSet {
+            guard model != nil, !pendingURLs.isEmpty else { return }
+            let urls = pendingURLs
+            pendingURLs = []
+            MainActor.assumeIsolated { model?.openForLabelPrint(urls) }
+        }
+    }
+
+    private var pendingURLs: [URL] = []
+
+    /// PDFs und Bilder aus dem Finder („Öffnen mit“), vom Dock-Symbol und aus „Mit LabelWerk drucken“
+    /// (`open -b`) → Etikettendruck.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        MainActor.assumeIsolated {
+            if let model {
+                model.openForLabelPrint(urls)
+            } else {
+                pendingURLs.append(contentsOf: urls)
+            }
+        }
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         // Mit Menüleisten-Extra weiterlaufen, damit Statusmeldungen ankommen.
@@ -119,6 +167,14 @@ struct LabelWerkCommands: Commands {
                 .keyboardShortcut("n", modifiers: [.command, .option])
                 .disabled(model.isOnboardingPresented || model.isAddPrinterPresented)
             Button(tr("Demo-Drucker hinzufügen")) { model.addDemoPrinter() }
+        }
+        // „Ablage › Drucken …“ der App: PDF oder Bild wählen und im Etikettendruck mit genauer
+        // Vorschau drucken (LabelWerk selbst hat keine Dokumente, die macOS drucken müsste).
+        CommandGroup(replacing: .printItem) {
+            Button(tr("Datei drucken …")) { model.chooseFilesForLabelPrint() }
+                .keyboardShortcut("p", modifiers: [.command])
+            Button(tr("Etikettendruck")) { model.showLabelPrintWindow() }
+                .keyboardShortcut("p", modifiers: [.command, .option])
         }
         CommandMenu(tr("Drucker")) {
             Button(tr("Testetikett drucken")) {

@@ -552,7 +552,8 @@ final class PrinterInstallService {
 
         update(.queue, .running(tr("Vorhandene macOS-Drucker werden geprüft …")))
         let queues = await CUPSService.queues()
-        let matches = await Self.existingQueues(for: request.descriptor, among: queues, serviceName: request.serviceName)
+        let matches = await Self.existingQueues(for: request.descriptor, among: queues, serviceName: request.serviceName,
+                                                excluding: model?.labelTypeQueueNames ?? [])
         let names = queues.map(\.name)
         let base = CUPSService.sanitizedQueueName(request.name)
         var queueName: String
@@ -936,9 +937,12 @@ final class PrinterInstallService {
 
     /// Vorhandene Warteschlangen, die zu diesem Gerät führen (LabelWerk-Treiber zuerst).
     /// `serviceName` (Bonjour-Name) erkennt zusätzlich `dnssd://`-Warteschlangen des Geräts.
+    /// `excluding` (klein geschrieben): Warteschlangen von Etikettentypen (`AppModel.labelTypeQueueNames`) –
+    /// sie gehören zu ihrem Typ und werden nie die Warteschlange eines Druckers.
     static func existingQueues(for descriptor: ConnectionDescriptor,
                                among queues: [CUPSQueueInfo]? = nil,
-                               serviceName: String? = nil) async -> [ExistingQueueMatch] {
+                               serviceName: String? = nil,
+                               excluding excluded: Set<String> = []) async -> [ExistingQueueMatch] {
         guard let uri = try? await CUPSService.deviceURI(for: descriptor) else { return [] }
         let all: [CUPSQueueInfo]
         if let queues {
@@ -947,7 +951,8 @@ final class PrinterInstallService {
             all = await CUPSService.queues()
         }
         let candidates = all.compactMap { info -> (CUPSQueueInfo, PrinterSetupPlanning.QueueMatch)? in
-            guard let match = PrinterSetupPlanning.queueMatch(queueURI: info.deviceURI, deviceURI: uri,
+            guard !excluded.contains(info.name.lowercased()),
+                  let match = PrinterSetupPlanning.queueMatch(queueURI: info.deviceURI, deviceURI: uri,
                                                               serviceName: serviceName) else { return nil }
             return (info, match)
         }

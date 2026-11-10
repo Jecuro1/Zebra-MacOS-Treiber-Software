@@ -4,8 +4,9 @@
 # LabelWerk – Deinstallation
 #
 # Entfernt den CUPS-Treiber (/Library/Printers/LabelWerk, LabelWerk-PPDs), die App, den
-# lwctl-Link und die Paketbelege. Druckerwarteschlangen, die LabelWerk-PPDs verwenden, werden
-# nur mit --remove-queues entfernt (sonst wird gewarnt, dass sie danach nicht mehr drucken).
+# lwctl-Link, den PDF-Dienst „Mit LabelWerk drucken“ und die Paketbelege. Druckerwarteschlangen,
+# die LabelWerk-PPDs verwenden, werden nur mit --remove-queues entfernt (sonst wird gewarnt, dass
+# sie danach nicht mehr drucken).
 #
 # Eigenständig lauffähig (keine weiteren Projektdateien nötig) und kompatibel mit der Bash 3.2
 # von macOS. Wird vom Treiberpaket als /Library/Printers/LabelWerk/uninstall.sh installiert:
@@ -24,6 +25,11 @@ BUNDLE_ID="${DEFAULT_BUNDLE_ID}"
 # Schlüsselbund-Dienst der Zugriffstoken für Updates aus privaten Repositorys (UpdateTokenStore der
 # App; ein Eintrag je Repository).
 UPDATE_KEYCHAIN_SERVICE="com.labelwerk.app.update"
+# PDF-Dienst „Mit LabelWerk drucken“, den die App je Benutzer in ~/Library/PDF Services anlegt
+# (PDFServiceInstaller der App). Er gehört zur App: Ohne sie liefe er ins Leere. Entfernt wird nur
+# eine Datei mit der Kennzeile der App.
+PDF_SERVICE_NAME="Mit LabelWerk drucken"
+PDF_SERVICE_MARKER="# LabelWerk-PDF-Dienst"
 
 ORIGINAL_ARGS="$*"
 REMOVE_QUEUES=0
@@ -55,12 +61,14 @@ usage() {
 Aufruf: sudo $(basename "$0") [Optionen]
 
 Entfernt ${APP_NAME}: CUPS-Treiber (Filter, PPD-Dateien, Druckersymbol), die App
-/Applications/${APP_NAME}.app, den Link /usr/local/bin/lwctl und die Installationsbelege.
+/Applications/${APP_NAME}.app, den Link /usr/local/bin/lwctl, den PDF-Dienst
+„${PDF_SERVICE_NAME}“ (~/Library/PDF Services) und die Installationsbelege.
 
 Optionen:
   --remove-queues     auch alle Druckerwarteschlangen entfernen, die LabelWerk-PPDs verwenden
                       (ohne diese Option bleiben sie bestehen, drucken aber nicht mehr)
-  --keep-app          die App (samt lwctl-Link) behalten und nur den Treiber entfernen
+  --keep-app          die App (samt lwctl-Link und PDF-Dienst) behalten und nur den Treiber
+                      entfernen
   --purge-user-data   zusätzlich Einstellungen und Daten des aufrufenden Benutzers löschen
                       (~/Library/Application Support/${APP_NAME}, Einstellungen, Caches,
                       Update-Protokoll ~/Library/Logs/${APP_NAME} und die Zugriffstoken für
@@ -133,6 +141,33 @@ add_target() {
     fi
 }
 
+# Benutzer, dessen Daten betroffen sind (bei sudo: SUDO_USER).
+TARGET_USER="${SUDO_USER:-$(id -un)}"
+
+# Heimatordner eines Benutzers (leer, wenn unbekannt). /Search findet auch Verzeichnisdienst-Konten
+# (AD/LDAP), nicht nur lokale. Werte mit Leerzeichen gibt dscl in einer Folgezeile aus
+# („NFSHomeDirectory:“, dann „ /Users/A B“). „|| true“: Eine fehlgeschlagene Abfrage darf das Skript
+# (set -e, pipefail) nicht beenden, damit die Ausweichwege greifen.
+home_of_user() {
+    local user="$1" home="" record=""
+    if command -v dscl >/dev/null 2>&1; then
+        record="$(dscl /Search -read "/Users/${user}" NFSHomeDirectory 2>/dev/null || true)"
+        home="$(printf '%s\n' "${record}" | sed -n -e 's/^NFSHomeDirectory: //p' -e '/^NFSHomeDirectory:$/{n;s/^ //p;}')"
+    fi
+    if [[ -z "${home}" ]] && command -v getent >/dev/null 2>&1; then
+        home="$(getent passwd "${user}" 2>/dev/null | cut -d: -f6 || true)"
+    fi
+    printf '%s' "${home}"
+}
+
+# Heimatordner von TARGET_USER; ohne Eintrag im Verzeichnisdienst $HOME.
+target_user_home() {
+    local home
+    home="$(home_of_user "${TARGET_USER}")"
+    [[ -n "${home}" ]] || home="${HOME:-}"
+    printf '%s' "${home}"
+}
+
 add_target "${DRIVER_DIR}"
 shopt -s nullglob
 for ppd in "${PPD_DIR}"/LabelWerk-*.ppd.gz "${PPD_DIR}"/LabelWerk-*.ppd; do
@@ -156,6 +191,24 @@ if [[ "${KEEP_APP}" != "1" ]]; then
             */Contents/Helpers/lwctl) add_target "${CLI_LINK}" ;;
         esac
     fi
+    # PDF-Dienst des aufrufenden und – auf dem echten System – des angemeldeten Benutzers.
+    PDF_SERVICE_HOMES=("$(target_user_home)")
+    if [[ "${SYSTEM_ROOT}" == "1" && "$(uname -s)" == "Darwin" ]] && [[ -e /dev/console ]]; then
+        console_user="$(stat -f %Su /dev/console 2>/dev/null || true)"
+        case "${console_user}" in
+            ""|root|loginwindow|_mbsetupuser|"${TARGET_USER}") ;;
+            *)
+                console_home="$(home_of_user "${console_user}")"
+                [[ -z "${console_home}" ]] || PDF_SERVICE_HOMES+=("${console_home}")
+                ;;
+        esac
+    fi
+    for service_home in "${PDF_SERVICE_HOMES[@]}"; do
+        service="${ROOT}${service_home}/Library/PDF Services/${PDF_SERVICE_NAME}"
+        if [[ -f "${service}" ]] && grep -q -F -e "${PDF_SERVICE_MARKER}" "${service}" 2>/dev/null; then
+            add_target "${service}"
+        fi
+    done
 fi
 
 # Warteschlangen, deren PPD von LabelWerk stammt (Attribut *lwModel oder Filterpfad).
@@ -174,21 +227,8 @@ fi
 
 # Benutzerdaten des aufrufenden Benutzers (bei sudo: SUDO_USER).
 USER_TARGETS=()
-TARGET_USER="${SUDO_USER:-$(id -un)}"
 if [[ "${PURGE_USER_DATA}" == "1" ]]; then
-    # /Search findet auch Verzeichnisdienst-Konten (AD/LDAP), nicht nur lokale. Werte mit
-    # Leerzeichen gibt dscl in einer Folgezeile aus („NFSHomeDirectory:“, dann „ /Users/A B“).
-    # „|| true“: Eine fehlgeschlagene Abfrage darf das Skript (set -e, pipefail) nicht beenden,
-    # damit die Ausweichwege greifen.
-    user_home=""
-    if command -v dscl >/dev/null 2>&1; then
-        dscl_record="$(dscl /Search -read "/Users/${TARGET_USER}" NFSHomeDirectory 2>/dev/null || true)"
-        user_home="$(printf '%s\n' "${dscl_record}" | sed -n -e 's/^NFSHomeDirectory: //p' -e '/^NFSHomeDirectory:$/{n;s/^ //p;}')"
-    fi
-    if [[ -z "${user_home}" ]] && command -v getent >/dev/null 2>&1; then
-        user_home="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f6 || true)"
-    fi
-    [[ -n "${user_home}" ]] || user_home="${HOME}"
+    user_home="$(target_user_home)"
     for candidate in \
         "${ROOT}${user_home}/Library/Application Support/${APP_NAME}" \
         "${ROOT}${user_home}/Library/Preferences/${BUNDLE_ID}.plist" \

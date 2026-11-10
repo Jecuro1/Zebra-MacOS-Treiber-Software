@@ -462,6 +462,77 @@ macOS unterstützt PPD-Treiber weiterhin vollständig.
 
 ## Drucken aus anderen Programmen
 
+### Mit LabelWerk drucken (empfohlen)
+
+Der macOS-Druckdialog zeigt seine Vorschau immer auf dem Systempapier (A4 bzw. Letter) – wie das
+Etikett wirklich aussieht, sieht man dort nicht. **„Mit LabelWerk drucken“** zeigt es genau und druckt
+genau das:
+
+1. Im Programm (Safari, Vorschau, Word, Web-Anwendung im Browser …) wie gewohnt **Ablage › Drucken …**
+   (⌘P) wählen – welcher Drucker oben im Dialog steht, ist egal.
+2. Unten links auf **„PDF ▾“** klicken und **„Mit LabelWerk drucken“** wählen.
+3. LabelWerk öffnet das Fenster **„Etikettendruck“**:
+   * **links** alle Seiten (mehrere mit ⌘ bzw. ⇧ markieren, „Alle Seiten“),
+   * **in der Mitte** das Etikett **genau so, wie es aus dem Drucker kommt** – Punkt für Punkt die
+     Druckdaten, in echtem Seitenverhältnis auf dem Etikett mit runden Ecken und angedeuteter Lücke zum
+     nächsten Etikett; mit Zoom und **„Originalseite“** zum Vergleich mit der Seite des Programms,
+   * **rechts** Drucker und **Etikettentyp** (siehe unten), **Exemplare**, **Seiten** (Alle/Auswahl), die
+     wirksamen Einstellungen und eine Zusammenfassung wie *„15 Etiketten · 104 × 76,2 mm ·
+     Brillenetikett“*.
+4. **„Drucken“** (⏎) – fertig. Der Auftrag erscheint im Auftragsverlauf der App (mit „Erneut drucken“).
+
+**Warum stimmt die Vorschau genau?** Die App rechnet jede Seite mit demselben Code wie der Treiber:
+Seite in der Druckerauflösung (z. B. 203 dpi) → „An Etikett anpassen“ (leeren Rand abschneiden, bei
+Bedarf aufrecht drehen, formatfüllend mit 1,5 mm Rand – für alle Seiten des Auftrags gleich gedreht und
+gleich groß) → Drehung, Spiegeln, Invertieren, Druckbreite aus den Einstellungen → Rasterung. Angezeigt
+werden genau diese Punkte (dazu, was der Drucker selbst noch tut: Versatz oben/links, Spiegeln und 180°
+bei ZPL); **gedruckt werden dieselben Bytes**. Was in der Vorschau fehlt oder abgeschnitten ist, fehlt
+auch auf dem Etikett – ein Hinweis „Inhalt ragt über das Etikett“ warnt davor.
+
+**Drucker und Etikettentyp wählt LabelWerk selbst:** zuerst ein Etikettentyp, dessen Format genau der
+Seitengröße des Dokuments entspricht (± 2 mm, auch gedreht), sonst die letzte Wahl für dasselbe Programm
+(PDF-Angabe „Creator“, z. B. Safari), sonst die letzte Wahl überhaupt.
+
+**Drucker nicht erreichbar?** Dann übergibt LabelWerk *dieselben* Druckdaten als Rohauftrag an den
+macOS-Drucker des Etikettentyps (bzw. des Druckers) – macOS druckt sie, sobald der Drucker wieder da ist,
+und der Ausdruck entspricht trotzdem der Vorschau. Ein Hinweis sagt das: *„An macOS-Warteschlange
+übergeben“*.
+
+**Weitere Wege in den Etikettendruck:**
+* **Ablage › Datei drucken …** (⌘P) in LabelWerk – PDF oder Bild wählen; **Ablage › Etikettendruck**
+  (⌥⌘P) öffnet das Fenster.
+* PDF oder Bild auf das LabelWerk-Fenster bzw. das Dock-Symbol ziehen oder im Finder **„Öffnen mit ›
+  LabelWerk“** wählen (LabelWerk wird dabei nie Standardprogramm für PDFs oder Bilder).
+* **Bilder** (PNG, JPEG, TIFF, HEIC): Ein Bildpunkt ist ein Druckpunkt. Bilder in Etikettengröße
+  (z. B. 831 × 609 Punkte für 104 × 76,2 mm bei 203 dpi) druckt LabelWerk 1:1, alle anderen passt es
+  wie PDF-Seiten auf das Etikett an.
+
+**Einrichtung:** keine. LabelWerk legt den Eintrag bei jedem Start still für den angemeldeten Benutzer
+an bzw. aktualisiert ihn: das Skript `~/Library/PDF Services/Mit LabelWerk drucken`. Es kopiert die PDF
+des Druckdialogs nach `~/Library/Caches/com.labelwerk.app/Incoming` (macOS löscht seine eigene Datei, sobald
+das Skript endet) und öffnet die Kopie mit LabelWerk; die App räumt diese Kopien nach dem Drucken bzw.
+nach 7 Tagen auf. `uninstall.sh` entfernt den Eintrag zusammen mit der App. Wer den Eintrag nicht möchte,
+ersetzt die Datei durch eine eigene ohne die Kennzeile „LabelWerk-PDF-Dienst“ – dann lässt LabelWerk
+sie in Ruhe.
+
+### Etikettentypen
+
+Wer **verschiedene Etiketten** auf einem Drucker verwendet – etwa Versandetiketten und schmale
+Brillenetiketten (Hantel-/Bügeletiketten) –, legt je Etikett einen **Etikettentyp** an:
+**Druckeinstellungen › Etikettentypen › „Etikettentyp hinzufügen“**.
+
+* **Name** (z. B. „Brillenetikett“) und **Etikett**: Format aus der Liste, **„Vom Drucker“** (die gerade
+  eingelegten Etiketten) oder **„Benutzerdefiniert …“** mit Breite, Höhe und Medientyp.
+* **Abweichungen** vom Drucker, je mit **„wie Drucker“** als Standard: Drehung, Temperatur,
+  Geschwindigkeit, Versatz oben/links, Medientyp, Bedienermodus.
+* **Jeder Etikettentyp erscheint in macOS als eigener Drucker**, z. B. **„Zebra ZD421t – Brillenetikett“**.
+  Im Druckdialog jedes Programms einfach diesen Drucker wählen – Format und Einstellungen kommen aus
+  LabelWerk, im Dialog ist nichts einzustellen. Ändern oder Löschen eines Typs gleicht LabelWerk sofort
+  mit macOS ab (gelöschte Typen verschwinden auch dort); Änderungen an den Einstellungen des Druckers
+  gelten für alle seine Typen, soweit ein Typ nichts Eigenes festlegt.
+* Im **Etikettendruck** („Mit LabelWerk drucken“) stehen unter jedem Drucker sein Standard und alle
+  seine Etikettentypen zur Wahl – mit genauer Vorschau im Format des Typs.
+
 ### Drucken aus Vorschau, Safari & Co.
 
 **Im Druckdialog muss nichts eingestellt werden** – weder Papierformat noch Skalierung oder

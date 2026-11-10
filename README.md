@@ -20,6 +20,8 @@ druckt. Dazu kommen ein Kommandozeilenwerkzeug (`lwctl`) und ein virtueller Demo
 | Bereich | Windows (ZDesigner + Setup Utilities) | LabelWerk |
 |---|---|---|
 | Drucken aus jeder App | ✔ Treiber | ✔ CUPS-Treiber (`rastertolabelwerk`), Universal Binary, 116 PPDs (69 Modelle × Auflösungen plus generische ZPL-, EPL- und CPCL-PPDs), automatische Treiberzuordnung per USB-Gerätekennung |
+| Druckvorschau | Vorschau des Programms auf dem Systempapier | ✔ **„Mit LabelWerk drucken“** im PDF-Menü jedes macOS-Druckdialogs (auch „Ablage › Datei drucken …“, Ablegen, „Öffnen mit“): Fenster **Etikettendruck** mit **genauer Vorschau** – Punkt für Punkt die Druckdaten auf dem Etikett in echtem Seitenverhältnis (angepasst, gedreht, gerastert wie im Treiber), Originalseite zum Vergleich, Seitenauswahl, Exemplare; gedruckt werden dieselben Bytes (direkt, sonst über die macOS-Warteschlange) ([Anleitung](docs/INSTALLATION.md#mit-labelwerk-drucken-empfohlen)) |
+| Mehrere Etikettenarten je Drucker | ein Drucker je Treiberinstallation, Format im Dialog wählen | ✔ **Etikettentypen:** je Etikett (z. B. Brillenetikett) Format und eigene Einstellungen – jeder Typ ist ein eigener macOS-Drucker wie **„Zebra ZD421t – Brillenetikett“**, im Druckdialog ist nichts einzustellen ([Etikettentypen](docs/INSTALLATION.md#etikettentypen)) |
 | Druckersprachen | ZPL, EPL | **ZPL II, EPL2 und CPCL** (Mobildrucker) |
 | Dialog „Druckeinstellungen für ZD421 …“ | ✔ | ✔ **gleich aufgebaut, gleiche Begriffe:** Seitenleiste mit Seite einrichten, Druckoptionen, Bedienermodus, Grafik Optionen, Kundenspezifische Befehle, Wartung, Einheiten, Hilfe und Über; „Testseite drucken“; Stift-Menü je Wert (Treiberwert oder Druckerwert, dazu „Vom Drucker lesen“); „Druckvorschau“ mit Drucker und zwei Etiketten; OK, Abbrechen, Übernehmen, Hilfe. Gespeicherte Werte gelten auch als Standard der macOS-Warteschlange; im macOS-Druckdialog stehen dieselben Gruppen unter „Druckerfunktionen“ ([Gegenüberstellung](docs/INSTALLATION.md#druckeinstellungen-wie-unter-windows)) |
 | Seite einrichten | Vorlage, Breite/Höhe, Medientyp, Drehung, Markierung Versatz, Spiegeln, Invers, Bei letztem Element stoppen | ✔ alle Werte, inkl. „Etiketten mit Seitenkerben“, Drehung 0°/90°/180°/270° und Stoppversatz |
@@ -72,7 +74,9 @@ Netzwerkschnittstelle):
 * **RFID** – Status des Kodierers; Tag lesen, Tag schreiben, Einstellungen & Kalibrierung
 * **Firmware** – Datei prüfen und übertragen
 
-Dazu kommen der **Etiketten-Designer**, der **Auftragsverlauf**, **Treiber & Warteschlangen**
+Dazu kommen der **Etikettendruck** („Mit LabelWerk drucken“ im PDF-Menü jedes Druckdialogs,
+Ablage › Datei drucken … ⌘P: genaue Vorschau, Drucker und Etikettentyp wählen, drucken), der
+**Etiketten-Designer**, der **Auftragsverlauf**, **Treiber & Warteschlangen**
 (Treiber installieren, aktualisieren, reparieren; macOS-Warteschlangen anlegen, synchronisieren,
 entfernen; Diagnose), die **Druckersuche** mit Radar, ein **Einrichtungsassistent** für den ersten
 Start, das **Menüleisten-Fenster**, Systemmitteilungen und der **Update-Dienst** (LabelWerk ›
