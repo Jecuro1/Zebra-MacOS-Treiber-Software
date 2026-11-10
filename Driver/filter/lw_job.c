@@ -8,9 +8,11 @@
 
 #include "lw_job.h"
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <zlib.h>
 
 #include "lw_encode.h"
@@ -54,6 +56,9 @@ bool lw_job_init(lw_job *job, const lw_job_config *config, lw_sink *out, const l
     job->gap_dots = config->gap_dots >= 0 ? config->gap_dots : LW_DEFAULT_GAP_DOTS;
     job->quantity = clamp_int(config->copies, 1, LW_MAX_QUANTITY);
     job->collate_mode = config->collate && job->quantity > 1;
+    job->fixed_clock = config->fixed_clock;
+    job->fixed_time = config->fixed_time;
+    job->time_step = config->time_step;
     job->out = out;
     if (hooks != NULL)
         job->hooks = *hooks;
@@ -81,6 +86,82 @@ static void write_commands_line(lw_job *job, const char *text, size_t len)
     lw_sink_write(job->out, "\n", 1);
 }
 
+/* ------------------------------------------------------------------------------------------ */
+/* Steuerzeichen und Uhr                                                                      */
+/* ------------------------------------------------------------------------------------------ */
+
+/* Ersetzt in selbst erzeugten ZPL-Befehlen ^ ~ , durch die eigenen Steuerzeichen (ein Durchgang,
+ * daher auch bei vertauschten Zeichen korrekt). Ohne control_printer: keine Änderung. */
+static void map_control_chars(const lw_settings *s, uint8_t *p, size_t n)
+{
+    if (!s->control_printer || p == NULL)
+        return;
+    for (size_t i = 0; i < n; i++) {
+        switch (p[i]) {
+        case '^': p[i] = (uint8_t)s->format_prefix; break;
+        case '~': p[i] = (uint8_t)s->control_prefix; break;
+        case ',': p[i] = (uint8_t)s->delimiter; break;
+        default: break;
+        }
+    }
+}
+
+/* Abbildung auf den Pufferinhalt ab `start` (nach dem Anhängen selbst erzeugter Befehle). */
+static void map_buf_from(const lw_settings *s, lw_buf *b, size_t start)
+{
+    if (!b->failed && b->len > start)
+        map_control_chars(s, b->data + start, b->len - start);
+}
+
+/* Schreibt einen selbst erzeugten ZPL-Befehl (mit Steuerzeichen-Abbildung) in die Ausgabe. */
+static void sink_command(lw_job *job, const char *fmt, ...) LW_PRINTF(2, 3);
+static void sink_command(lw_job *job, const char *fmt, ...)
+{
+    char line[192];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    if (n < 0 || (size_t)n >= sizeof(line)) {
+        job->out->failed = true;
+        return;
+    }
+    map_control_chars(&job->s, (uint8_t *)line, (size_t)n);
+    lw_sink_write(job->out, line, (size_t)n);
+}
+
+/* Uhrzeit für den Auftragskopf (k < 0) bzw. vor Etikett k. */
+static long long job_clock(const lw_job *job, long k)
+{
+    if (!job->fixed_clock)
+        return (long long)time(NULL);
+    return k <= 0 ? job->fixed_time : job->fixed_time + (long long)k * job->time_step;
+}
+
+/* ^XA^STmm,dd,yyyy,hh,mm,ss,M^XZ (Ortszeit, 24 Stunden). */
+static void write_set_time(lw_job *job, long long when)
+{
+    time_t t = (time_t)when;
+    struct tm tm;
+    if (localtime_r(&t, &tm) == NULL)
+        memset(&tm, 0, sizeof(tm));
+    sink_command(job, "^XA^ST%02d,%02d,%04d,%02d,%02d,%02d,M^XZ\n", tm.tm_mon + 1, tm.tm_mday,
+                 tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    job->last_st_time = when;
+}
+
+/* ~JA: Ausgabe leeren und (nur im Filter) die eingestellte Zeit warten. */
+static void write_cancel_all(lw_job *job, bool zpl)
+{
+    if (zpl)
+        sink_command(job, "~JA\n");
+    else
+        lw_sink_puts(job->out, "~JA\n");   /* EPL: wörtlich wie Startbefehle */
+    lw_sink_flush(job->out);
+    if (job->hooks.wait_ms != NULL && job->s.cancel_delay > 0 && !job->out->failed)
+        job->hooks.wait_ms(job->hooks.ctx, job->s.cancel_delay);
+}
+
 static bool report_output_failure(lw_job *job)
 {
     if (job->out->failed) {
@@ -99,18 +180,31 @@ bool lw_job_begin(lw_job *job)
     switch (s->language) {
     case LW_LANGUAGE_ZPL:
         write_commands_line(job, s->start_commands, s->start_commands_len);
+        if (s->cancel_before)
+            write_cancel_all(job, true);
         if (s->darkness != LW_UNSET)
-            lw_sink_printf(job->out, "~SD%02d\n", s->darkness);
+            sink_command(job, "~SD%02d\n", s->darkness);
         if (s->tear_off != LW_UNSET)
-            lw_sink_printf(job->out, "~TA%03d\n", s->tear_off);
+            sink_command(job, "~TA%03d\n", s->tear_off);
         /* Rückzugsfolge: Steuerbefehl ~JS (^JS ist in ZPL II die Sensorwahl). */
         if (s->backfeed != LW_BACKFEED_UNSET)
-            lw_sink_printf(job->out, "~JS%c\n", lw_backfeed_code(s->backfeed));
+            sink_command(job, "~JS%c\n", lw_backfeed_code(s->backfeed));
         if (s->calibrate)
-            lw_sink_puts(job->out, "~JC\n");
+            sink_command(job, "~JC\n");
+        /* Linerless-Modi haben keinen ^MM-Code: Modus per SGD (unabhängig von Steuerzeichen). */
+        if (lw_print_mode_is_linerless(s->print_mode))
+            lw_sink_printf(job->out, "! U1 setvar \"media.printmode\" \"%s\"\r\n",
+                           lw_print_mode_sgd(s->print_mode));
+        if (s->power_up_action != LW_MEDIA_ACTION_UNSET && s->head_close_action != LW_MEDIA_ACTION_UNSET)
+            sink_command(job, "^XA^MF%c,%c^XZ\n", lw_media_action_code(s->power_up_action),
+                         lw_media_action_code(s->head_close_action));
+        if (s->rtc != LW_RTC_UNSET)
+            write_set_time(job, job_clock(job, -1));
         break;
     case LW_LANGUAGE_EPL:
         write_commands_line(job, s->start_commands, s->start_commands_len);
+        if (s->cancel_before)
+            write_cancel_all(job, false);
         break;
     case LW_LANGUAGE_CPCL:
         /* CPCL kennt laut §8 keinen Auftragskopf. */
@@ -123,13 +217,28 @@ bool lw_job_begin(lw_job *job)
 /* Etikettenrümpfe                                                                            */
 /* ------------------------------------------------------------------------------------------ */
 
+/* Rohbefehle + LF in einen Puffer (nur falls nicht leer). */
+static void buf_commands_line(lw_buf *b, const char *text, size_t len)
+{
+    if (text == NULL || len == 0)
+        return;
+    lw_buf_append(b, text, len);
+    lw_buf_append_byte(b, '\n');
+}
+
 static bool encode_zpl_body(lw_job *job, const lw_bitmap *page, lw_buf *b)
 {
     const lw_settings *s = &job->s;
+    size_t mark = b->len;
     lw_buf_append_str(b, "^XA\n");
-    if (s->print_mode != LW_PRINT_MODE_UNSET)
+    map_buf_from(s, b, mark);
+    buf_commands_line(b, s->label_start_commands, s->label_start_commands_len);
+    mark = b->len;
+    if (s->print_mode != LW_PRINT_MODE_UNSET && !lw_print_mode_is_linerless(s->print_mode))
         lw_buf_printf(b, "^MM%c\n", lw_print_mode_code(s->print_mode));
-    if (s->tracking != LW_TRACKING_UNSET)
+    if (s->tracking == LW_TRACKING_BLACK_MARK && s->mark_offset != LW_UNSET)
+        lw_buf_printf(b, "^MNM,%d\n", s->mark_offset);
+    else if (s->tracking != LW_TRACKING_UNSET)
         lw_buf_printf(b, "^MN%c\n", lw_tracking_code(s->tracking));
     if (s->media_type != LW_MEDIA_TYPE_UNSET)
         lw_buf_printf(b, "^MT%c\n", lw_media_type_code(s->media_type));
@@ -142,11 +251,12 @@ static bool encode_zpl_body(lw_job *job, const lw_bitmap *page, lw_buf *b)
         lw_buf_printf(b, "^LT%d\n", s->label_top);
     if (s->label_left != LW_UNSET)
         lw_buf_printf(b, "^LS%d\n", s->label_left);
-    lw_buf_append_str(b, s->rotate180 ? "^POI\n" : "^PON\n");
+    lw_buf_append_str(b, lw_settings_effective_rotation(s) == 180 ? "^POI\n" : "^PON\n");
     lw_buf_append_str(b, s->mirror ? "^PMY\n" : "^PMN\n");
 
     size_t total = lw_bitmap_size(page);
     lw_buf_printf(b, "^FO0,0^GFA,%zu,%zu,%d,", total, total, page->bpr);
+    map_buf_from(s, b, mark);   /* Grafikdaten selbst bleiben unverändert */
     switch (s->compression) {
     case LW_COMPRESSION_HEX:
         lw_hex_append(b, page->data, total);
@@ -168,7 +278,9 @@ static bool encode_zpl_body(lw_job *job, const lw_bitmap *page, lw_buf *b)
         break;
     }
     }
+    mark = b->len;
     lw_buf_append_str(b, "^FS\n");
+    map_buf_from(s, b, mark);
     return !b->failed;
 }
 
@@ -177,6 +289,7 @@ static bool encode_epl_body(lw_job *job, const lw_bitmap *page, lw_buf *b)
     const lw_settings *s = &job->s;
     /* Führendes LF leert evtl. Restdaten im Empfangspuffer. */
     lw_buf_append_str(b, "\nN\n");
+    buf_commands_line(b, s->label_start_commands, s->label_start_commands_len);
     lw_buf_printf(b, "q%d\n", page->width);
     switch (s->tracking) {
     case LW_TRACKING_BLACK_MARK:
@@ -186,6 +299,7 @@ static bool encode_epl_body(lw_job *job, const lw_bitmap *page, lw_buf *b)
         lw_buf_printf(b, "Q%d,0\n", page->height);
         break;
     case LW_TRACKING_GAP:
+    case LW_TRACKING_NOTCH:     /* Seitenkerben: Durchlichtsensor wie bei Lücken */
     case LW_TRACKING_AUTO:
     case LW_TRACKING_UNSET:
         lw_buf_printf(b, "Q%d,%d\n", page->height, job->gap_dots);
@@ -195,7 +309,7 @@ static bool encode_epl_body(lw_job *job, const lw_bitmap *page, lw_buf *b)
         lw_buf_printf(b, "S%d\n", clamp_int(s->speed, 1, 6));
     if (s->darkness != LW_UNSET)
         lw_buf_printf(b, "D%d\n", clamp_int((s->darkness + 1) / 2, 0, 15));
-    lw_buf_append_str(b, s->rotate180 ? "ZB\n" : "ZT\n");
+    lw_buf_append_str(b, lw_settings_effective_rotation(s) == 180 ? "ZB\n" : "ZT\n");
     if (s->media_type != LW_MEDIA_TYPE_UNSET || s->print_mode != LW_PRINT_MODE_UNSET) {
         lw_buf_append_byte(b, 'O');
         if (s->media_type == LW_MEDIA_TYPE_DIRECT_THERMAL)
@@ -217,6 +331,7 @@ static bool encode_epl_body(lw_job *job, const lw_bitmap *page, lw_buf *b)
         b->data[b->len] = 0;
     }
     lw_buf_append_byte(b, '\n');
+    buf_commands_line(b, s->label_end_commands, s->label_end_commands_len);
     return !b->failed;
 }
 
@@ -259,14 +374,24 @@ bool lw_job_emit_label(lw_job *job, const lw_page_record *record, int quantity)
     const lw_settings *s = &job->s;
     switch (s->language) {
     case LW_LANGUAGE_ZPL:
+        if (s->rtc == LW_RTC_EVERY_LABEL || s->rtc == LW_RTC_EVERY_MINUTE) {
+            long long now = job_clock(job, job->labels_emitted);
+            bool due = s->rtc == LW_RTC_EVERY_LABEL ? job->labels_emitted > 0
+                                                    : now - job->last_st_time >= 60;
+            if (due)
+                write_set_time(job, now);
+        }
         lw_sink_write(job->out, record->body.data, record->body.len);
-        if (s->cut_every > 0)
-            lw_sink_printf(job->out, "^PQ%d,%d,0,Y\n", quantity, s->cut_every);
+        if (s->pause_every > 0)
+            sink_command(job, "^PQ%d,%d,0,N\n", quantity, s->pause_every);
+        else if (s->cut_every > 0)
+            sink_command(job, "^PQ%d,%d,0,Y\n", quantity, s->cut_every);
         else
-            lw_sink_printf(job->out, "^PQ%d\n", quantity);
+            sink_command(job, "^PQ%d\n", quantity);
         if (job->labels_emitted == 0 && s->save_settings)
-            lw_sink_puts(job->out, "^JUS\n");
-        lw_sink_puts(job->out, "^XZ\n");
+            sink_command(job, "^JUS\n");
+        write_commands_line(job, s->label_end_commands, s->label_end_commands_len);
+        sink_command(job, "^XZ\n");
         break;
     case LW_LANGUAGE_EPL:
         lw_sink_write(job->out, record->body.data, record->body.len);
@@ -368,7 +493,13 @@ bool lw_job_add_page(lw_job *job, lw_bitmap *page, int page_number)
     if (!job->begun && !lw_job_begin(job))
         return false;
     const lw_settings *s = &job->s;
+    const int rotation = lw_settings_effective_rotation(s);
 
+    /* (0) 90°/270° im Uhrzeigersinn drehen – alle Sprachen, vor dem Abschneiden */
+    if ((rotation == 90 || rotation == 270) && !lw_bitmap_rotate_quarter(page, rotation)) {
+        lw_log(job->hooks.log, LW_LOG_ERROR, "Nicht genügend Speicher zum Drehen der Seite.");
+        return false;
+    }
     /* (1) rechts abschneiden */
     lw_bitmap_crop_width(page, job->max_print_width);
     if (page->width <= 0 || page->height <= 0) {
@@ -377,6 +508,16 @@ bool lw_job_add_page(lw_job *job, lw_bitmap *page, int page_number)
                page_number, page->width, page->height);
         job->pages_skipped_empty++;
         return true;
+    }
+    /* (1b) Endlosmaterial: nach dem letzten Element (+ Stoppversatz) beenden */
+    if (s->stop_at_last && s->tracking == LW_TRACKING_CONTINUOUS) {
+        long height = (long)lw_bitmap_last_black_row(page) + 1 + s->stop_offset;
+        if (height < 1)
+            height = 1;
+        if (!lw_bitmap_set_height(page, (int)height)) {
+            lw_log(job->hooks.log, LW_LOG_ERROR, "Nicht genügend Speicher für die Seitenlänge %ld.", height);
+            return false;
+        }
     }
     /* (2) Negativ */
     if (s->negative)
@@ -392,8 +533,8 @@ bool lw_job_add_page(lw_job *job, lw_bitmap *page, int page_number)
         lw_log(job->hooks.log, LW_LOG_ERROR, "Nicht genügend Speicher zum Spiegeln der Seite.");
         return false;
     }
-    /* (5) Drehen – nur CPCL (ZPL nutzt ^PO, EPL ZB) */
-    if (s->rotate180 && s->language == LW_LANGUAGE_CPCL && !lw_bitmap_rotate180(page)) {
+    /* (5) 180° – nur CPCL in Software (ZPL nutzt ^PO, EPL ZB) */
+    if (rotation == 180 && s->language == LW_LANGUAGE_CPCL && !lw_bitmap_rotate180(page)) {
         lw_log(job->hooks.log, LW_LOG_ERROR, "Nicht genügend Speicher zum Drehen der Seite.");
         return false;
     }
