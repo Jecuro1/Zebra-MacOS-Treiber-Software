@@ -11,6 +11,10 @@
 #   Scripts/ci_macos.sh                         alle Standardschritte
 #   Scripts/ci_macos.sh test-swift app pkg      nur diese Schritte
 #
+# „release“ veröffentlicht das geprüfte Paket als GitHub-Release mit Update-Manifest (die App
+# lädt Updates von dort) – nur in GitHub Actions oder mit --allow-publish; --release-dry-run
+# bereitet alles vor und zeigt die gh-Befehle nur an.
+#
 # Die Schritte „install-test“ und „e2e-print“ verändern das System (sudo installer, lpadmin) und
 # laufen deshalb nur auf CI-Rechnern (CI=true) oder mit --allow-system-changes. Hat
 # „install-test“ den Installer tatsächlich gestartet, wird am Ende des Aufrufs immer deinstalliert
@@ -23,17 +27,21 @@
 # Jeder fehlschlagende Befehl beendet den Schritt.
 #
 # Umgebung: LW_JOBS (parallele Jobs), DEVELOPER_ID_APP/DEVELOPER_ID_INSTALLER (optional; ohne
-# Angabe ad hoc signierte App und unsigniertes Paket), LW_STRICT_STRINGS=1.
+# Angabe ad hoc signierte App und unsigniertes Paket), LW_STRICT_STRINGS=1; für „release“ GH_TOKEN
+# (Schreibrecht auf die Inhalte von UPDATE_REPOSITORY) und LW_RELEASE_DRY_RUN=1.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=SCRIPTDIR/../Installer/lib/common.sh
 source "${SCRIPT_DIR}/../Installer/lib/common.sh"
+# shellcheck source=SCRIPTDIR/../Installer/lib/release.sh
+source "${SCRIPT_DIR}/../Installer/lib/release.sh"
 
 DEFAULT_STEPS=(setup catalog test-swift test-driver test-ppd test-scripts strings app pkg verify-pkg artifacts)
 SYSTEM_STEPS=(install-test e2e-print)
-ALL_STEPS=("${DEFAULT_STEPS[@]}" "${SYSTEM_STEPS[@]}")
+PUBLISH_STEPS=(release)
+ALL_STEPS=("${DEFAULT_STEPS[@]}" "${SYSTEM_STEPS[@]}" "${PUBLISH_STEPS[@]}")
 
 usage() {
     cat <<EOF
@@ -49,15 +57,23 @@ Standardschritte (in dieser Reihenfolge):
   strings       Lokalisierung prüfen (fehlende Übersetzungen: Warnung)
   app           Scripts/build_app.sh – Release, Universal Binary, signiert (ad hoc ohne Identität)
   pkg           Scripts/make_pkg.sh --skip-build (unsigniert ohne DEVELOPER_ID_INSTALLER)
-  verify-pkg    Paketinhalt, Architekturen, Info.plist und Signaturen prüfen
+  verify-pkg    Paketinhalt, Architekturen, Info.plist, Signaturen und Update-Fähigkeit prüfen
   artifacts     App als ZIP nach dist/ legen (für den Upload)
 
 Schritte mit Systemänderungen (nur mit CI=true oder --allow-system-changes):
-  install-test  Paket installieren, Rechte/CUPS/Warteschlange prüfen, wieder deinstallieren
+  install-test  Paket installieren, Rechte/CUPS/Warteschlange prüfen, Update mit höherer
+                Build-Nummer über die installierte App, wieder deinstallieren
   e2e-print     PDF über CUPS und den Filter an einen lokalen TCP-„Drucker“ drucken
+
+Veröffentlichen (nur in GitHub Actions oder mit --allow-publish; nicht in den Standardschritten):
+  release       GitHub-Release v<Version>-b<Build> in UPDATE_REPOSITORY mit dem Paket und
+                labelwerk-update.json – die App findet und installiert es als Update
 
 Optionen:
   --allow-system-changes  install-test/e2e-print auch außerhalb der CI erlauben
+  --allow-publish         release auch außerhalb von GitHub Actions erlauben (mit gh-Anmeldung)
+  --release-dry-run       release: Paket, Manifest und Notizen nach dist/release/ legen, gh-Befehle
+                          nur anzeigen (keine Anfrage an GitHub)
   --keep-going            nach einem fehlgeschlagenen Schritt weitermachen
   --strict-strings        fehlende Übersetzungen als Fehler werten
   --strict-e2e            fehlgeschlagenen Testdruck als Fehler werten (sonst Warnung)
@@ -67,6 +83,8 @@ EOF
 
 KEEP_GOING=0
 ALLOW_SYSTEM="${CI:-false}"
+ALLOW_PUBLISH="${GITHUB_ACTIONS:-false}"
+RELEASE_DRY_RUN="${LW_RELEASE_DRY_RUN:-0}"
 STRICT_STRINGS="${LW_STRICT_STRINGS:-0}"
 STRICT_E2E="${LW_STRICT_E2E:-0}"
 STEPS=()
@@ -81,6 +99,8 @@ while [[ $# -gt 0 ]]; do
             break
             ;;
         --allow-system-changes) ALLOW_SYSTEM=true; shift ;;
+        --allow-publish) ALLOW_PUBLISH=true; shift ;;
+        --release-dry-run) RELEASE_DRY_RUN=1; shift ;;
         --keep-going) KEEP_GOING=1; shift ;;
         --strict-strings) STRICT_STRINGS=1; shift ;;
         --strict-e2e) STRICT_E2E=1; shift ;;
@@ -106,6 +126,12 @@ LW_CI_SCRIPT="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 LW_CI_PROCESS_OPTIONS=()
 if [[ "${ALLOW_SYSTEM}" == "true" ]]; then
     LW_CI_PROCESS_OPTIONS+=(--allow-system-changes)
+fi
+if [[ "${ALLOW_PUBLISH}" == "true" ]]; then
+    LW_CI_PROCESS_OPTIONS+=(--allow-publish)
+fi
+if [[ "${RELEASE_DRY_RUN}" == "1" ]]; then
+    LW_CI_PROCESS_OPTIONS+=(--release-dry-run)
 fi
 if [[ "${STRICT_STRINGS}" == "1" ]]; then
     LW_CI_PROCESS_OPTIONS+=(--strict-strings)
@@ -141,6 +167,12 @@ INSTALL_MARKER="${CI_TMP}/install-test.started"
 require_system_changes() {
     if [[ "${ALLOW_SYSTEM}" != "true" ]]; then
         lw_die "Dieser Schritt installiert Software systemweit. Nur in der CI (CI=true) oder mit --allow-system-changes."
+    fi
+}
+
+require_publish() {
+    if [[ "${ALLOW_PUBLISH}" != "true" ]]; then
+        lw_die "„release“ veröffentlicht ein Update für alle installierten Apps. Nur in GitHub Actions, mit --allow-publish oder als Probelauf (--release-dry-run)."
     fi
 }
 
@@ -269,6 +301,8 @@ step_verify_pkg() {
     [[ "$(plutil -extract CFBundleShortVersionString raw -o - "${info}")" == "${VERSION}" ]] || lw_die "Version falsch."
     [[ "$(plutil -extract CFBundleVersion raw -o - "${info}")" == "${BUILD}" ]] || lw_die "Build-Nummer falsch."
     [[ "$(plutil -extract LSMinimumSystemVersion raw -o - "${info}")" == "14.0" ]] || lw_die "Mindestversion falsch."
+    [[ "$(plutil -extract LWUpdateRepository raw -o - "${info}")" == "${UPDATE_REPOSITORY}" ]] \
+        || lw_die "LWUpdateRepository falsch (erwartet „${UPDATE_REPOSITORY}“)."
     if grep -q '@[A-Z_]*@' "${info}"; then
         lw_die "Info.plist enthält nicht ersetzte Platzhalter."
     fi
@@ -282,7 +316,16 @@ step_verify_pkg() {
     done
     [[ -d "${app}/Contents/Resources/Driver/Library/Printers/LabelWerk" ]] || lw_die "Treiberpaket fehlt in der App."
     require_universal "${app}/Contents/MacOS/LabelWerk"
-    lw_ok "App: ${BUNDLE_ID} ${VERSION} (${BUILD}), Universal, signiert, Berechtigungen, Lokalisierung, Treiber"
+    lw_ok "App: ${BUNDLE_ID} ${VERSION} (${BUILD}), Universal, signiert, Berechtigungen, Lokalisierung, Treiber, Updates aus ${UPDATE_REPOSITORY:-(abgeschaltet)}"
+
+    # Update-Fähigkeit: Ziel /Applications, nicht verschiebbar, „upgrade“, Versionsprüfung mit der
+    # Build-Nummer (Belege im Protokoll; Paketaufbau siehe Scripts/make_pkg.sh).
+    local package_info="${expanded}/LabelWerkApp.pkg/PackageInfo"
+    [[ -f "${package_info}" ]] || lw_die "PackageInfo der App-Komponente fehlt."
+    grep -E '<(pkg-info|bundle|relocate)[ />]' "${package_info}" | sed 's/^[[:space:]]*/    /' >&2 || true
+    lw_check_app_package_info "${package_info}"
+    grep -q "CFBundleVersion=\"${BUILD}\"" "${expanded}/Distribution" \
+        || lw_die "Distribution nennt nicht CFBundleVersion=\"${BUILD}\"."
 
     if [[ -f "${PKG}.sha256" ]]; then
         (cd "$(dirname "${PKG}")" && shasum -a 256 -c "$(basename "${PKG}").sha256")
@@ -351,11 +394,31 @@ step_install_test() {
     check_queue_label_size "nach lwctl install --size"
     lw_ok "Warteschlange ${TEST_QUEUE} mit $(basename "${ppd}") und Etikett ${TEST_SIZE} eingerichtet"
 
+    # App-Update wie aus der App (gleiche Marketing-Version, höhere Build-Nummer – so sieht jedes
+    # CI-Release aus): Die installierte App bekommt Build-Nummer 0, die zweite Installation muss
+    # genau /Applications/<App>.app wieder auf BUILD bringen (nicht verschiebbar, Versionsprüfung).
+    local installed_info="/Applications/${APP_NAME}.app/Contents/Info.plist" lowered=0
+    if [[ "${BUILD}" =~ ^[0-9]+$ ]] && (( 10#${BUILD} > 0 )); then
+        if sudo plutil -replace CFBundleVersion -string 0 "${installed_info}"; then
+            lowered=1
+            lw_info "Installierte App auf Build 0 gesetzt – das Paket (Build ${BUILD}) muss sie ersetzen."
+        else
+            lw_ci_warning "Build-Nummer der installierten App ließ sich nicht ändern – Update-Probe übersprungen."
+        fi
+    fi
+
     # Treiber-Update: Der postinstall ersetzt die PPD der Warteschlange durch die neue Modell-PPD –
     # die ergänzte Etikettengröße und lwLabelWidth/lwLabelHeight müssen dabei erhalten bleiben.
     lw_run sudo installer -pkg "${PKG}" -target / -verboseR
     check_queue_label_size "nach dem Treiber-Update (postinstall)"
     lw_ok "Treiber-Update behält die Etikettengröße von ${TEST_QUEUE}"
+    if [[ "${lowered}" == "1" ]]; then
+        local installed_build
+        installed_build="$(plutil -extract CFBundleVersion raw -o - "${installed_info}")"
+        [[ "${installed_build}" == "${BUILD}" ]] \
+            || lw_die "Update hat /Applications/${APP_NAME}.app nicht ersetzt (Build ${installed_build}, erwartet ${BUILD})."
+        lw_ok "App-Update: /Applications/${APP_NAME}.app von Build 0 auf ${BUILD} ersetzt (gleiche Version ${VERSION})"
+    fi
 }
 
 # Prüft, dass die Testwarteschlange das Etikett TEST_SIZE als benannte Standard-Papiergröße hat
@@ -508,6 +571,87 @@ PY
         lw_die "Etikettenlänge ^LL${length:-?} (${name}) passt nicht zu 76,2 mm."
     fi
     lw_ok "PDF (${name}) → CUPS → rastertolabelwerk → ZPL: ${bytes} Bytes, ^XA … ^GFA … ^XZ, ~SD20, ^LL${length}"
+}
+
+# Veröffentlicht das Paket als Update: GitHub-Release v<VERSION>-b<BUILD> in UPDATE_REPOSITORY
+# (Ziel: der gebaute Commit) mit <App>-<VERSION>-<BUILD>.pkg und labelwerk-update.json, als
+# „neuestes“ markiert – außer es gibt schon ein neueres Release (später gestarteter Lauf, der früher
+# fertig war). Gibt es das Release schon (erneuter Lauf mit derselben Laufnummer), werden Dateien und
+# Text ersetzt. Vorbereitete Dateien liegen in dist/release/.
+step_release() {
+    if [[ -z "${UPDATE_REPOSITORY}" ]]; then
+        lw_ci_warning "UPDATE_REPOSITORY ist leer (Installer/config.env) – Update-Dienst abgeschaltet, kein Release."
+        return 0
+    fi
+    if [[ -n "${GITHUB_REPOSITORY:-}" ]] && ! lw_release_same_repository "${GITHUB_REPOSITORY}" "${UPDATE_REPOSITORY}"; then
+        lw_ci_warning "Dieser Lauf gehört zu ${GITHUB_REPOSITORY}, die App sucht Updates in ${UPDATE_REPOSITORY} – kein Release (UPDATE_REPOSITORY in Installer/config.env anpassen)."
+        return 0
+    fi
+    if [[ "${RELEASE_DRY_RUN}" != "1" ]]; then
+        require_publish
+        lw_require_tool gh "GitHub CLI installieren (https://cli.github.com) und GH_TOKEN setzen."
+    fi
+    lw_release_require_build
+    [[ -f "${PKG}" ]] || lw_die "Paket fehlt: ${PKG} – zuerst die Schritte „app“, „pkg“ und „verify-pkg“."
+    local info="${APP}/Contents/Info.plist"
+    [[ -f "${info}" ]] || lw_die "App fehlt: ${APP} – zuerst den Schritt „app“."
+    lw_release_check_app_info "${info}"
+
+    local tag title asset target stage notes manifest body sha
+    tag="$(lw_release_tag)"
+    title="$(lw_release_title)"
+    asset="$(lw_release_asset_name)"
+    target="$(git -C "${LW_REPO_ROOT}" rev-parse --verify HEAD)"
+    stage="${LW_REPO_ROOT}/dist/release"
+    notes="${stage}/notes.md"
+    manifest="${stage}/${LW_RELEASE_MANIFEST_NAME}"
+    body="${stage}/release-body.md"
+    lw_info "Release ${tag} „${title}“ in ${UPDATE_REPOSITORY}, Commit ${target}"
+
+    rm -rf "${stage}"
+    mkdir -p "${stage}"
+    cp "${PKG}" "${stage}/${asset}"
+    lw_release_notes "${target}" > "${notes}"
+    lw_release_write_manifest "${stage}/${asset}" "${info}" "${notes}" "${manifest}"
+    sha="$(lw_release_manifest_field "${manifest}" pkg.sha256)"
+    {
+        cat "${notes}"
+        printf '\n---\n\n'
+        printf 'Installierte Versionen mit Update-Dienst finden dieses Update selbst (%s › Nach Updates suchen …) und installieren es auf Wunsch. ' "${APP_NAME}"
+        # shellcheck disable=SC2016  # Backticks sind Markdown (Code), keine Befehlsersetzung.
+        printf 'Zum ersten Installieren `%s` laden und öffnen.\n\nSHA-256 `%s` · Commit %s\n' \
+            "${asset}" "${sha}" "${target}"
+    } > "${body}"
+    sed 's/^/    /' "${notes}" >&2
+
+    export GH_REPO="${UPDATE_REPOSITORY}"
+    local exists=0 latest="true" current=""
+    if [[ "${RELEASE_DRY_RUN}" == "1" ]]; then
+        lw_info "Probelauf: nichts wird veröffentlicht. Ohne Abfrage bei GitHub gilt ${tag} als neu und als neuestes Release."
+        LW_DRY_RUN=1
+    else
+        current="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+        if [[ -n "${current}" && "${current}" != "${tag}" ]] && lw_release_tag_is_newer "${current}" "${tag}"; then
+            latest="false"
+            lw_ci_warning "Neuestes Release ist ${current} (neuer als ${tag}) – ${tag} wird nicht als neuestes markiert."
+        fi
+        if gh release view "${tag}" --json tagName >/dev/null 2>&1; then
+            exists=1
+        fi
+    fi
+    if [[ "${exists}" == "1" ]]; then
+        lw_warn "Release ${tag} gibt es schon (erneuter Lauf) – Dateien und Text werden ersetzt."
+        lw_run gh release upload "${tag}" "${stage}/${asset}" "${manifest}" --clobber
+        lw_run gh release edit "${tag}" --title "${title}" --notes-file "${body}" "--latest=${latest}"
+    else
+        lw_run gh release create "${tag}" "${stage}/${asset}" "${manifest}" --title "${title}" \
+            --notes-file "${body}" --target "${target}" "--latest=${latest}"
+    fi
+    if [[ "${RELEASE_DRY_RUN}" == "1" ]]; then
+        lw_ok "Probelauf: ${stage}/ enthält ${asset}, ${LW_RELEASE_MANIFEST_NAME}, notes.md, release-body.md"
+    else
+        lw_ok "Release ${tag} veröffentlicht: https://github.com/${UPDATE_REPOSITORY}/releases/tag/${tag}"
+    fi
 }
 
 # Räumt nach „install-test“ auf (nur wenn dessen Installer gestartet wurde, siehe Ablauf).

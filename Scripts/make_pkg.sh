@@ -5,7 +5,8 @@
 #
 # Erzeugt dist/LabelWerk-<version>.pkg (Produktarchiv) aus drei Komponenten:
 #
-#   LabelWerkApp.pkg      build/LabelWerk.app → /Applications (nicht verschiebbar, „upgrade“)
+#   LabelWerkApp.pkg      build/LabelWerk.app → /Applications (nicht verschiebbar, „upgrade“,
+#                         Versionsprüfung: höhere Build-Nummer bei gleicher Version ersetzt die App)
 #   LabelWerkDriver.pkg   build/driver-root → / (Filter, PPDs, Symbol, VERSION)
 #                         mit preinstall (alte Version entfernen) und postinstall (Rechte,
 #                         cupsd-Neustart, vorhandene Warteschlangen aktualisieren)
@@ -141,19 +142,38 @@ lw_step "Komponente „App“"
 COMPONENT_PLIST="${WORK}/app-component.plist"
 lw_run pkgbuild --analyze --root "${WORK}/app-root" "${COMPONENT_PLIST}"
 # Nicht verschiebbar: Sonst „installiert“ der Installer in eine beliebige andere Kopie der App
-# (z. B. im Build-Ordner) statt nach /Applications.
+# (z. B. im Build- oder Downloads-Ordner) statt nach /Applications – auch jedes Update der App
+# (UpdateController: installer -pkg … -target /) muss /Applications/<App>.app ersetzen.
+# „upgrade“ ersetzt das alte Bundle vollständig. Die Versionsprüfung (Standard, hier ausdrücklich)
+# vergleicht CFBundleShortVersionString und dann CFBundleVersion: Ein CI-Release mit gleicher
+# Marketing-Version und höherer Build-Nummer ersetzt die App, ein älteres Paket nicht. Belegt in
+# Scripts/ci_macos.sh (verify-pkg: PackageInfo, install-test: Build-Nummer 0 wird ersetzt).
+COMPONENT_KEYS=(
+    BundleIsRelocatable -bool NO
+    BundleOverwriteAction -string upgrade
+    BundleIsVersionChecked -bool YES
+    BundleHasStrictIdentifier -bool YES
+)
+set_component_keys() {
+    local index="$1" position=0
+    while [[ "${position}" -lt "${#COMPONENT_KEYS[@]}" ]]; do
+        lw_run plutil -replace "${index}.${COMPONENT_KEYS[position]}" "${COMPONENT_KEYS[position + 1]}" \
+            "${COMPONENT_KEYS[position + 2]}" "${COMPONENT_PLIST}"
+        position=$((position + 3))
+    done
+}
 if [[ "${LW_DRY_RUN}" == "1" ]]; then
-    lw_run plutil -replace 0.BundleIsRelocatable -bool NO "${COMPONENT_PLIST}"
-    lw_run plutil -replace 0.BundleOverwriteAction -string upgrade "${COMPONENT_PLIST}"
+    set_component_keys 0
 else
     index=0
     while plutil -extract "${index}" xml1 -o /dev/null "${COMPONENT_PLIST}" >/dev/null 2>&1; do
-        plutil -replace "${index}.BundleIsRelocatable" -bool NO "${COMPONENT_PLIST}"
-        plutil -replace "${index}.BundleOverwriteAction" -string upgrade "${COMPONENT_PLIST}"
+        set_component_keys "${index}"
         index=$((index + 1))
     done
     [[ "${index}" -gt 0 ]] || lw_die "pkgbuild --analyze hat kein Bundle in ${WORK}/app-root gefunden."
-    lw_ok "${index} Bundle(s): nicht verschiebbar, Aktualisierung ersetzt die alte Version"
+    [[ "$(plutil -extract 0.BundleIsRelocatable raw -o - "${COMPONENT_PLIST}")" == "false" ]] \
+        || lw_die "BundleIsRelocatable ließ sich nicht abschalten (${COMPONENT_PLIST})."
+    lw_ok "${index} Bundle(s): nicht verschiebbar, Aktualisierung ersetzt die alte Version, Versionsprüfung"
 fi
 lw_run pkgbuild --root "${WORK}/app-root" \
     --component-plist "${COMPONENT_PLIST}" \

@@ -3,9 +3,14 @@
 <!--
   LabelWerk – Info.plist (Vorlage)
 
-  Platzhalter in At-Zeichen (App-Name, Bundle-ID, Version, Build, Copyright-Jahr) ersetzt
-  Scripts/build_app.sh mit den Werten aus Installer/config.env. Lokalisierte Texte (Anzeigename,
-  Nutzungsbeschreibungen) stehen zusätzlich in Installer/Resources/<sprache>.lproj/InfoPlist.strings.
+  Platzhalter in At-Zeichen (App-Name, Bundle-ID, Version, Build, Copyright-Jahr, Update-Repository)
+  ersetzt Scripts/build_app.sh mit den Werten aus Installer/config.env. Lokalisierte Texte
+  (Anzeigename, Nutzungsbeschreibungen) stehen zusätzlich in
+  Installer/Resources/<sprache>.lproj/InfoPlist.strings.
+
+  LWUpdateRepository: GitHub-Repository „Besitzer/Name“, aus dessen neuestem Release die App
+  labelwerk-update.json und das Installationspaket lädt (config.env: UPDATE_REPOSITORY; leer =
+  Update-Dienst abgeschaltet).
 -->
 <plist version="1.0">
 <dict>
@@ -42,6 +47,8 @@
 	</array>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>LWUpdateRepository</key>
+	<string>@UPDATE_REPOSITORY@</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>NSPrincipalClass</key>

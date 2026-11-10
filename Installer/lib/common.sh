@@ -135,7 +135,8 @@ lw_require_file() {
 # --- Konfiguration -------------------------------------------------------------------------
 
 LW_CONFIG_FILE="${LW_CONFIG_FILE:-${LW_REPO_ROOT}/Installer/config.env}"
-LW_CONFIG_KEYS=(APP_NAME BUNDLE_ID VERSION BUILD COPYRIGHT_YEAR TEAM_ID DEVELOPER_ID_APP DEVELOPER_ID_INSTALLER)
+LW_CONFIG_KEYS=(APP_NAME BUNDLE_ID VERSION BUILD COPYRIGHT_YEAR TEAM_ID DEVELOPER_ID_APP DEVELOPER_ID_INSTALLER
+                UPDATE_REPOSITORY)
 
 # Liest Installer/config.env. Bereits gesetzte Umgebungsvariablen haben Vorrang.
 # Die Datei wird bewusst nicht mit `source` ausgeführt, sondern zeilenweise geparst.
@@ -183,6 +184,8 @@ lw_load_config() {
     local re_bundle='^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
     local re_name='^[A-Za-z0-9][A-Za-z0-9 ._-]*$'
     local re_year='^[0-9]{4}$'
+    # GitHub „Besitzer/Name“ (Besitzer: Buchstaben, Ziffern, Bindestriche; Name zusätzlich . und _).
+    local re_repository='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$'
     [[ "${VERSION}" =~ ${re_version} ]] \
         || lw_die "VERSION „${VERSION}“ ist ungültig (erwartet z. B. 1.0.0)."
     [[ "${BUILD}" =~ ${re_build} ]] \
@@ -196,6 +199,10 @@ lw_load_config() {
     fi
     [[ "${COPYRIGHT_YEAR}" =~ ${re_year} ]] \
         || lw_die "COPYRIGHT_YEAR „${COPYRIGHT_YEAR}“ ist ungültig (erwartet eine Jahreszahl)."
+    if [[ -n "${UPDATE_REPOSITORY}" ]]; then
+        [[ "${UPDATE_REPOSITORY}" =~ ${re_repository} && "${UPDATE_REPOSITORY}" != */. && "${UPDATE_REPOSITORY}" != */.. ]] \
+            || lw_die "UPDATE_REPOSITORY „${UPDATE_REPOSITORY}“ ist ungültig (erwartet Besitzer/Name eines GitHub-Repositorys, z. B. Jecuro1/Zebra-MacOS-Treiber-Software, oder leer)."
+    fi
 
     # Abgeleitete Kennungen der Paketkomponenten.
     LW_PKG_ID_APP="${BUNDLE_ID}.pkg"
@@ -205,7 +212,8 @@ lw_load_config() {
 }
 
 # Ersetzt @SCHLÜSSEL@-Platzhalter einer Vorlage (APP_NAME, BUNDLE_ID, VERSION, BUILD,
-# COPYRIGHT_YEAR, LW_PKG_ID_APP, LW_PKG_ID_DRIVER, LW_PKG_ID_CLI) wörtlich und schreibt das Ergebnis.
+# COPYRIGHT_YEAR, UPDATE_REPOSITORY, LW_PKG_ID_APP, LW_PKG_ID_DRIVER, LW_PKG_ID_CLI) wörtlich und
+# schreibt das Ergebnis.
 # $1: Vorlage, $2: Ziel. Bricht ab, wenn danach noch Platzhalter übrig sind.
 lw_render_template() {
     local template="$1"
@@ -213,7 +221,7 @@ lw_render_template() {
     [[ -f "${template}" ]] || lw_die "Vorlage fehlt: ${template}"
     # awk mit index()/substr() ersetzt wörtlich (keine Sonderbedeutung von & oder \ im Wert).
     LWT_APP_NAME="${APP_NAME}" LWT_BUNDLE_ID="${BUNDLE_ID}" LWT_VERSION="${VERSION}" \
-    LWT_BUILD="${BUILD}" LWT_COPYRIGHT_YEAR="${COPYRIGHT_YEAR}" \
+    LWT_BUILD="${BUILD}" LWT_COPYRIGHT_YEAR="${COPYRIGHT_YEAR}" LWT_UPDATE_REPOSITORY="${UPDATE_REPOSITORY:-}" \
     LWT_LW_PKG_ID_APP="${LW_PKG_ID_APP}" LWT_LW_PKG_ID_DRIVER="${LW_PKG_ID_DRIVER}" \
     LWT_LW_PKG_ID_CLI="${LW_PKG_ID_CLI}" \
     awk '
@@ -226,7 +234,7 @@ lw_render_template() {
             return result text
         }
         BEGIN {
-            count = split("APP_NAME BUNDLE_ID VERSION BUILD COPYRIGHT_YEAR LW_PKG_ID_APP LW_PKG_ID_DRIVER LW_PKG_ID_CLI", keys, " ")
+            count = split("APP_NAME BUNDLE_ID VERSION BUILD COPYRIGHT_YEAR UPDATE_REPOSITORY LW_PKG_ID_APP LW_PKG_ID_DRIVER LW_PKG_ID_CLI", keys, " ")
         }
         {
             line = $0

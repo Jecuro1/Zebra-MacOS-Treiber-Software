@@ -6,7 +6,8 @@
 #   macos  ist teuer (macOS-Minuten) und läuft deshalb nur manuell (workflow_dispatch) sowie bei
 #          Pushes auf „main“ und Versions-Tags: Swift-Tests inkl. App, Universal-Filter, App-Bundle,
 #          Installationspaket, Probeinstallation mit Testdruck über CUPS; lädt App (ZIP) und
-#          Paket als Artefakte hoch.
+#          Paket als Artefakte hoch. Ist alles grün, veröffentlicht er das Paket als GitHub-Release
+#          v<Version>-b<Laufnummer> mit labelwerk-update.json – die App findet es als Update.
 #
 # Alle Schritte stecken in Scripts/ci_linux.sh bzw. Scripts/ci_macos.sh und lassen sich lokal
 # genauso ausführen (siehe docs/DEVELOPMENT.md).
@@ -93,12 +94,21 @@ jobs:
        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: macos-15
     timeout-minutes: 90
+    permissions:
+      # Schritt „Update veröffentlichen“: Release und Tag anlegen (alles andere bleibt lesend).
+      contents: write
     env:
-      # Fortlaufende Build-Nummer (CFBundleVersion) je CI-Lauf – jeder Download ist eindeutig.
+      # Fortlaufende Build-Nummer (CFBundleVersion) je CI-Lauf – jeder Download ist eindeutig, und
+      # jedes Release ist für die App ein Update (gleiche Version, höhere Build-Nummer).
       BUILD: ${{ github.run_number }}
     steps:
       - name: Quelltext auschecken
         uses: actions/checkout@v4
+        with:
+          # Vollständige Historie mit Tags: Release-Notizen = Commits seit dem letzten v*-Tag.
+          fetch-depth: 0
+          # Das Token mit Schreibrecht bleibt im Schritt „Update veröffentlichen“ (GH_TOKEN).
+          persist-credentials: false
 
       - name: Neuestes stabiles Xcode auswählen
         uses: maxim-lobanov/setup-xcode@v1
@@ -160,3 +170,10 @@ jobs:
             dist/*.pkg.sha256
           if-no-files-found: warn
           retention-days: 14
+
+      # Nur wenn alle Schritte davor erfolgreich waren: GitHub-Release v<Version>-b<Build> mit
+      # LabelWerk-<Version>-<Build>.pkg und labelwerk-update.json, als neuestes markiert.
+      - name: Update veröffentlichen (GitHub-Release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: Scripts/ci_macos.sh release

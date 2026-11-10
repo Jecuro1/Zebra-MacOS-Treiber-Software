@@ -7,6 +7,7 @@
 # (arm64 + x86_64) und setzt daraus build/LabelWerk.app zusammen:
 #
 #   LabelWerk.app/Contents/Info.plist              aus Installer/Info.plist + Installer/config.env
+#                                                  (Version, Build, LWUpdateRepository für Updates)
 #   LabelWerk.app/Contents/PkgInfo
 #   LabelWerk.app/Contents/MacOS/LabelWerk
 #   LabelWerk.app/Contents/Helpers/lwctl
@@ -37,8 +38,8 @@ Optionen:
   --dry-run       Schritte nur anzeigen, nichts ausführen
   -h, --help      diese Hilfe
 
-Umgebung: VERSION, BUILD, DEVELOPER_ID_APP … überschreiben Installer/config.env;
-SWIFT_BUILD_JOBS begrenzt die parallelen Übersetzungsjobs.
+Umgebung: VERSION, BUILD, UPDATE_REPOSITORY, DEVELOPER_ID_APP … überschreiben
+Installer/config.env; SWIFT_BUILD_JOBS begrenzt die parallelen Übersetzungsjobs.
 EOF
 }
 
@@ -82,6 +83,11 @@ SWIFT="${SWIFT:-swift}"
 
 lw_step "${APP_NAME} ${VERSION} (${BUILD}) – ${CONFIGURATION}"
 lw_info "Bundle: ${APP}"
+if [[ -n "${UPDATE_REPOSITORY}" ]]; then
+    lw_info "Updates: neuestes Release von github.com/${UPDATE_REPOSITORY} (LWUpdateRepository)"
+else
+    lw_warn "UPDATE_REPOSITORY ist leer – die App sucht nicht nach Updates."
+fi
 
 lw_require_tool "${SWIFT}" "Xcode 16 oder neuer installieren und mit „xcode-select“ auswählen."
 lw_require_tool codesign
@@ -152,6 +158,8 @@ else
     lw_render_template "${LW_REPO_ROOT}/Installer/Info.plist" "${CONTENTS}/Info.plist"
     plutil -convert xml1 "${CONTENTS}/Info.plist"
     plutil -lint -s "${CONTENTS}/Info.plist" || lw_die "Info.plist ist ungültig."
+    [[ "$(plutil -extract LWUpdateRepository raw -o - "${CONTENTS}/Info.plist")" == "${UPDATE_REPOSITORY}" ]] \
+        || lw_die "LWUpdateRepository in der Info.plist entspricht nicht UPDATE_REPOSITORY."
     printf 'APPL????' > "${CONTENTS}/PkgInfo"
 fi
 lw_run cp "${RESOURCES_SRC}/AppIcon.icns" "${CONTENTS}/Resources/AppIcon.icns"

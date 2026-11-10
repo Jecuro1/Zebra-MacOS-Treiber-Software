@@ -33,6 +33,9 @@ Geprüft werden – auf jedem System, also auch unter Linux in der CI –
 * ``notarize.sh`` gegen Attrappen von ``xcrun``, ``spctl`` & Co. (Gatekeeper-Prüfung je Dateityp),
 * Info.plist, Berechtigungen, InfoPlist.strings, distribution.xml, Installer-Texte und Symbole,
 * ShellCheck für alle Skripte (falls installiert).
+
+Release und Update-Manifest (``Installer/lib/release.sh``, ``ci_macos.sh release``) prüft
+``test_release.py``.
 """
 
 from __future__ import annotations
@@ -76,6 +79,7 @@ SHELL_SCRIPTS = [
     SCRIPTS / "ci_linux.sh",
     SCRIPTS / "ci_macos.sh",
     COMMON,
+    INSTALLER / "lib" / "release.sh",
     INSTALLER / "pkg" / "scripts" / "driver" / "preinstall",
     INSTALLER / "pkg" / "scripts" / "driver" / "postinstall",
     INSTALLER / "pkg" / "scripts" / "cli" / "postinstall",
@@ -86,7 +90,8 @@ def clean_env(**extra: str) -> Dict[str, str]:
     """Umgebung ohne Konfigurationswerte des Aufrufers (damit config.env gilt)."""
     env = {key: value for key, value in os.environ.items()
            if key not in ("APP_NAME", "BUNDLE_ID", "VERSION", "BUILD", "COPYRIGHT_YEAR", "TEAM_ID",
-                          "DEVELOPER_ID_APP", "DEVELOPER_ID_INSTALLER", "LW_CONFIG_FILE", "LW_DRY_RUN",
+                          "DEVELOPER_ID_APP", "DEVELOPER_ID_INSTALLER", "UPDATE_REPOSITORY", "LW_CONFIG_FILE",
+                          "LW_DRY_RUN",
                           "NOTARY_KEYCHAIN_PROFILE", "NOTARY_API_KEY_PATH", "NOTARY_API_KEY_ID",
                           "NOTARY_APPLE_ID", "NOTARY_PASSWORD")}
     env["NO_COLOR"] = "1"
@@ -118,12 +123,12 @@ def write_executable(path: Path, text: str) -> Path:
 
 
 def make_sandbox_repo(directory: Path, *files: str) -> Path:
-    """Kopiert common.sh, config.env und die genannten Dateien in ein Test-Repository.
+    """Kopiert common.sh, release.sh, config.env und die genannten Dateien in ein Test-Repository.
 
     ``LW_REPO_ROOT`` der Skripte ist dann ``directory`` – Ausgaben (build/, dist/) landen dort und
     nicht im echten Repository.
     """
-    for relative in ("Installer/lib/common.sh", "Installer/config.env", *files):
+    for relative in ("Installer/lib/common.sh", "Installer/lib/release.sh", "Installer/config.env", *files):
         target = directory / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO_ROOT / relative, target)
@@ -133,8 +138,9 @@ def make_sandbox_repo(directory: Path, *files: str) -> Path:
 def ci_env(path_prefix: Optional[Path] = None, **extra: str) -> Dict[str, str]:
     """Umgebung für die CI-Skripte: ohne CI-Kennungen und Strenge-Schalter des Aufrufers."""
     env = clean_env()
-    for key in ("CI", "GITHUB_ACTIONS", "GITHUB_PATH", "LW_STRICT_STRINGS", "LW_STRICT_E2E", "PYTHON",
-                "LW_E2E_PORT"):
+    for key in ("CI", "GITHUB_ACTIONS", "GITHUB_PATH", "GITHUB_REPOSITORY", "GH_TOKEN", "GITHUB_TOKEN", "GH_REPO",
+                "LW_STRICT_STRINGS", "LW_STRICT_E2E", "LW_RELEASE_DRY_RUN", "PYTHON", "LW_E2E_PORT",
+                "SOURCE_DATE_EPOCH"):
         env.pop(key, None)
     env["PYTHON"] = sys.executable
     if path_prefix is not None:
@@ -1967,6 +1973,7 @@ class ResourceTests(unittest.TestCase):
             "CFBundleShortVersionString": "@VERSION@",
             "CFBundleVersion": "@BUILD@",
             "LSMinimumSystemVersion": "14.0",
+            "LWUpdateRepository": "@UPDATE_REPOSITORY@",
             "CFBundleDevelopmentRegion": "de",
             "CFBundleLocalizations": ["de", "en"],
             "LSApplicationCategoryType": "public.app-category.utilities",
