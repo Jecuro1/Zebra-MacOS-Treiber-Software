@@ -246,10 +246,12 @@ private struct DesignerTargetPicker: View {
                         .fixedSize(horizontal: false, vertical: true)
                     DesignerChoiceBar(items: Resolution.allCases, selection: $fallbackResolution,
                                       reduceMotion: reduceMotion, title: { $0.displayName })
-                    Button(action: onAddDemo) {
-                        Label(tr("Demo-Drucker hinzufügen"), systemImage: "sparkles")
+                    if model.preferences.showDemoPrinter {
+                        Button(action: onAddDemo) {
+                            Label(tr("Demo-Drucker hinzufügen"), systemImage: "sparkles")
+                        }
+                        .buttonStyle(.labelWerkSecondary)
                     }
-                    .buttonStyle(.labelWerkSecondary)
                 }
             } else {
                 VStack(spacing: 4) {

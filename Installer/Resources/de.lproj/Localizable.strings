@@ -2580,6 +2580,7 @@
 "Bild wird gedruckt …" = "Bild wird gedruckt …";
 "Daten werden gesendet …" = "Daten werden gesendet …";
 "Erneut drucken nicht möglich" = "Erneut drucken nicht möglich";
+"RFID-Kodieraufträge werden nicht wiederholt – jede EPC darf nur einmal geschrieben werden." = "RFID-Kodieraufträge werden nicht wiederholt – jede EPC darf nur einmal geschrieben werden.";
 "Für diesen Auftrag wurden keine Druckdaten gespeichert." = "Für diesen Auftrag wurden keine Druckdaten gespeichert.";
 "Auftrag wird erneut gesendet …" = "Auftrag wird erneut gesendet …";
 "Erneut gedruckt" = "Erneut gedruckt";

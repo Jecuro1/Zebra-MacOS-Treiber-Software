@@ -241,3 +241,40 @@ public enum CUPSCommandEncoding {
         return String(data: data, encoding: .utf8)
     }
 }
+
+// MARK: - Tolerantes Dekodieren
+
+extension PrintSettings {
+    /// Dekodiert fehlende oder unbekannte Werte (z. B. aus einer neueren App-Version) mit
+    /// Standardwerten, statt die gesamten Einstellungen zu verwerfen.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func value<T: Decodable>(_ type: T.Type, _ key: CodingKeys) -> T? {
+            (try? c.decodeIfPresent(type, forKey: key)) ?? nil
+        }
+        self.init(
+            darkness: value(Int.self, .darkness),
+            speed: value(Int.self, .speed),
+            mediaType: value(MediaType.self, .mediaType),
+            tracking: value(MediaTracking.self, .tracking),
+            printMode: value(PrintMode.self, .printMode),
+            labelTop: value(Int.self, .labelTop),
+            labelLeft: value(Int.self, .labelLeft),
+            tearOffAdjust: value(Int.self, .tearOffAdjust),
+            backfeed: value(BackfeedMode.self, .backfeed),
+            mirror: value(Bool.self, .mirror) ?? false,
+            negative: value(Bool.self, .negative) ?? false,
+            rotate180: value(Bool.self, .rotate180) ?? false,
+            dither: value(DitherAlgorithm.self, .dither) ?? .threshold,
+            threshold: value(Int.self, .threshold) ?? 128,
+            compression: value(GraphicCompression.self, .compression) ?? .z64,
+            cutEvery: value(Int.self, .cutEvery) ?? 0,
+            calibrateBeforeJob: value(Bool.self, .calibrateBeforeJob) ?? false,
+            saveToPrinter: value(Bool.self, .saveToPrinter) ?? false,
+            skipBlankLabels: value(Bool.self, .skipBlankLabels) ?? false,
+            startCommands: value(String.self, .startCommands) ?? "",
+            endCommands: value(String.self, .endCommands) ?? ""
+        )
+        self = clamped()
+    }
+}

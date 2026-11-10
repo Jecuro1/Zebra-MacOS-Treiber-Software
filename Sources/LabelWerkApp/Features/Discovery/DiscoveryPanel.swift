@@ -335,17 +335,19 @@ struct DiscoveryPanel: View {
             }
             HStack(spacing: 8) {
                 let demoSession = model.sessions.first { $0.isVirtual }
-                Button {
-                    let session = model.addDemoPrinter()
-                    onFinished?(session)
-                } label: {
-                    Label(demoSession == nil ? tr("Demo-Drucker verwenden") : tr("Demo-Drucker ist eingerichtet"),
-                          systemImage: demoSession == nil ? "sparkles" : "checkmark.circle.fill")
-                        .contentTransition(.symbolEffect(.replace))
+                if model.preferences.showDemoPrinter || demoSession != nil {
+                    Button {
+                        let session = model.addDemoPrinter()
+                        onFinished?(session)
+                    } label: {
+                        Label(demoSession == nil ? tr("Demo-Drucker verwenden") : tr("Demo-Drucker ist eingerichtet"),
+                              systemImage: demoSession == nil ? "sparkles" : "checkmark.circle.fill")
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                    .buttonStyle(.labelWerkSecondary)
+                    .controlSize(.small)
+                    .disabled(demoSession != nil)
                 }
-                .buttonStyle(.labelWerkSecondary)
-                .controlSize(.small)
-                .disabled(demoSession != nil)
                 if let onRequestManual {
                     Button(action: onRequestManual) {
                         Label(tr("Manuell hinzufügen …"), systemImage: "square.and.pencil")

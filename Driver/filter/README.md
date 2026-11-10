@@ -52,7 +52,7 @@ Einzelne End-to-End-Fälle: `python3 tests/run_e2e.py --bindir build --only kopi
 
 ## Optionen (ARCHITECTURE.md §9)
 
-Vorrang: Wert aus `argv[5]` (Auftrags-/Warteschlangenoptionen, z. B. `lpadmin -p q -o lwLabelTop=37`)
+Vorrang: Wert aus `argv[5]` (Auftrags-/Warteschlangenoptionen, z. B. `lpadmin -p q -o lwLabelTop-default=37`)
 **vor** markierter PPD-Auswahl **vor** PPD-Standard **vor** eingebautem Standard. Ungültige Werte
 werden mit `WARNING:` gemeldet und übergangen (dann gilt die nächste Ebene). Optionsnamen und
 Aufzählungswerte sind unabhängig von Groß-/Kleinschreibung; Ganzzahlen dürfen außerhalb der

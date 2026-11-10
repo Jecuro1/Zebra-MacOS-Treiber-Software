@@ -85,3 +85,27 @@ public struct LabelStock: Codable, Identifiable, Hashable, Sendable {
         return "\(fmt(widthMM, 1)) × \(fmt(heightMM, 1)) mm (\(fmt(widthMM / 25.4, 2)) × \(fmt(heightMM / 25.4, 2)) Zoll)"
     }
 }
+
+// MARK: - Tolerantes Dekodieren
+
+extension LabelStock {
+    /// Pflicht sind nur Kennung, Name und Maße; fehlende oder unbekannte übrige Werte
+    /// (z. B. aus einer neueren App-Version) erhalten Standardwerte.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func value<T: Decodable>(_ type: T.Type, _ key: CodingKeys) -> T? {
+            (try? c.decodeIfPresent(type, forKey: key)) ?? nil
+        }
+        self.init(
+            id: try c.decode(String.self, forKey: .id),
+            name: try c.decode(String.self, forKey: .name),
+            widthMM: try c.decode(Double.self, forKey: .widthMM),
+            heightMM: try c.decode(Double.self, forKey: .heightMM),
+            gapMM: value(Double.self, .gapMM) ?? 3,
+            tracking: value(MediaTracking.self, .tracking) ?? .gap,
+            mediaType: value(MediaType.self, .mediaType),
+            category: value(Category.self, .category) ?? .custom,
+            isCustom: value(Bool.self, .isCustom) ?? true
+        )
+    }
+}

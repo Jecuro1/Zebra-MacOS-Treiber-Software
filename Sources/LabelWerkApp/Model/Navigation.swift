@@ -63,7 +63,8 @@ enum PrinterSection: String, CaseIterable, Identifiable, Codable {
         if hasNetwork && descriptor.supportsBidirectional { sections.append(.network) }
         if descriptor.supportsBidirectional { sections.append(.maintenance) }
         if descriptor.supportsBidirectional, model?.supports(.rfid) ?? false { sections.append(.rfid) }
-        sections.append(.firmware)
+        // Firmware braucht eine direkte Verbindung (über eine macOS-Warteschlange nicht möglich).
+        if descriptor.supportsBidirectional { sections.append(.firmware) }
         return sections
     }
 }

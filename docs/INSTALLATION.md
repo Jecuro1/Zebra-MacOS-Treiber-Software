@@ -19,7 +19,7 @@ lassen:
 
 | Komponente | Ziel | Inhalt |
 |---|---|---|
-| **LabelWerk-App** | `/Applications/LabelWerk.app` | Steuerzentrale (Status, Einstellungen, Werkzeuge, Terminal, Designer, Firmware, Netzwerk); enthält zusätzlich eine Kopie des Treibers, um ihn aus der App heraus zu installieren oder zu reparieren |
+| **LabelWerk-App** | `/Applications/LabelWerk.app` | Steuerzentrale (Status, Druckeinstellungen, Etikettenformate, Werkzeuge, Terminal, Dateien, Netzwerk, Sicherung & Wartung, RFID, Firmware, Designer, Auftragsverlauf); enthält zusätzlich eine Kopie des Treibers, um ihn aus der App heraus zu installieren oder zu reparieren, und `lwctl` |
 | **Druckertreiber (CUPS)** | `/Library/Printers/LabelWerk/Filter/rastertolabelwerk` | CUPS-Filter: Raster → ZPL/EPL/CPCL (root:wheel, 0755) |
 | | `/Library/Printers/LabelWerk/Filter/commandtolabelwerk` | Befehlsfilter (Selbsttest, Kalibrieren aus dem Druckerdienstprogramm) |
 | | `/Library/Printers/LabelWerk/Icons/LabelWerk.icns` | Druckersymbol |
@@ -86,17 +86,28 @@ LabelWerk-Warteschlangen bleiben erhalten und werden anschließend automatisch a
 PPD-Dateien umgestellt; die gewählten Standardoptionen (Schwärzung, Geschwindigkeit,
 Etikettenformat …) bleiben dabei bestehen.
 
+Unter **Treiber & Warteschlangen** zeigt die App, ob der installierte Treiber zur App passt, und
+bietet **„Auf <Version> aktualisieren“** bzw. **„Erneut installieren“** (repariert Dateien und
+Rechte) an. Ist bereits ein *neuerer* Treiber installiert als der, den die App mitbringt (etwa nach
+einem Paket einer neueren LabelWerk-Version), ersetzt LabelWerk ihn nur nach ausdrücklicher
+Bestätigung durch die ältere Version – besser ist es dann, die App zu aktualisieren.
+
 ## Drucker einrichten
 
 ### In der App (empfohlen)
 
 1. LabelWerk öffnen. Beim ersten Start sucht der Einrichtungsassistent gleichzeitig per Bonjour,
    USB, Netzwerk-Scan, in den vorhandenen macOS-Warteschlangen und – nach Freigabe – per Bluetooth.
-   Später geht das jederzeit mit **Drucker › Drucker hinzufügen …** (⇧⌘N).
+   Später geht das jederzeit mit **Ablage › Drucker hinzufügen …** (⇧⌘N); **Ablage ›
+   Demo-Drucker hinzufügen** legt einen simulierten ZD421t zum Ausprobieren an.
 2. Den gefundenen Drucker mit **„Hinzufügen“** übernehmen. Modell, Auflösung und Druckersprache
    werden automatisch zugeordnet und beim Verbinden überprüft. Netzwerk-, USB- und
    Bluetooth-Drucker lassen sich auch manuell anlegen (IP-Adresse und Port 9100, USB-Gerät,
-   Bluetooth-Adresse).
+   Bluetooth-Adresse). Netzwerkgeräte mit offenem Port 9100, die sich bei der Suche weder per
+   SNMP noch per `~HI` als Zebra-Drucker zu erkennen geben, sind mit **„Nicht als Zebra-Drucker
+   erkannt“** markiert und lassen sich erst nach Bestätigung (**„Trotzdem hinzufügen“**)
+   übernehmen: LabelWerk fragt den Status regelmäßig ab, und ein Büro- oder Tintenstrahldrucker
+   würde diese Abfragen als Seiten voller Steuerzeichen drucken.
 3. Unter **„Treiber & Warteschlangen“** den Treiber installieren, falls noch nicht geschehen, und
    beim Drucker **„Einrichten“** wählen. LabelWerk legt eine macOS-Warteschlange mit der passenden
    PPD-Datei und den Druckeinstellungen des Druckers an. Danach erscheint der Drucker in jedem
@@ -105,8 +116,12 @@ Etikettenformat …) bleiben dabei bestehen.
    als Standard in die Warteschlange.
 
 Ohne Warteschlange druckt und steuert LabelWerk den Drucker direkt (Testetiketten, Designer,
-Werkzeuge, Terminal, Dateien, Firmware) – die Warteschlange wird nur für das Drucken aus anderen
-Programmen benötigt.
+Werkzeuge, Terminal, Dateien, Netzwerk, Sicherung & Wartung, RFID, Firmware) – die Warteschlange
+wird nur für das Drucken aus anderen Programmen benötigt. Umgekehrt lässt sich auch eine
+vorhandene macOS-Warteschlange als Drucker in LabelWerk übernehmen; über sie kann LabelWerk
+allerdings nur senden und keine Antworten lesen. Status, Dateien, Netzwerk, Sicherung & Wartung,
+RFID und Firmware-Updates benötigen deshalb eine direkte Verbindung (USB, Netzwerk oder
+Bluetooth).
 
 ### In den macOS-Systemeinstellungen
 
@@ -271,7 +286,10 @@ Vorschau; `lwctl render etikett.zpl -o vorschau.png` wandelt ZPL in ein PNG um, 
   LabelWerk benötigt die Freigabe unter **Systemeinstellungen › Datenschutz & Sicherheit › Lokales
   Netzwerk**.
 * **USB:** Kabel direkt (ohne Hub) anschließen; `system_profiler SPUSBDataType | grep -A6 -i zebra`
-  bzw. `lpinfo -v` zeigt, ob macOS das Gerät sieht.
+  bzw. `lpinfo -v` zeigt, ob macOS das Gerät sieht. Meldet die App beim Einrichten der
+  Warteschlange, dass sich ein USB-Drucker keinem Gerät eindeutig zuordnen lässt, sind mehrere
+  Zebra-Drucker angeschlossen, die sich weder über die Seriennummer noch über das Modell
+  unterscheiden lassen: nur den gewünschten Drucker anschließen und erneut einrichten.
 * **Bluetooth:** Bluetooth am Drucker aktivieren und sichtbar machen; LabelWerk benötigt die
   Freigabe unter **Datenschutz & Sicherheit › Bluetooth**.
 

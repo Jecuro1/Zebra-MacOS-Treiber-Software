@@ -156,10 +156,12 @@ und die generische CPCL-PPD zeigen deshalb nur die wirksamen Optionen.
 
 `lwStartCmd`/`lwEndCmd` sind **keine** PPD-Optionen: Ihre Werte sind freie Base64url-Zeichenketten,
 die ein Druckdialog nicht darstellen kann. Stünden sie als Auswahl in der PPD, würde ein Dialog
-den Platzhalter mit jedem Auftrag senden und die per `lpadmin -p <queue> -o lwStartCmd=…`
-gesetzten Warteschlangenwerte überdecken. Ohne PPD-Eintrag gelangen sie über die
-Warteschlangen-Optionen zuverlässig in `argv[5]` des Filters. Dasselbe Prinzip erlaubt auch
-Ganzzahlen außerhalb der PPD-Auswahl (z. B. `lwLabelTop=37`).
+den Platzhalter mit jedem Auftrag senden und die gesetzten Warteschlangenwerte überdecken. Ohne
+PPD-Eintrag gelangen sie als serverseitige Vorgaben zuverlässig in `argv[5]` des Filters – gesetzt mit
+`lpadmin -p <queue> -o lwStartCmd-default=…`, entfernt mit `-R lwStartCmd-default`. Dasselbe gilt
+für Ganzzahlen außerhalb der PPD-Auswahl (z. B. `-o lwLabelTop-default=37`). Achtung: Die Kurzform
+`-o lwStartCmd=…` speichert CUPS nur für PPD-Optionen mit gültiger Auswahl; andere Werte werden
+stillschweigend verworfen.
 
 **Generische PPDs.** Vereinigung der Fähigkeiten aller Katalogmodelle der jeweiligen Sprache:
 Druckbreite und Etikettenlänge = Maximum (ZPL: 216 mm, sodass jeder Drucker passt; EPL2/CPCL:

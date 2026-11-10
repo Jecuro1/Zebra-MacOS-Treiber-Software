@@ -725,8 +725,12 @@ PRINT\r\n
 | `lwStartCmd` `lwEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle |
 
 Vorrang im Filter: Wert aus `argv[5]` (Job-/Warteschlangen-Optionen) **vor** markierter PPD-Auswahl
-**vor** PPD-Default. Ganzzahlen außerhalb der PPD-Auswahl sind erlaubt (die App setzt beliebige
-Werte per `lpadmin -p <queue> -o lwLabelTop=37`). Boolesche Werte: `True/False/yes/no/on/off/1/0`.
+**vor** PPD-Default. Ganzzahlen außerhalb der PPD-Auswahl sind erlaubt. Warteschlangen-Standardwerte
+setzt die App als serverseitige Vorgaben mit `lpadmin -p <queue> -o lwLabelTop-default=37`
+(entfernen: `-R lwLabelTop-default`); CUPS übergibt sie jedem Auftrag als `lwLabelTop=37` in
+`argv[5]`. Die Kurzform `-o lwLabelTop=37` speichert CUPS nur für PPD-Optionen mit gültiger Auswahl
+und verwirft andere Werte (z. B. `lwStartCmd`, Ganzzahlen außerhalb der Auswahl) stillschweigend.
+Boolesche Werte: `True/False/yes/no/on/off/1/0`.
 
 Zusätzliche PPD-Attribute, die der Filter liest:
 `*lwModel: "zd421t"`, `*lwMaxPrintWidthDots: "832"`, `*lwDefaultGapDots: "24"`.

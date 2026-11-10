@@ -750,6 +750,8 @@ struct ToolsCalibrationWizard: View {
         setRunState(.sending)
         let lengthBefore = session.status?.hostStatus?.labelLengthDots
         let sentAt = Date()
+        // Während des Messens meldet der Drucker kurzzeitig z. B. „Etiketten leer“ – keine Alarme.
+        session.muteAlertNotifications(for: Self.maximumMeasuringTime + 15)
         let sent = await session.perform(.calibrate)
         guard !Task.isCancelled else { return }
         guard sent else {

@@ -127,23 +127,30 @@ extension ButtonStyle where Self == LabelWerkButtonStyle {
 
 ## Feature-Bereiche (je eine Root-View mit exakt dieser Signatur)
 
-Bereits fertig: `DashboardView`, `HistoryView`, `MenuBarView`, `AppSettingsView` (als Stil- und
-Qualitätsreferenz lesen).
+Alle Bereiche sind vollständig implementiert (Spalte „Stand“); `DashboardView`, `HistoryView`,
+`MenuBarView` und `AppSettingsView` dienen als Stil- und Qualitätsreferenz für Erweiterungen.
+Druckerbereiche (`PrinterSection` in `Model/Navigation.swift`) erscheinen in der Tab-Leiste von
+`PrinterDetailView` nur, wenn sie zu Modell und Verbindung passen
+(`PrinterSection.available(for:descriptor:developerMode:)`: Dateien, Sicherung & Wartung und RFID
+nur mit bidirektionaler Verbindung, Netzwerk nur mit Netzwerkschnittstelle, RFID nur bei Modellen
+mit RFID-Option).
 
-| Datei/Ordner | Root-View | Inhalt |
-|---|---|---|
-| `Features/Dashboard` | `DashboardView(session: PrinterSession)` | Übersicht: animierter Drucker, Status/Alarme mit Lösungsschritten, Kennzahlen, Schnellaktionen, Identität, letzte Aufträge, Demo-Steuerung |
-| `Features/Preferences` | `PrintPreferencesView(session: PrinterSession)` | Alle `PrintSettings` mit Live-Vorschau; „An Drucker senden“, „Dauerhaft speichern“, „Als macOS-Standard übernehmen“ |
-| `Features/Stocks` | `StocksView(session: PrinterSession)` | Etikettenformate (Katalog + eigene), Auswahl, Anlegen/Bearbeiten |
-| `Features/Tools` | `ToolsView(session: PrinterSession)` | Gerätebefehle (`PrinterAction`), Konfiguration (`^HH`), SGD-Explorer, Kalibrier-Assistent |
-| `Features/Terminal` | `TerminalView(session: PrinterSession)` | ZPL/SGD-Konsole mit Hervorhebung, Verlauf, Autovervollständigung, Hex-Ansicht |
-| `Features/Designer` | `DesignerView()` | ZPL-Editor + Live-Vorschau, Vorlagen, Bild/PDF → Etikett, Drucken/Exportieren |
-| `Features/Files` | `FilesView(session: PrinterSession)` | Dateien auf dem Drucker, Schriften (TTF) & Grafiken hochladen/löschen |
-| `Features/Network` | `NetworkView(session: PrinterSession)` | IP/DHCP/Gateway/WLAN/Bluetooth lesen & setzen |
-| `Features/Firmware` | `FirmwareView(session: PrinterSession)` | Firmware-Datei prüfen & übertragen mit Fortschritt |
-| `Features/History` | `HistoryView(printerID: UUID?)` | Auftragsverlauf mit Vorschau, Filter, erneut drucken |
-| `Features/Driver` | `DriverView()` | Treiberstatus, Installation/Update, macOS-Warteschlangen verwalten |
-| `Features/Discovery` | `DiscoveryView()`, `AddPrinterView()` | Suche (Bonjour, USB, Netzwerk, CUPS, Bluetooth) mit Radar-Animation, manuelles Hinzufügen |
-| `Features/Onboarding` | `OnboardingView()` | Erststart-Assistent (Willkommen → Treiber → Drucker → fertig) |
-| `Features/MenuBar` | `MenuBarView()` | Menüleisten-Fenster: alle Drucker mit Status, Schnellaktionen |
-| `Features/Settings` | `AppSettingsView()` | App-Einstellungen (`AppPreferences`) |
+| Datei/Ordner | Root-View | Inhalt | Stand |
+|---|---|---|---|
+| `Features/Dashboard` | `DashboardView(session: PrinterSession)` | Übersicht: animierter Drucker, Status/Alarme mit Lösungsschritten, Kennzahlen, Schnellaktionen, Identität, letzte Aufträge, Demo-Steuerung | ✔ implementiert |
+| `Features/Preferences` | `PrintPreferencesView(session: PrinterSession)` | Alle `PrintSettings` mit Live-Vorschau; „An Drucker senden“, „Dauerhaft speichern“, „Als macOS-Standard“ (Standardoptionen der Warteschlange) | ✔ implementiert |
+| `Features/Stocks` | `StocksView(session: PrinterSession)` | Etikettenformate (Katalog + eigene), Auswahl, Anlegen/Bearbeiten, Maße vom Drucker übernehmen | ✔ implementiert |
+| `Features/Tools` | `ToolsView(session: PrinterSession)` | Gerätebefehle (`PrinterAction`), Konfiguration (`^HH`), SGD-Explorer (Filter, Bearbeitung, JSON-Export), Kalibrier-Assistent, Testseite über macOS | ✔ implementiert |
+| `Features/Terminal` | `TerminalView(session: PrinterSession)` | ZPL/SGD/JSON-Konsole mit Hervorhebung, Verlauf, Autovervollständigung, Befehlsreferenz, Hex-Ansicht, Dateiversand, Export | ✔ implementiert |
+| `Features/Designer` | `DesignerView()` | ZPL-Editor + Live-Vorschau, Vorlagen, Bausteine, Bild/PDF → Etikett mit Rasterungsvergleich, Drucken/Exportieren | ✔ implementiert |
+| `Features/Files` | `FilesView(session: PrinterSession)` | Dateien auf dem Drucker, Speicherbelegung, Schriften (TTF) & Grafiken hochladen/löschen, Probedruck | ✔ implementiert |
+| `Features/Network` | `NetworkView(session: PrinterSession)` | IP/DHCP/Gateway/DNS/WLAN/Bluetooth lesen & setzen, Live-Prüfung, Änderungsübersicht | ✔ implementiert |
+| `Features/Maintenance` | `MaintenanceView(session: PrinterSession)` | „Sicherung & Wartung“: Konfiguration als `.lwbackup` sichern, wiederherstellen und auf andere Drucker klonen (Wert-für-Wert-Vergleich), Gerätesprache (`device.languages`) umstellen, Druckkopf-Zähler mit Reinigungserinnerung, Druckkopftest, Reinigungsanleitung | ✔ implementiert |
+| `Features/RFID` | `RFIDView(session: PrinterSession)` | Status des Kodierers, Tags lesen (EPC/TID/Benutzerspeicher, Dekodierung), Tags schreiben (Serien, SGTIN-96, Prüfung durch Rücklesen, bedruckte Etiketten), `^HR`-Kalibrierung, Programmierposition, Sendeleistung, RFID-SGD-Variablen | ✔ implementiert |
+| `Features/Firmware` | `FirmwareView(session: PrinterSession)` | Firmware-Datei prüfen (Version, Modell, SHA-256) & übertragen mit Fortschritt, Neustart-Countdown und Wiederverbindung | ✔ implementiert |
+| `Features/History` | `HistoryView(printerID: UUID?)` | Auftragsverlauf mit Vorschau, Filter, Statistik, erneut drucken, CSV-Export | ✔ implementiert |
+| `Features/Driver` | `DriverView()` | Treiberstatus, Installation/Update/Reparatur, macOS-Warteschlangen verwalten, Diagnose | ✔ implementiert |
+| `Features/Discovery` | `DiscoveryView()`, `AddPrinterView(initialTab: DiscoveryPanelTab = .search)` | Suche (Bonjour, USB, Netzwerk, CUPS, Bluetooth) mit Radar-Animation, manuelles Hinzufügen, Warnung bei Geräten, die sich nicht als Zebra-Drucker zu erkennen geben | ✔ implementiert |
+| `Features/Onboarding` | `OnboardingView()` | Erststart-Assistent (Willkommen → Treiber → Drucker → Mitteilungen → Fertig) | ✔ implementiert |
+| `Features/MenuBar` | `MenuBarView()` | Menüleisten-Fenster: alle Drucker mit Status, Schnellaktionen | ✔ implementiert |
+| `Features/Settings` | `AppSettingsView()` | App-Einstellungen (`AppPreferences`) | ✔ implementiert |

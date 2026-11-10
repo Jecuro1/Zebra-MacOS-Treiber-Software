@@ -16,9 +16,10 @@ veröffentlicht wird. Die verbindlichen Schnittstellen stehen in [ARCHITECTURE.m
 ## Voraussetzungen
 
 **macOS** (App, Universal-Filter, Paket): macOS 14 oder neuer mit **Xcode 16 oder neuer**
-(empfohlen: aktuelles Xcode; `sudo xcode-select -s /Applications/Xcode.app`). Die
-Befehlszeilenwerkzeuge allein genügen nicht – `swift build --arch arm64 --arch x86_64` benötigt
-Xcode. Dazu Python 3 (im System enthalten), optional `brew install shellcheck`.
+(empfohlen: aktuelles Xcode, zuletzt geprüft mit Xcode 26.3;
+`sudo xcode-select -s /Applications/Xcode.app`). Die Befehlszeilenwerkzeuge allein genügen
+nicht – `swift build --arch arm64 --arch x86_64` benötigt Xcode. Dazu Python 3 (im System
+enthalten), optional `brew install shellcheck`.
 
 **Linux** (Kern, CLI, Filter, PPDs – so läuft auch die CI): Ubuntu 24.04 mit Swift 6.x von
 [swift.org](https://www.swift.org/install/) und
@@ -44,10 +45,10 @@ Das `Makefile` im Wurzelverzeichnis fasst alle Befehle zusammen (`make` zeigt di
 |---|---|
 | `make build` | `swift build` – Kernmodule, `lwctl`; auf macOS zusätzlich die App |
 | `make test` | Katalogprüfung, `swift test`, Filtertests, PPD-Tests, Werkzeug-Tests |
-| `make test-swift` | `swift test` (Swift Testing) |
+| `make test-swift` | `swift test` (Swift Testing) – alle Testziele in einem Lauf; die CI startet jedes Testziel einzeln (siehe unten) |
 | `make test-driver` | `make -C Driver/filter test`: C-Unit-Tests und End-to-End-Tests gegen den Python-Referenz-Encoder |
 | `make test-ppd` | alle PPDs erzeugen, mit `cupstestppd` prüfen, Generator-Tests |
-| `make test-scripts` | Tests von `extract_strings.py` und den Build-/Installationsskripten (`Scripts/tests`) |
+| `make test-scripts` | Tests von `extract_strings.py`, den Build-/Installationsskripten und der Auftragsformat-Konformität (Swift `lwctl encode` = Python-Referenz = C-Filter, byte-genau) (`Scripts/tests`) |
 | `make lint` | Shell-/Python-Syntax, ShellCheck, Workflow-YAML, Property-Listen, Lokalisierung, Katalog |
 | `make ci` | kompletter CI-Lauf wie auf GitHub (`Scripts/ci_linux.sh` bzw. `Scripts/ci_macos.sh`) |
 | `make driver` | Treiberbaum nach `build/driver-root` (unter Linux als Testaufbau mit `--host`) |
@@ -55,8 +56,26 @@ Das `Makefile` im Wurzelverzeichnis fasst alle Befehle zusammen (`make` zeigt di
 | `make clean` / `make distclean` | Build-Ausgaben bzw. zusätzlich `.build/` entfernen |
 
 Parallele Jobs begrenzen: `make test JOBS=2`. Einzelne Swift-Tests: `swift test --filter
-LabelWerkImagingTests` oder `swift test --filter "Z64"`. Speicherfehler im Filter findet
-`make -C Driver/filter asan` (AddressSanitizer + UBSan) bzw. `make -C Driver/filter valgrind`.
+LabelWerkImagingTests` oder `swift test --filter "Z64"`. Wie in der CI je Testziel:
+
+```bash
+swift build --build-tests
+for t in LabelWerkCoreTests LabelWerkImagingTests LabelWerkBarcodeTests LabelWerkRenderTests \
+         LabelWerkStatusTests LabelWerkTransportTests LabelWerkKitTests; do
+    swift test --skip-build --filter "$t" || break
+done
+```
+
+Einige Tests laufen nur unter bestimmten Bedingungen und werden sonst mit Begründung übersprungen:
+die Rückleser-Tests in `LabelWerkRenderTests` (Barcodes aus dem Rasterizer mit zxing-cpp lesen)
+nur, wenn ein Python mit `zxing-cpp` und Pillow gefunden wird (`LABELWERK_ZXING_PYTHON` oder
+`PATH`), zwei Tests in `LabelWerkTransportTests`, die das Linux-Verhalten von `listen(…, 0)`
+voraussetzen, nur unter Linux. Die Konformitätstests in `Scripts/tests` benötigen ein gebautes
+`lwctl` und den Filter (`swift build --product lwctl`, `make -C Driver/filter tests`) – fehlen
+sie, werden sie übersprungen, mit `LW_REQUIRE_CONFORMANCE=1` schlagen sie dann fehl.
+
+Speicherfehler im Filter findet `make -C Driver/filter asan` (AddressSanitizer + UBSan) bzw.
+`make -C Driver/filter valgrind`.
 
 ### App starten
 
@@ -268,8 +287,8 @@ auf; jeder Workflow-Schritt entspricht einem Skriptschritt und lässt sich lokal
 
 | Job | Auslöser | Inhalt |
 |---|---|---|
-| `linux` (ubuntu-24.04) | jeder Push, jeder Pull Request, manuell | Swift 6.4.2 von swift.org (zwischengespeichert), Lint, Katalog, `swift build`/`swift test`, Filtertests, PPDs + `cupstestppd`, Werkzeug-Tests, Treiberbaum und Probeläufe der macOS-Skripte; Lokalisierung als Warnschritt |
-| `macos` (macos-15, neuestes stabiles Xcode) | nur manuell (`workflow_dispatch`), bei Pushes auf `main` und für Versions-Tags `v*` – macOS-Minuten sind knapp | Swift-Tests inkl. App, Universal-Filter + Tests, App-Bundle (ad hoc signiert), unsigniertes Paket, Paketprüfung, Probeinstallation mit Testdruck über CUPS und Deinstallation; Artefakte: App (ZIP, dSYM) und Paket |
+| `linux` (ubuntu-24.04) | jeder Push (alle Zweige und Tags `v*`), jeder Pull Request, manuell | Swift 6.4.2 von swift.org (zwischengespeichert), Lint, Katalog, `swift build --build-tests`, Swift-Tests je Testziel, Filtertests, PPDs + `cupstestppd`, Werkzeug-Tests, Treiberbaum und Probeläufe der macOS-Skripte; Lokalisierung als Warnschritt (`--strict-strings`, `continue-on-error`) |
+| `macos` (macos-15, neuestes stabiles Xcode) | nur manuell (`workflow_dispatch`), bei Pushes auf `main` und für Versions-Tags `v*` – macOS-Minuten sind knapp | Build inkl. App-Ziel, Swift-Tests je Testziel, Universal-Filter + Tests, App-Bundle (ad hoc signiert), unsigniertes Paket, Paketprüfung, Probeinstallation mit Testdruck über CUPS und Deinstallation; Artefakte: App (ZIP, dSYM) und Paket |
 
 ```bash
 Scripts/ci_linux.sh                         # alle Schritte
@@ -278,6 +297,16 @@ Scripts/ci_linux.sh --keep-going            # weitermachen und am Ende zusammenf
 Scripts/ci_macos.sh test-driver app pkg verify-pkg
 Scripts/ci_macos.sh --allow-system-changes install-test e2e-print   # installiert systemweit!
 ```
+
+Der Schritt `test-swift` baut zuerst alles (`swift build --build-tests`, auf macOS inklusive
+App-Ziel) und startet dann jedes Testziel in einem eigenen Lauf (`swift test --skip-build --filter
+<Modul>Tests`): In einem gemeinsamen Prozess würden rechenintensive Tests (QR/PDF417,
+Renderer-Fuzzing) auf kleinen CI-Rechnern die zeitkritischen Netzwerk- und Zeitlimit-Tests
+verzögern. Ein eigenes Testziel für die App gibt es nicht; auf macOS wird sie in diesem Schritt
+mitgebaut, sodass Compilerfehler der App den Lauf scheitern lassen.
+
+Laufen überholte Läufe desselben Zweigs noch, bricht die CI sie ab (außer auf `main`); manuelle
+Läufe bilden eine eigene Gruppe und werden nicht durch Pushes abgebrochen.
 
 Jeder Schritt läuft als eigener Bash-Prozess des CI-Skripts (`lw_ci_run_step` in
 `Installer/lib/common.sh`): Bash setzt `set -e` in Funktionen außer Kraft, die in einem

@@ -2583,6 +2583,7 @@
 "Bild wird gedruckt …" = "Printing image…";
 "Daten werden gesendet …" = "Sending data…";
 "Erneut drucken nicht möglich" = "Cannot print again";
+"RFID-Kodieraufträge werden nicht wiederholt – jede EPC darf nur einmal geschrieben werden." = "RFID encoding jobs are not repeated – each EPC may only be written once.";
 "Für diesen Auftrag wurden keine Druckdaten gespeichert." = "No print data was stored for this job.";
 "Auftrag wird erneut gesendet …" = "Resending job…";
 "Erneut gedruckt" = "Printed again";

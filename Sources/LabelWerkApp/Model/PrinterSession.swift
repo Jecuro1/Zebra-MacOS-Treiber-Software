@@ -42,6 +42,7 @@ final class PrinterSession: Identifiable {
     @ObservationIgnored weak var app: AppModel?
     @ObservationIgnored private var client: PrinterClient?
     @ObservationIgnored private var monitorTask: Task<Void, Never>?
+    @ObservationIgnored private var alertsMutedUntil: Date?
     @ObservationIgnored private var previousAlertKinds: Set<AlertKind> = []
     @ObservationIgnored private var consecutiveFailures = 0
     /// Automatische Wiederverbindungsversuche seit der letzten erfolgreichen Verbindung.
@@ -283,7 +284,22 @@ final class PrinterSession: Identifiable {
         notifyIfNeeded(newAlerts: appeared)
     }
 
+    /// Unterdrückt Hinweise, Mitteilungen und Töne für neu auftretende Meldungen für `seconds`
+    /// Sekunden – z. B. während einer Kalibrierung, bei der der Drucker kurzzeitig „Etiketten leer“
+    /// melden kann. Die Meldungen bleiben in der Übersicht sichtbar.
+    func muteAlertNotifications(for seconds: TimeInterval) {
+        alertsMutedUntil = Date().addingTimeInterval(max(0, seconds))
+    }
+
+    func unmuteAlertNotifications() {
+        alertsMutedUntil = nil
+    }
+
     private func notifyIfNeeded(newAlerts: [PrinterAlert]) {
+        if let until = alertsMutedUntil {
+            if Date() < until { return }
+            alertsMutedUntil = nil
+        }
         let relevant = newAlerts.filter { $0.severity >= .warning }
         guard !relevant.isEmpty, let app else { return }
         for alert in relevant {
@@ -430,6 +446,13 @@ final class PrinterSession: Identifiable {
     @discardableResult
     func reprint(_ job: JobRecord) async -> Bool {
         // Nach einem Neustart liegen die Druckdaten in einer eigenen Datei (siehe `PersistenceStore`).
+        if let payload = PersistenceStore.payload(for: job), Self.containsRFIDWrite(payload) {
+            // RFID-Kodieraufträge nie erneut senden: Das würde dieselbe EPC ein zweites Mal schreiben.
+            app?.toast(tr("Erneut drucken nicht möglich"),
+                       message: tr("RFID-Kodieraufträge werden nicht wiederholt – jede EPC darf nur einmal geschrieben werden."),
+                       style: .warning)
+            return false
+        }
         guard job.isReprintable, let payload = PersistenceStore.payload(for: job) else {
             app?.toast(tr("Erneut drucken nicht möglich"), message: tr("Für diesen Auftrag wurden keine Druckdaten gespeichert."), style: .warning)
             return false
@@ -561,6 +584,12 @@ final class PrinterSession: Identifiable {
     /// Animiert eine Zustandsänderung – ohne Animation, wenn Bewegung reduziert werden soll.
     private func animate(_ animation: Animation, _ changes: () -> Void) {
         withAnimation(Motion.animation(animation, reduceMotion: app?.reducesMotion ?? false), changes)
+    }
+
+    /// Enthält der Auftrag einen RFID-Schreibbefehl (`^RFW`)?
+    nonisolated static func containsRFIDWrite(_ data: Data) -> Bool {
+        let upper = String(decoding: data, as: UTF8.self).uppercased()
+        return upper.contains("^RFW")
     }
 
     /// Lesbare Fehlermeldung (LocalizedError bevorzugt).
