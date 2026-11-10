@@ -156,8 +156,8 @@ struct HostStatusTests {
 
     @Test("Druckmodus-Codes", arguments: [
         ("0", PrintMode?.some(.rewind)), ("1", .peelOff), ("2", .tearOff), ("3", .cutter),
-        ("4", .applicator), ("5", .delayedCut), ("6", .peelOff), ("7", .rewind), ("8", .cutter),
-        ("9", nil), ("K", .kiosk), ("k", .kiosk), ("S", nil), ("A", .tearOff), ("X", nil),
+        ("4", .applicator), ("5", .delayedCut), ("6", .linerlessPeel), ("7", .linerlessRewind), ("8", .cutter),
+        ("9", nil), ("K", .kiosk), ("k", .kiosk), ("S", nil), ("A", .linerlessTear), ("a", .linerlessTear), ("X", nil),
     ])
     func mapsPrintModeCodes(code: String, expected: PrintMode?) throws {
         #expect(HostStatus.printMode(forCode: code) == expected)
@@ -173,12 +173,28 @@ struct HostStatusTests {
 
     @Test("Kanonische Codes je PrintMode sind umkehrbar", arguments: PrintMode.allCases)
     func printModeCodeRoundTrip(mode: PrintMode) {
-        #expect(HostStatus.printMode(forCode: HostStatus.code(for: mode)) == mode)
+        // ~HS kennt keine eigenen Codes für Linerless schneiden / verzögert schneiden.
+        let expected: PrintMode = [.linerlessCut, .linerlessDelayedCut].contains(mode) ? mode.classicEquivalent : mode
+        #expect(HostStatus.printMode(forCode: HostStatus.code(for: mode)) == expected)
+    }
+
+    @Test("Linerless-Codes und -Bezeichnungen")
+    func linerlessCodes() {
+        #expect(HostStatus.code(for: .linerlessPeel) == "6")
+        #expect(HostStatus.code(for: .linerlessRewind) == "7")
+        #expect(HostStatus.code(for: .linerlessTear) == "A")
+        #expect(HostStatus.code(for: .linerlessCut) == "3")
+        #expect(HostStatus.code(for: .linerlessDelayedCut) == "5")
+        #expect(HostStatus(printMode: .linerlessCut).printModeDisplayName == "Linerless schneiden")
+        #expect(HostStatus(printMode: .linerlessDelayedCut, printModeCode: "5").printModeDisplayName
+            == "Linerless verzögert schneiden")
+        #expect(HostStatus(printMode: .linerlessTear, printModeCode: "A").printModeDisplayName == "Linerless – Abreißen")
+        #expect(HostStatus(printMode: .linerlessPeel).effectivePrintModeCode == "6")
     }
 
     @Test("Deutsche Bezeichnung des gemeldeten Druckmodus")
     func printModeDisplayNames() {
-        #expect(HostStatus(printMode: .peelOff, printModeCode: "6").printModeDisplayName == "Linerless – Spenden")
+        #expect(HostStatus(printMode: .linerlessPeel, printModeCode: "6").printModeDisplayName == "Linerless – Spenden")
         #expect(HostStatus(printMode: .cutter, printModeCode: "8").printModeDisplayName == "Teilschnitt")
         #expect(HostStatus(printMode: nil, printModeCode: "9").printModeDisplayName == "RFID")
         #expect(HostStatus(printMode: nil, printModeCode: "Q").printModeDisplayName == "Unbekannt (Q)")
@@ -188,7 +204,7 @@ struct HostStatusTests {
 
     @Test("Veralteter Rohcode nach Änderung von printMode wird nicht ausgegeben")
     func effectiveCodeFollowsPrintMode() throws {
-        var status = HostStatus(printMode: .peelOff, printModeCode: "6")
+        var status = HostStatus(printMode: .linerlessPeel, printModeCode: "6")
         #expect(status.effectivePrintModeCode == "6")
         status.printMode = .cutter
         #expect(status.effectivePrintModeCode == "3")
@@ -240,7 +256,8 @@ struct HostStatusTests {
         HostStatus(),
         HostStatus(paperOut: true, paused: true, labelLengthDots: 99_999, headOpen: true),
         HostStatus(printMode: nil, printModeCode: "9"),
-        HostStatus(printMode: .peelOff, labelWaitingToBePeeled: true, printModeCode: "6"),
+        HostStatus(printMode: .linerlessPeel, labelWaitingToBePeeled: true, printModeCode: "6"),
+        HostStatus(printMode: .linerlessTear, printModeCode: "A"),
         HostStatus(labelsRemainingInBatch: 12_345_678, graphicsStoredInMemory: 123, password: "0000",
                    staticRAMInstalled: true),
         HostStatus(communicationSettings: 291, formatsInReceiveBuffer: 999, receiveBufferFull: true,

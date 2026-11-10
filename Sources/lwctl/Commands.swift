@@ -182,8 +182,21 @@ enum Commands {
     static func encode(_ context: Context) throws -> ExitCode {
         let job = try ImageJob(context: context, identity: nil)
         let images = try job.loadImages(context.arguments.arguments)
-        let encoder = JobEncoder(language: context.language, resolution: job.resolution, settings: job.settings,
+        var encoder = JobEncoder(language: context.language, resolution: job.resolution, settings: job.settings,
                                  stock: job.stock, maxPrintWidthDots: job.maxPrintWidthDots)
+        if let seconds = try context.arguments.int("fixed-time") {
+            let date = Date(timeIntervalSince1970: TimeInterval(seconds))
+            encoder.now = { date }
+        }
+        if let step = try context.arguments.int("time-step", in: 0...86_400) {
+            encoder.timeStepSeconds = Int64(step)
+        }
+        if let identifier = context.arguments.value("time-zone") {
+            guard let zone = TimeZone(identifier: identifier) ?? TimeZone(abbreviation: identifier) else {
+                throw CLIError.usage("Unbekannte Zeitzone „\(identifier)“ (z. B. UTC, Europe/Berlin).")
+            }
+            encoder.timeZone = zone
+        }
         let data = try encoder.encode(images: images, copies: job.copies, collate: !context.arguments.has("no-collate"))
         if let output = context.arguments.value("output"), output != "-" {
             try Files.write(data, to: output)
@@ -367,6 +380,24 @@ struct ImageJob {
         settings.skipBlankLabels = arguments.has("skip-blank")
         settings.startCommands = arguments.value("start-commands") ?? ""
         settings.endCommands = arguments.value("end-commands") ?? ""
+        if let raw = arguments.value("rotation") {
+            guard let rotation = PrintRotation(cupsValue: raw) else {
+                throw CLIError.usage("„--rotation“ erwartet 0, 90, 180 oder 270.")
+            }
+            settings.rotation = rotation
+        }
+        settings.markOffset = try arguments.int("mark-offset", in: -80...283)
+        settings.stopAtLastElement = arguments.has("stop-at-last")
+        settings.stopOffset = try arguments.int("stop-offset", in: 0...32_000) ?? 0
+        settings.pauseEvery = try arguments.int("pause-every", in: 0...9999) ?? 0
+        settings.controlCharacters = try Self.controlCharacters(arguments)
+        settings.rtcUpdate = try Self.choice(arguments, "rtc") { (value: RTCUpdate) in value.cupsValue }
+        settings.cancelJobsBeforePrint = arguments.has("cancel-before")
+        settings.cancelDelayMs = try arguments.int("cancel-delay", in: 0...10_000) ?? 1000
+        settings.labelStartCommands = arguments.value("label-start-commands") ?? ""
+        settings.labelEndCommands = arguments.value("label-end-commands") ?? ""
+        settings.powerUpAction = try Self.feedAction(arguments, "power-up-action")
+        settings.headCloseAction = try Self.feedAction(arguments, "head-close-action")
         self.settings = settings
 
         if let id = arguments.value("model") {
@@ -441,6 +472,48 @@ struct ImageJob {
         throw CLIError.usage("Unbekannter Wert „\(raw)“ für „--\(name)“ (erlaubt: \(allowed)).")
     }
 
+    /// `--control-chars standard|printer` mit `--format-prefix`, `--control-prefix`, `--delimiter`
+    /// (je ein Zeichen oder dezimaler ASCII-Code 33…126). Wie bei den CUPS-Optionen gelten die
+    /// Zeichen nur mit `printer`; fehlende Zeichen sind die Standardzeichen.
+    static func controlCharacters(_ arguments: ParsedArguments) throws -> ControlCharacters? {
+        let names = ["format-prefix", "control-prefix", "delimiter"]
+        var mode = arguments.value("control-chars")?.trimmingCharacters(in: .whitespaces).lowercased() ?? "standard"
+        if mode == "intern" || mode == "internal" { mode = "printer" }
+        guard mode == "printer" else {
+            guard mode == "standard" || mode == "default" else {
+                throw CLIError.usage("„--control-chars“ erwartet standard oder printer, nicht „\(mode)“.")
+            }
+            for name in names where arguments.value(name) != nil {
+                Console.err("Hinweis: „--\(name)“ wirkt nur mit „--control-chars printer“ und wird ignoriert.")
+            }
+            return nil
+        }
+        func character(_ name: String, _ fallback: UInt8) throws -> UInt8 {
+            guard let raw = arguments.value(name) else { return fallback }
+            if let code = Int(raw.trimmingCharacters(in: .whitespaces)) {
+                guard let byte = UInt8(exactly: code), ControlCharacters.validRange.contains(byte) else {
+                    throw CLIError.usage("„--\(name)“: ASCII-Code \(code) liegt nicht zwischen 33 und 126.")
+                }
+                return byte
+            }
+            guard let byte = ControlCharacters.character(from: raw) else {
+                throw CLIError.usage("„--\(name)“ erwartet ein druckbares ASCII-Zeichen oder einen Code 33…126, nicht „\(raw)“.")
+            }
+            return byte
+        }
+        return ControlCharacters(formatPrefix: try character("format-prefix", 0x5E),
+                                 controlPrefix: try character("control-prefix", 0x7E),
+                                 delimiter: try character("delimiter", 0x2C))
+    }
+
+    /// `--power-up-action`/`--head-close-action`: CUPS-Wert (`ShortCal`), Name (`shortCalibration`)
+    /// oder ZPL-Code (`S`).
+    static func feedAction(_ arguments: ParsedArguments, _ name: String) throws -> MediaFeedAction? {
+        guard let raw = arguments.value(name) else { return nil }
+        if raw.count == 1, let action = MediaFeedAction(zplCode: raw) { return action }
+        return try choice(arguments, name) { (value: MediaFeedAction) in value.cupsValue }
+    }
+
     static func dither(_ raw: String) -> DitherAlgorithm? {
         let lower = raw.lowercased().replacingOccurrences(of: "-", with: "")
         if let match = DitherAlgorithm.allCases.first(where: { $0.rawValue.lowercased() == lower || $0.cupsValue.lowercased() == lower }) {
@@ -455,12 +528,22 @@ struct ImageJob {
 
     /// Lädt, dreht und passt alle Bilder ein (mit `--no-layout`: lädt sie unverändert; zu breite
     /// Bilder schneidet dann erst der `JobEncoder` nach der Rasterung ab – wie der CUPS-Filter).
+    ///
+    /// Bei einer Treiberdrehung um 90° bzw. 270° (`--rotation`) ist die Seite – wie im
+    /// Druckdialog – quer: Eingepasst wird in das Etikett mit vertauschter Breite und Höhe; der
+    /// `JobEncoder` dreht die Seite danach auf das Etikett zurück.
     func loadImages(_ paths: [String]) throws -> [GrayImage] {
-        try paths.map { path in
+        let landscape = settings.effectiveRotation.isQuarterTurn
+        var page = stock
+        if landscape {
+            page.widthMM = stock.heightMM
+            page.heightMM = stock.widthMM
+        }
+        return try paths.map { path in
             let image = try Files.image(path)
             if keepsImageSize { return image }
-            return ImageLayout.layout(image, for: stock, resolution: resolution, mode: fit, rotation: rotation,
-                                      maxPrintWidthDots: maxPrintWidthDots)
+            return ImageLayout.layout(image, for: page, resolution: resolution, mode: fit, rotation: rotation,
+                                      maxPrintWidthDots: landscape ? nil : maxPrintWidthDots)
         }
     }
 }

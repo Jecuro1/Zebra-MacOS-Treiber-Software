@@ -16,6 +16,12 @@ Aufrufe), Seiten der Höhe 0, SIGTERM-Abbruch (auch vor der ersten Seite und vor
 eine 2400 × 32000-Seite mit Speichermessung, ``commandtolabelwerk`` und die Test-PPD mit
 ``cupstestppd``.
 
+Windows-Druckeinstellungen: Drehung 0/90/180/270°, Markenversatz, Seitenkerben, Linerless-Modi,
+Bei letztem Element stoppen, Pause, eigene Steuerzeichen, RTC (``^ST``) mit fester bzw.
+schrittweiser Uhr (``LW_FIXED_TIME``/``LW_TIME_STEP_SECONDS``, auch mit anderer Zeitzone ``TZ``),
+``~JA`` samt Wartezeit (``LW_CANCEL_DELAY_SCALE``; ohne Angabe setzt der Testrahmen 0, damit kein
+Fall wirklich wartet – nur die Zeitmessung wartet kurz), Etikettenbefehle und ``^MF``.
+
 Aufruf:
     run_e2e.py --bindir build [--quick] [--wrapper "valgrind -q …"] [--only MUSTER] [--keep]
 """
@@ -34,6 +40,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -158,6 +165,7 @@ class Case:
     expect: Optional[Callable[["Context"], bytes]] = None
     max_rss_mb: Optional[float] = None
     timeout: float = 120.0
+    env: Dict[str, str] = field(default_factory=dict)   # z. B. LW_FIXED_TIME, TZ
 
     def argv_options(self) -> str:
         if self.opt_string is not None:
@@ -177,6 +185,27 @@ class Context:
     copies: int
     max_width: int
     gap: int
+    now: Optional[int] = None
+    time_step: int = 0
+
+
+@contextmanager
+def time_zone(tz: Optional[str]):
+    """Setzt TZ für die Referenzrechnung (wie in der Umgebung des Filters) und stellt sie wieder her."""
+    if tz is None:
+        yield
+        return
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = tz
+    time.tzset()
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
 
 
 class Runner:
@@ -294,6 +323,8 @@ class Runner:
             ppd = make_ppd(directory, case.ppd)
             env = dict(os.environ)
             env.pop("PPD", None)
+            env.setdefault("LW_CANCEL_DELAY_SCALE", "0")   # ~JA-Wartezeit in Tests nicht abwarten
+            env.update(case.env)
             if case.ppd == "missing":
                 env["PPD"] = os.path.join(directory, "gibt-es-nicht.ppd")
             elif ppd is not None:
@@ -318,7 +349,8 @@ class Runner:
                 self.check(rss <= case.max_rss_mb, "Speicherbedarf %.1f MB > %.1f MB" % (rss, case.max_rss_mb), errors)
             if case.compare and not errors and code == 0:
                 ctx = self.context(case, infos, dump, ppd, argv_text)
-                expected = case.expect(ctx) if case.expect else self.expected(ctx)
+                with time_zone(case.env.get("TZ")):
+                    expected = case.expect(ctx) if case.expect else self.expected(ctx)
                 if output != expected:
                     pos = next((i for i, (a, b) in enumerate(zip(output, expected)) if a != b),
                                min(len(output), len(expected)))
@@ -343,10 +375,15 @@ class Runner:
         marked = simulate_marked(ppd, argv)
         defaults = ppd.defaults if ppd else {}
         settings = ref.resolve_settings(argv, marked, defaults)
+        fixed = case.env.get("LW_FIXED_TIME")
+        step = case.env.get("LW_TIME_STEP_SECONDS") if fixed is not None else None
+        if settings.rtc and settings.language == "ZPL" and fixed is None:
+            raise AssertionError("RTC-Fall ohne LW_FIXED_TIME ist nicht reproduzierbar")
         return Context(case=case, infos=infos, dump=dump, ppd=ppd, argv=argv, settings=settings,
                        collate=ref.resolve_collate(argv, marked), copies=ref.parse_copies(str(case.copies)),
                        max_width=ppd_int(ppd, "lwMaxPrintWidthDots", 1, 0),
-                       gap=ppd_int(ppd, "lwDefaultGapDots", 0, ref.DEFAULT_GAP_DOTS))
+                       gap=ppd_int(ppd, "lwDefaultGapDots", 0, ref.DEFAULT_GAP_DOTS),
+                       now=int(fixed) if fixed is not None else None, time_step=int(step) if step else 0)
 
     @staticmethod
     def images(ctx: Context):
@@ -366,7 +403,8 @@ class Runner:
         res = ctx.infos[0]["xres"] if ctx.infos else 203
         return ref.encode_job_from_luminance(self.images(ctx), ctx.settings, resolution_dpi=res,
                                              max_width=ctx.max_width, gap_dots=ctx.gap,
-                                             copies=ctx.copies, collate=ctx.collate)
+                                             copies=ctx.copies, collate=ctx.collate,
+                                             now=ctx.now, time_step=ctx.time_step)
 
     def processed_pages(self, ctx: Context):
         s = ctx.settings
@@ -398,7 +436,11 @@ class Runner:
         """Unabhängig vom Bytevergleich: Grafikfelder dekodieren und mit den Seiten vergleichen."""
         pages = self.processed_pages(ctx)
         seq = ref.label_sequence(len(pages), ctx.copies, ctx.collate)
-        fields = re.findall(rb"\^GFA,(\d+),(\d+),(\d+),(.*?)\^FS", output, re.S)
+        f, _, d = (bytes([c]) for c in (ctx.settings.control_chars or ref.STANDARD_CONTROL_CHARS))
+        n = rb"(\d+)"
+        pattern = re.escape(f) + b"GFA" + re.escape(d) + n + re.escape(d) + n + re.escape(d) + n + re.escape(d) \
+            + rb"(.*?)" + re.escape(f) + b"FS"
+        fields = re.findall(pattern, output, re.S)
         self.check(len(fields) == len(seq), "Anzahl Grafikfelder %d, erwartet %d" % (len(fields), len(seq)), errors)
         for (total, total2, bpr, data), (index, _) in zip(fields, seq):
             bm = pages[index][1]
@@ -442,6 +484,7 @@ P_BLANK = "w=96,h=40,pattern=blank"
 P_BLACK = "w=40,h=20,pattern=black"
 P_WIDE = "w=900,h=48,pattern=hgrad"
 P_ODD = "w=13,h=7,pattern=noise,seed=2"
+P_SMALL = "w=37,h=11,pattern=text,seed=5"
 
 
 def raster_cases() -> List[Case]:
@@ -658,6 +701,159 @@ def raster_cases() -> List[Case]:
     # Ob libcups an einem Kopf mit Höhe 0 abbricht (2.3/2.4) oder ihn liefert, ist versionsabhängig;
     # der Filter überspringt solche Seiten bzw. meldet „keine Seiten“, wenn gar nichts ankommt.
     add(Case("hoehe-null-zuerst", ["w=40,h=0,raw=1", P_GRAD], exit_code=None))
+    cases += windows_cases()
+    return cases
+
+
+# Feste Uhr für RTC-Fälle: 14.11.2023 22:13:20 UTC
+FIXED = {"LW_FIXED_TIME": "1700000000", "TZ": "UTC0"}
+TZ_BERLIN = "CET-1CEST,M3.5.0,M10.5.0/3"   # POSIX-Zeitzone (ohne tzdata), Sommerzeit am 2.7.2024
+
+
+def windows_cases() -> List[Case]:
+    """Optionen der Windows-Druckeinstellungen (ZDesigner „Druckeinstellungen für ZD421“)."""
+    cases: List[Case] = []
+    add = cases.append
+    P_TALLNOISE = "w=60,h=900,pattern=noise,seed=4"
+
+    # Drehung (lwRotation) – Software-Drehung vor dem Abschneiden, 180° wie bisher
+    for lang in LANGS:
+        for rotation in ("0", "90", "180", "270"):
+            add(Case("drehung-%s-%s" % (lang, rotation), [P_TEXT, P_ODD],
+                     {"lwLanguage": lang, "lwRotation": rotation, "lwCompression": "ACS"},
+                     quick=(rotation == "90" and lang == "ZPL")))
+        add(Case("drehung-%s-90-mit-alt-180" % lang, [P_ODD], {"lwLanguage": lang, "lwRotation": "90",
+                                                              "lwRotate180": "True"}))
+        add(Case("drehung-%s-270-abschneiden-spiegeln-negativ" % lang, [P_TALLNOISE, P_TEXT],
+                 {"lwLanguage": lang, "lwRotation": "270", "lwMirror": "True", "lwNegative": "True",
+                  "lwDither": "FloydSteinberg"}, stderr_has=["abgeschnitten"]))
+    add(Case("drehung-90-abschneiden", [P_TALLNOISE], {"lwRotation": "90", "lwCompression": "Hex"},
+             stderr_has=["abgeschnitten"]))
+    add(Case("drehung-ppd-standard", [P_TEXT], ppd={"defaults": {"lwRotation": "270"}}))
+    add(Case("drehung-ungueltig-faellt-auf-ppd", [P_TEXT], {"lwRotation": "45"},
+             ppd={"defaults": {"lwRotation": "90"}}, stderr_has=["lwRotation"]))
+    add(Case("drehung-default", [P_TEXT], {"lwRotation": "Default", "lwRotate180": "True"},
+             ppd={"defaults": {"lwRotation": "90"}}))
+    add(Case("drehung-kopien-sortiert", [P_TEXT, P_ODD, P_GRAD], {"lwRotation": "90"}, copies=2))
+
+    # Medientyp: Seitenkerben, Markenversatz
+    for lang in LANGS:
+        add(Case("kerben-%s" % lang, [P_ODD, P_SMALL], {"lwLanguage": lang, "lwMediaTracking": "Notch"}))
+    for offset in ("-200", "-80", "0", "37", "283", "999", "Default", "Custom.-12"):
+        add(Case("markenversatz-%s" % offset, [P_ODD], {"lwMediaTracking": "BlackMark", "lwMarkOffset": offset}))
+    add(Case("markenversatz-nur-schwarze-marke", [P_ODD], {"lwMediaTracking": "Gap", "lwMarkOffset": "40"}))
+    add(Case("markenversatz-ohne-erkennung", [P_ODD], {"lwMarkOffset": "40"}))
+    add(Case("markenversatz-EPL-ignoriert", [P_ODD], {"lwLanguage": "EPL", "lwMediaTracking": "BlackMark",
+                                                      "lwMarkOffset": "40"}))
+    add(Case("markenversatz-ppd", [P_ODD], {"lwMediaTracking": "BlackMark"},
+             ppd={"defaults": {"lwMarkOffset": "40"}}))
+
+    # Linerless-Modi (SGD media.printmode, kein ^MM)
+    for mode in ("LinerlessPeel", "LinerlessCut", "LinerlessDelayedCut", "LinerlessRewind", "LinerlessTear"):
+        for lang in LANGS:
+            add(Case("linerless-%s-%s" % (lang, mode), [P_ODD, P_SMALL],
+                     {"lwLanguage": lang, "lwPrintMode": mode, "lwMediaType": "DirectThermal"},
+                     copies=2, quick=(mode == "LinerlessCut" and lang == "ZPL")))
+
+    # Bei letztem Element stoppen (nur Endlosmaterial, alle Sprachen)
+    P_TOP = "w=96,h=120,pattern=dots,seed=9"
+    for lang in LANGS:
+        for offset in ("0", "24", "5000"):
+            add(Case("stoppen-%s-%s" % (lang, offset), [P_TEXT, P_GRAD, P_TOP],
+                     {"lwLanguage": lang, "lwMediaTracking": "Continuous", "lwStopAtLast": "True",
+                      "lwStopOffset": offset}))
+    add(Case("stoppen-leer", [P_BLANK, P_TEXT], {"lwMediaTracking": "Continuous", "lwStopAtLast": "True"}))
+    add(Case("stoppen-leer-ueberspringen", [P_BLANK, P_TEXT], {"lwMediaTracking": "Continuous",
+                                                              "lwStopAtLast": "True", "lwSkipBlank": "True"}))
+    add(Case("stoppen-negativ", [P_TEXT], {"lwMediaTracking": "Continuous", "lwStopAtLast": "True",
+                                          "lwStopOffset": "16", "lwNegative": "True"}))
+    add(Case("stoppen-nur-endlos", [P_TEXT], {"lwMediaTracking": "Gap", "lwStopAtLast": "True",
+                                             "lwStopOffset": "16"}))
+    add(Case("stoppen-begrenzt", [P_ODD], {"lwMediaTracking": "Continuous", "lwStopAtLast": "True",
+                                          "lwStopOffset": "99999"}))
+    add(Case("stoppen-gedreht", [P_TALLNOISE], {"lwMediaTracking": "Continuous", "lwStopAtLast": "True",
+                                               "lwRotation": "90"}))
+
+    # Pausieren (Vorrang vor Schneiden)
+    for pause in ("1", "5", "9999", "20000"):
+        add(Case("pause-%s" % pause, [P_ODD, P_SMALL], {"lwPauseEvery": pause}, copies=3))
+    add(Case("pause-vor-schneiden", [P_ODD], {"lwPauseEvery": "4", "lwCutEvery": "2"}, copies=8))
+    add(Case("pause-null-schneiden", [P_ODD], {"lwPauseEvery": "0", "lwCutEvery": "2"}, copies=8))
+    add(Case("pause-EPL-ignoriert", [P_ODD], {"lwLanguage": "EPL", "lwPauseEvery": "3"}, copies=2))
+
+    # Steuerzeichen („Intern“ = Zeichen des Druckers)
+    every = {"lwDarkness": "12", "lwTearOff": "-10", "lwBackfeed": "After", "lwCalibrate": "True",
+             "lwCancelBefore": "True", "lwPowerUpAction": "Feed", "lwHeadCloseAction": "Length",
+             "lwRTC": "EveryLabel", "lwMediaTracking": "BlackMark", "lwMarkOffset": "-20", "lwSpeed": "5",
+             "lwLabelTop": "8", "lwLabelLeft": "-4", "lwPauseEvery": "2", "lwSaveSettings": "True",
+             "lwStartCmd": b64u("^XA^FX,~^XZ"), "lwLabelStartCmd": b64u("^FO1,1^FD~,^FS"),
+             "lwLabelEndCmd": b64u("^FX,"), "lwEndCmd": b64u("~JR")}
+    for label, chars in (("raute", ("35", "64", "59")), ("vertauscht", ("126", "94", "44")),
+                         ("nur-trenner", ("94", "126", "124")), ("ungueltig", ("200", "32", "59"))):
+        for comp in ("Z64", "ACS", "Hex"):
+            opts = dict(every, lwControlChars="Printer", lwFormatPrefix=chars[0], lwControlPrefix=chars[1],
+                        lwDelimiter=chars[2], lwCompression=comp)
+            add(Case("steuerzeichen-%s-%s" % (label, comp), [P_TEXT, P_ODD], opts, copies=2, env=FIXED,
+                     stderr_has=["lwFormatPrefix"] if label == "ungueltig" else [],
+                     quick=(label == "raute" and comp == "ACS")))
+    add(Case("steuerzeichen-standard-ignoriert-praefixe", [P_ODD],
+             dict(every, lwControlChars="Standard", lwFormatPrefix="35"), env=FIXED))
+    add(Case("steuerzeichen-ppd-standard", [P_ODD], {"lwDarkness": "3"},
+             ppd={"defaults": {"lwControlChars": "Printer", "lwFormatPrefix": "35", "lwDelimiter": "59"}}))
+    add(Case("steuerzeichen-EPL-ignoriert", [P_ODD], {"lwLanguage": "EPL", "lwControlChars": "Printer",
+                                                      "lwFormatPrefix": "35", "lwCancelBefore": "True"}))
+
+    # Echtzeituhr (^ST)
+    for mode in ("JobStart", "EveryLabel", "EveryMinute"):
+        for step in ("0", "25", "61"):
+            add(Case("rtc-%s-%s" % (mode, step), [P_ODD, P_SMALL, P_TEXT], {"lwRTC": mode}, copies=3,
+                     env=dict(FIXED, LW_TIME_STEP_SECONDS=step), quick=(mode == "EveryMinute" and step == "25")))
+        add(Case("rtc-%s-einzeln" % mode, [P_ODD, P_SMALL], {"lwRTC": mode, "collate": "false"}, copies=4,
+                 env=dict(FIXED, LW_TIME_STEP_SECONDS="30")))
+    add(Case("rtc-sommerzeit-berlin", [P_ODD], {"lwRTC": "EveryLabel"}, copies=2,
+             env={"LW_FIXED_TIME": "1719914400", "LW_TIME_STEP_SECONDS": "3600", "TZ": TZ_BERLIN}))
+    add(Case("rtc-jahreswechsel", [P_ODD, P_SMALL], {"lwRTC": "EveryMinute"}, copies=2,
+             env={"LW_FIXED_TIME": "1704067170", "LW_TIME_STEP_SECONDS": "45", "TZ": "UTC0"}))
+    add(Case("rtc-leer-alles-uebersprungen", [P_BLANK], {"lwRTC": "EveryLabel", "lwSkipBlank": "True"},
+             env=FIXED))
+    add(Case("rtc-ppd-standard", [P_ODD], ppd={"defaults": {"lwRTC": "JobStart"}}, env=FIXED))
+    for lang in ("EPL", "CPCL"):
+        add(Case("rtc-%s-ignoriert" % lang, [P_ODD], {"lwLanguage": lang, "lwRTC": "EveryLabel"}, copies=2))
+    add(Case("rtc-ungueltige-uhr", [P_ODD], {"lwRTC": "JobStart"}, compare=False,
+             env={"LW_FIXED_TIME": "gestern"}, stderr_has=["LW_FIXED_TIME"]))
+
+    # Aufträge vor dem Drucken abbrechen (~JA)
+    for lang in LANGS:
+        add(Case("abbrechen-%s" % lang, [P_ODD], {"lwLanguage": lang, "lwCancelBefore": "True",
+                                                  "lwStartCmd": b64u("~JR"), "lwEndCmd": b64u("END")}))
+    add(Case("abbrechen-ohne-seiten", [P_BLANK], {"lwCancelBefore": "True", "lwSkipBlank": "True"}))
+
+    # Etikettenbefehle (Anfang/Ende jedes Etiketts)
+    start, end = "^FO10,10^A0N,20,20^FDÄnfang €^FS", "^FX Ende,~"
+    for lang in LANGS:
+        add(Case("etikettenbefehle-%s" % lang, [P_ODD, P_SMALL], {"lwLanguage": lang,
+                                                                  "lwLabelStartCmd": b64u(start),
+                                                                  "lwLabelEndCmd": b64u(end)}, copies=2))
+    add(Case("etikettenbefehle-ppd", [P_ODD], ppd={"defaults": {"lwLabelStartCmd": "XkZYTGFiZWxTdGFydA",
+                                                                "lwLabelEndCmd": "XkZYTGFiZWxFbmRl"}}))
+    add(Case("etikettenbefehle-ungueltig", [P_ODD], {"lwLabelStartCmd": "@@@", "lwLabelEndCmd": "None"},
+             ppd={"defaults": {"lwLabelEndCmd": "XkZYTGFiZWxFbmRl"}}, stderr_has=["lwLabelStartCmd"]))
+
+    # ^MF (nur wenn beide Aktionen gesetzt sind)
+    for power, head in (("Feed", "Calibrate"), ("Length", "NoMotion"), ("ShortCal", "Default"),
+                        ("Default", "Feed")):
+        add(Case("medienaktion-%s-%s" % (power, head), [P_ODD], {"lwPowerUpAction": power,
+                                                                 "lwHeadCloseAction": head}))
+    add(Case("medienaktion-EPL-ignoriert", [P_ODD], {"lwLanguage": "EPL", "lwPowerUpAction": "Feed",
+                                                     "lwHeadCloseAction": "Feed"}))
+
+    # Alles zusammen je Sprache
+    for lang in LANGS:
+        opts = dict(every, lwLanguage=lang, lwRotation="90", lwMediaTracking="Continuous", lwStopAtLast="True",
+                    lwStopOffset="12", lwPrintMode="LinerlessRewind", lwControlChars="Printer",
+                    lwFormatPrefix="36", lwRTC="EveryMinute", lwCompression="ACS")
+        add(Case("windows-alle-%s" % lang, [P_TEXT, P_TOP, P_ODD], opts, copies=2,
+                 env=dict(FIXED, LW_TIME_STEP_SECONDS="40"), quick=True))
     return cases
 
 
@@ -829,6 +1025,43 @@ def special_tests(r: Runner):
         result = subprocess.run([tool, "-I", "filters", BASE_PPD], capture_output=True, text=True)
         r.check(result.returncode == 0, "cupstestppd: %s" % result.stdout.strip()[-400:], errors)
 
+    def cancel_delay(directory: str, errors: List[str]):
+        """Wartezeit nach ~JA: wirklich gewartet (300 ms), mit Faktor 0 nicht; SIGTERM beendet sie."""
+        raster, _, _ = r.run_mkraster(directory, [P_ODD], "native")
+
+        def timed(opts: str, scale: Optional[str]):
+            env = plain_env()
+            env.pop("LW_CANCEL_DELAY_SCALE", None)
+            if scale is not None:
+                env["LW_CANCEL_DELAY_SCALE"] = scale
+            start = time.time()
+            code, out, err, _ = r.run_filter(filt, ["1", "u", "t", "1", opts, raster], env, None, directory, 60)
+            return time.time() - start, code, out, err
+
+        elapsed, code, out, err = timed("lwCancelBefore=True lwCancelDelay=300", None)
+        r.check(code == 0 and out.startswith(b"~JA\n^XA\n"), "Wartezeit: %d %r" % (code, out[:20]), errors)
+        r.check(elapsed >= 0.3, "nicht gewartet: %.3f s" % elapsed, errors)
+        r.check("Warte 300 ms" in err, "keine Wartemeldung: %r" % err[-300:], errors)
+        elapsed, code, out, err = timed("lwCancelBefore=True lwCancelDelay=3000", "0.1")
+        r.check(code == 0 and 0.3 <= elapsed < 2.5, "Faktor 0,1: %.3f s" % elapsed, errors)
+        elapsed, code, out, err = timed("lwCancelBefore=True lwCancelDelay=10000", "0")
+        r.check(code == 0 and elapsed < 2.5 and "Warte" not in err, "Faktor 0: %.3f s" % elapsed, errors)
+        elapsed, code, out, err = timed("lwCancelBefore=False lwCancelDelay=10000", None)
+        r.check(code == 0 and elapsed < 2.5 and b"~JA" not in out, "ohne ~JA: %.3f s" % elapsed, errors)
+        elapsed, code, out, err = timed("lwCancelBefore=True lwCancelDelay=100", "x")
+        r.check(code == 0 and "LW_CANCEL_DELAY_SCALE" in err, "ungültiger Faktor: %r" % err[-200:], errors)
+        # SIGTERM während der Wartezeit: Filter endet sofort regulär
+        proc = subprocess.Popen(r.wrapper + [filt, "1", "u", "t", "1", "lwCancelBefore=True lwCancelDelay=10000",
+                                             raster], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=dict(plain_env(), LW_CANCEL_DELAY_SCALE="1"))
+        time.sleep(0.4 if not r.wrapper else 2.0)
+        start = time.time()
+        proc.send_signal(signal.SIGTERM)
+        out, err = proc.communicate(timeout=60)
+        r.check(proc.returncode == 0 and time.time() - start < 3.0 and out.startswith(b"~JA\n"),
+                "SIGTERM in der Wartezeit: %d %r" % (proc.returncode, err[-300:]), errors)
+
+    r.run_custom("abbrechen-wartezeit", True, cancel_delay)
     r.run_custom("aufruf-fehler", True, bad_invocations)
     r.run_custom("sigterm-abbruch", True, sigterm)
     r.run_custom("sigterm-vor-erster-seite", True, sigterm_before_first_page)
@@ -891,6 +1124,14 @@ def command_tests(r: Runner):
         ("leer", b"", "", "base", b"", 1, "ERROR:"),
         ("fehlende-datei", None, "", "base", b"", 1, "kann nicht geöffnet werden"),
         ("lange-zeile", b"#CUPS-COMMAND\n" + b"X" * 5000 + b"\nCalibrate\n", "", "base", b"~JC\n", 0, None),
+        ("steuerzeichen-drucker", b"#CUPS-COMMAND\nPrintSelfTestPage\nCalibrate\n",
+         "lwControlChars=Printer lwControlPrefix=64", "base", b"@WC\n@JC\n", 0, None),
+        ("steuerzeichen-ppd", b"#CUPS-COMMAND\nCalibrate\n", "",
+         {"defaults": {"lwControlChars": "Printer", "lwControlPrefix": "64"}}, b"@JC\n", 0, None),
+        ("steuerzeichen-standard", b"#CUPS-COMMAND\nCalibrate\n", "lwControlChars=Standard lwControlPrefix=64",
+         "base", b"~JC\n", 0, None),
+        ("steuerzeichen-epl", b"#CUPS-COMMAND\nCalibrate\n", "lwLanguage=EPL lwControlChars=Printer "
+         "lwControlPrefix=64", "base", b"\nxa\n", 0, None),
     ]
     for name, content, opts, ppd_spec, expected, code_expected, needle in expectations:
         def test(directory, errors, content=content, opts=opts, ppd_spec=ppd_spec, expected=expected,

@@ -560,6 +560,7 @@ enum PrintPrefsSymbols {
         case .blackMark: return "square.bottomhalf.filled"
         case .continuous: return "scroll"
         case .autoDetect: return "wand.and.stars"
+        case .notch: return "square.split.1x2.fill"
         }
     }
 
@@ -581,6 +582,10 @@ enum PrintPrefsSymbols {
         case .rewind: return "arrow.triangle.2.circlepath"
         case .applicator: return "hand.point.up.left"
         case .kiosk: return "display"
+        case .linerlessPeel: return "square.stack"
+        case .linerlessCut, .linerlessDelayedCut: return "scissors"
+        case .linerlessRewind: return "arrow.triangle.2.circlepath"
+        case .linerlessTear: return "hand.raised"
         }
     }
 

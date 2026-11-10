@@ -44,17 +44,23 @@ struct ZPLDialect {
 /// * ``RTCUpdate/everyMinute``: zusätzlich vor jedem Etikett (auch dem ersten), wenn seit dem
 ///   letzten `^ST` mindestens 60 s vergangen sind.
 ///
-/// Zeiten sind ganze Sekunden seit 1970 (abgerundet) – wie `time()` im C-Filter.
+/// Zeiten sind ganze Sekunden seit 1970 (abgerundet) – wie `time()` im C-Filter. Etikett k
+/// (0-basiert, in Auftragsreihenfolge inklusive Sortierwiederholungen) sieht
+/// `now() + k · timeStep` – mit fester Zeit wie `LW_FIXED_TIME` + `LW_TIME_STEP_SECONDS` im
+/// C-Filter bzw. `now`/`time_step` der Python-Referenz.
 struct RTCClock {
     let update: RTCUpdate?
     let now: @Sendable () -> Date
+    let timeStep: Int64
     let timeZone: TimeZone
     let dialect: ZPLDialect
     private(set) var lastSet: Int64?
 
-    init(update: RTCUpdate?, now: @escaping @Sendable () -> Date, timeZone: TimeZone, dialect: ZPLDialect) {
+    init(update: RTCUpdate?, now: @escaping @Sendable () -> Date, timeStep: Int64 = 0, timeZone: TimeZone,
+         dialect: ZPLDialect) {
         self.update = update
         self.now = now
+        self.timeStep = timeStep
         self.timeZone = timeZone
         self.dialect = dialect
     }
@@ -71,13 +77,19 @@ struct RTCClock {
         return set(currentSeconds())
     }
 
-    /// `^ST`-Zeile vor einem Etikett (oder `nil`).
-    mutating func beforeLabel(isFirst: Bool) -> String? {
+    /// Zeit für Etikett `label` (0-basiert).
+    private func labelSeconds(_ label: Int) -> Int64 {
+        let (offset, overflow) = Int64(label).multipliedReportingOverflow(by: timeStep)
+        return overflow ? currentSeconds() : currentSeconds() &+ offset
+    }
+
+    /// `^ST`-Zeile vor Etikett `label` (0-basiert, Auftragsreihenfolge) oder `nil`.
+    mutating func beforeLabel(_ label: Int) -> String? {
         switch update {
         case .everyLabel?:
-            return isFirst ? nil : set(currentSeconds())
+            return label == 0 ? nil : set(labelSeconds(label))
         case .everyMinute?:
-            let seconds = currentSeconds()
+            let seconds = labelSeconds(label)
             guard let last = lastSet, seconds - last >= JobEncoder.rtcMinuteInterval else { return nil }
             return set(seconds)
         case .jobStart?, nil:

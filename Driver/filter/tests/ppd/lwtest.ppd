@@ -145,6 +145,7 @@
 *lwMediaTracking BlackMark/Black Mark: ""
 *lwMediaTracking Continuous/Continuous: ""
 *lwMediaTracking Auto/Auto Detect: ""
+*lwMediaTracking Notch/Notch: ""
 *CloseUI: *lwMediaTracking
 
 *OpenUI *lwPrintMode/Print Mode: PickOne
@@ -158,6 +159,11 @@
 *lwPrintMode Rewind/Rewind: ""
 *lwPrintMode Applicator/Applicator: ""
 *lwPrintMode Kiosk/Kiosk: ""
+*lwPrintMode LinerlessPeel/Linerless Peel: ""
+*lwPrintMode LinerlessCut/Linerless Cut: ""
+*lwPrintMode LinerlessDelayedCut/Linerless Delayed Cut: ""
+*lwPrintMode LinerlessRewind/Linerless Rewind: ""
+*lwPrintMode LinerlessTear/Linerless Tear: ""
 *CloseUI: *lwPrintMode
 
 *OpenUI *lwLabelTop/Label Top: PickOne
@@ -376,5 +382,134 @@
 *lwEndCmd None/None: ""
 *lwEndCmd XlhBXkZYIExhYmVsV2Vya15YWg/Comment Format: ""
 *CloseUI: *lwEndCmd
+
+*OpenUI *lwRotation/Rotation: PickOne
+*OrderDependency: 20 AnySetup *lwRotation
+*DefaultlwRotation: 0
+*lwRotation 0/0 deg: ""
+*lwRotation 90/90 deg: ""
+*lwRotation 180/180 deg: ""
+*lwRotation 270/270 deg: ""
+*CloseUI: *lwRotation
+
+*OpenUI *lwMarkOffset/Mark Offset: PickOne
+*OrderDependency: 20 AnySetup *lwMarkOffset
+*DefaultlwMarkOffset: Default
+*lwMarkOffset Default/Printer Setting: ""
+*lwMarkOffset -80/-80 dots: ""
+*lwMarkOffset 0/0 dots: ""
+*lwMarkOffset 40/40 dots: ""
+*lwMarkOffset 283/283 dots: ""
+*CloseUI: *lwMarkOffset
+
+*OpenUI *lwStopAtLast/Stop at Last Element: PickOne
+*OrderDependency: 20 AnySetup *lwStopAtLast
+*DefaultlwStopAtLast: False
+*lwStopAtLast False/Off: ""
+*lwStopAtLast True/On: ""
+*CloseUI: *lwStopAtLast
+
+*OpenUI *lwStopOffset/Stop Offset: PickOne
+*OrderDependency: 20 AnySetup *lwStopOffset
+*DefaultlwStopOffset: 0
+*lwStopOffset 0/0 dots: ""
+*lwStopOffset 24/24 dots: ""
+*lwStopOffset 80/80 dots: ""
+*CloseUI: *lwStopOffset
+
+*OpenUI *lwPauseEvery/Pause Every: PickOne
+*OrderDependency: 20 AnySetup *lwPauseEvery
+*DefaultlwPauseEvery: 0
+*lwPauseEvery 0/No Pause: ""
+*lwPauseEvery 1/1 Label: ""
+*lwPauseEvery 5/5 Labels: ""
+*CloseUI: *lwPauseEvery
+
+*OpenUI *lwControlChars/Control Characters: PickOne
+*OrderDependency: 20 AnySetup *lwControlChars
+*DefaultlwControlChars: Standard
+*lwControlChars Standard/Standard: ""
+*lwControlChars Printer/Printer: ""
+*CloseUI: *lwControlChars
+
+*OpenUI *lwFormatPrefix/Format Prefix: PickOne
+*OrderDependency: 20 AnySetup *lwFormatPrefix
+*DefaultlwFormatPrefix: 94
+*lwFormatPrefix 94/^: ""
+*lwFormatPrefix 35/#: ""
+*CloseUI: *lwFormatPrefix
+
+*OpenUI *lwControlPrefix/Control Prefix: PickOne
+*OrderDependency: 20 AnySetup *lwControlPrefix
+*DefaultlwControlPrefix: 126
+*lwControlPrefix 126/Tilde: ""
+*lwControlPrefix 64/At: ""
+*CloseUI: *lwControlPrefix
+
+*OpenUI *lwDelimiter/Delimiter: PickOne
+*OrderDependency: 20 AnySetup *lwDelimiter
+*DefaultlwDelimiter: 44
+*lwDelimiter 44/Comma: ""
+*lwDelimiter 59/Semicolon: ""
+*CloseUI: *lwDelimiter
+
+*OpenUI *lwRTC/Update RTC: PickOne
+*OrderDependency: 20 AnySetup *lwRTC
+*DefaultlwRTC: Default
+*lwRTC Default/Printer Setting: ""
+*lwRTC JobStart/Job Start: ""
+*lwRTC EveryLabel/Every Label: ""
+*lwRTC EveryMinute/Every Minute: ""
+*CloseUI: *lwRTC
+
+*OpenUI *lwCancelBefore/Cancel Jobs Before Printing: PickOne
+*OrderDependency: 20 AnySetup *lwCancelBefore
+*DefaultlwCancelBefore: False
+*lwCancelBefore False/Off: ""
+*lwCancelBefore True/On: ""
+*CloseUI: *lwCancelBefore
+
+*OpenUI *lwCancelDelay/Cancel Delay: PickOne
+*OrderDependency: 20 AnySetup *lwCancelDelay
+*DefaultlwCancelDelay: 1000
+*lwCancelDelay 0/0 ms: ""
+*lwCancelDelay 1000/1000 ms: ""
+*CloseUI: *lwCancelDelay
+
+*OpenUI *lwLabelStartCmd/Label Start Commands: PickOne
+*OrderDependency: 20 AnySetup *lwLabelStartCmd
+*DefaultlwLabelStartCmd: None
+*lwLabelStartCmd None/None: ""
+*lwLabelStartCmd XkZYTGFiZWxTdGFydA/Comment: ""
+*CloseUI: *lwLabelStartCmd
+
+*OpenUI *lwLabelEndCmd/Label End Commands: PickOne
+*OrderDependency: 20 AnySetup *lwLabelEndCmd
+*DefaultlwLabelEndCmd: None
+*lwLabelEndCmd None/None: ""
+*lwLabelEndCmd XkZYTGFiZWxFbmRl/Comment: ""
+*CloseUI: *lwLabelEndCmd
+
+*OpenUI *lwPowerUpAction/Power Up Action: PickOne
+*OrderDependency: 20 AnySetup *lwPowerUpAction
+*DefaultlwPowerUpAction: Default
+*lwPowerUpAction Default/Printer Setting: ""
+*lwPowerUpAction Feed/Feed: ""
+*lwPowerUpAction Calibrate/Calibrate: ""
+*lwPowerUpAction Length/Length: ""
+*lwPowerUpAction NoMotion/No Motion: ""
+*lwPowerUpAction ShortCal/Short Calibration: ""
+*CloseUI: *lwPowerUpAction
+
+*OpenUI *lwHeadCloseAction/Head Close Action: PickOne
+*OrderDependency: 20 AnySetup *lwHeadCloseAction
+*DefaultlwHeadCloseAction: Default
+*lwHeadCloseAction Default/Printer Setting: ""
+*lwHeadCloseAction Feed/Feed: ""
+*lwHeadCloseAction Calibrate/Calibrate: ""
+*lwHeadCloseAction Length/Length: ""
+*lwHeadCloseAction NoMotion/No Motion: ""
+*lwHeadCloseAction ShortCal/Short Calibration: ""
+*CloseUI: *lwHeadCloseAction
 
 *% Ende der Test-PPD

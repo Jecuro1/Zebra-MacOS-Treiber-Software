@@ -32,9 +32,10 @@ enum CommandCatalog {
         OptionSpec("rotate180", "Um 180° gedreht drucken (^POI)"),
         OptionSpec("no-layout", "Bild unverändert übernehmen: nicht drehen, nicht einpassen, Etikett so groß wie das Bild"),
         OptionSpec("media-type", value: "directThermal|thermalTransfer", "Druckverfahren (^MT), Standard: Druckereinstellung"),
-        OptionSpec("tracking", value: "gap|blackMark|continuous|auto", "Medienerkennung (^MN), Standard: Druckereinstellung"),
+        OptionSpec("tracking", value: "gap|blackMark|continuous|auto|notch", "Medienerkennung (^MN), Standard: Druckereinstellung"),
         OptionSpec("print-mode", value: "modus",
-                   "tearOff, peelOff, cutter, delayedCut, rewind, applicator, kiosk (^MM), Standard: Druckereinstellung"),
+                   "tearOff, peelOff, cutter, delayedCut, rewind, applicator, kiosk (^MM) bzw. linerlessPeel, linerlessCut, "
+                   + "linerlessDelayedCut, linerlessRewind, linerlessTear (SGD media.printmode), Standard: Druckereinstellung"),
         OptionSpec("label-top", value: "-120…120", "Vertikaler Versatz in Punkten (^LT), Standard: Druckereinstellung"),
         OptionSpec("label-left", value: "-9999…9999", "Horizontaler Versatz in Punkten (^LS), Standard: Druckereinstellung"),
         OptionSpec("tear-off", value: "-120…120", "Abreißposition in Punkten (~TA), Standard: Druckereinstellung"),
@@ -45,6 +46,26 @@ enum CommandCatalog {
         OptionSpec("skip-blank", "Leere Etiketten nicht drucken"),
         OptionSpec("start-commands", value: "befehle", "Rohbefehle vor dem ersten Etikett (ZPL, EPL)"),
         OptionSpec("end-commands", value: "befehle", "Rohbefehle nach dem letzten Etikett (ZPL, EPL)"),
+        OptionSpec("rotation", value: "0|90|180|270",
+                   "Drehung durch den Treiber (lwRotation): 90/270 dreht die Bitmap, 180 per ^POI/ZB; auch mit --no-layout (Standard: 0)"),
+        OptionSpec("mark-offset", value: "-80…283", "Versatz der schwarzen Markierung in Punkten (^MNM,n; nur mit --tracking blackMark)"),
+        OptionSpec("stop-at-last", "Bei letztem Element stoppen: Etikett endet nach der letzten schwarzen Zeile (nur --tracking continuous)"),
+        OptionSpec("stop-offset", value: "0…32000", "Stoppversatz in Punkten nach dem letzten Element (Standard: 0)"),
+        OptionSpec("pause-every", value: "0…9999", "Nach jeweils N Etiketten pausieren (^PQ…,N,0,N; Vorrang vor --cut-every)"),
+        OptionSpec("control-chars", value: "standard|printer",
+                   "Steuerzeichen: standard (^ ~ ,) oder printer = Zeichen aus --format-prefix/--control-prefix/--delimiter"),
+        OptionSpec("format-prefix", value: "zeichen|33…126", "Formatpräfix statt ^ (nur mit --control-chars printer)"),
+        OptionSpec("control-prefix", value: "zeichen|33…126", "Steuerpräfix statt ~ (nur mit --control-chars printer)"),
+        OptionSpec("delimiter", value: "zeichen|33…126", "Trennzeichen statt , (nur mit --control-chars printer)"),
+        OptionSpec("rtc", value: "jobStart|everyLabel|everyMinute", "Echtzeituhr stellen (^ST), Standard: nie"),
+        OptionSpec("cancel-before", "Aufträge vor dem Drucken abbrechen (~JA; ZPL, EPL)"),
+        OptionSpec("cancel-delay", value: "0…10000", "Wartezeit nach ~JA in Millisekunden (Standard: 1000; nur beim Drucken)"),
+        OptionSpec("label-start-commands", value: "befehle", "Rohbefehle am Anfang jedes Etiketts (ZPL nach ^XA, EPL nach N)"),
+        OptionSpec("label-end-commands", value: "befehle", "Rohbefehle am Ende jedes Etiketts (ZPL vor ^XZ, EPL nach P)"),
+        OptionSpec("power-up-action", value: "feed|calibrate|length|noMotion|shortCal",
+                   "Aktion beim Einschalten (^MF; nur zusammen mit --head-close-action)"),
+        OptionSpec("head-close-action", value: "feed|calibrate|length|noMotion|shortCal",
+                   "Aktion nach dem Schließen des Druckkopfs (^MF; nur zusammen mit --power-up-action)"),
     ]
 
     /// Zusätzliche Optionen von `encode` (bei `print` bestimmen Drucker und `PrinterClient` diese Werte).
@@ -53,6 +74,11 @@ enum CommandCatalog {
         OptionSpec("max-width", value: "punkte",
                    "Druckbreite; breitere Etiketten werden nach der Rasterung rechts abgeschnitten (Standard: Druckbreite von --model, sonst unbegrenzt)"),
         OptionSpec("no-collate", "Bei mehreren Bildern jedes Etikett mit allen Kopien einzeln senden statt die Folge zu wiederholen"),
+        OptionSpec("fixed-time", value: "sekunden",
+                   "Feste Uhrzeit für ^ST (Sekunden seit 1970, UTC) statt der Systemzeit – für reproduzierbare Aufträge"),
+        OptionSpec("time-step", value: "sekunden",
+                   "Für Tests: Etikett k sieht die Uhrzeit + k · sekunden (wie LW_TIME_STEP_SECONDS beim Filter; Standard: 0)"),
+        OptionSpec("time-zone", value: "id", "Zeitzone für ^ST, z. B. UTC oder Europe/Berlin (Standard: Systemzeitzone bzw. TZ)"),
     ]
 
     static let commands: [CommandSpec] = [

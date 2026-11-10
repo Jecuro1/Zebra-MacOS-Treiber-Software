@@ -266,6 +266,7 @@ struct PrintPrefsMediaCard: View {
         case .some(.blackMark): return tr("Der Reflexsensor erkennt schwarze Markierungen auf der Rückseite.")
         case .some(.continuous): return tr("Endlosmaterial – die Länge ergibt sich aus dem Etikettenformat.")
         case .some(.autoDetect): return tr("Der Drucker ermittelt die Medienart beim Kalibrieren selbst.")
+        case .some(.notch): return tr("Der Durchlichtsensor erkennt die Kerben am Rand der Etiketten.")
         }
     }
 
@@ -279,6 +280,9 @@ struct PrintPrefsMediaCard: View {
         case .some(.rewind): return tr("Bedruckte Etiketten werden aufgewickelt.")
         case .some(.applicator): return tr("Betrieb mit einem Etiketten-Applikator.")
         case .some(.kiosk): return tr("Kiosk-Modus: Beleg wird präsentiert und geschnitten.")
+        case .some(.linerlessPeel), .some(.linerlessCut), .some(.linerlessDelayedCut), .some(.linerlessRewind),
+             .some(.linerlessTear):
+            return tr("Linerless-Etiketten ohne Trägermaterial – der Modus wird per SGD (media.printmode) gesetzt.")
         }
     }
 

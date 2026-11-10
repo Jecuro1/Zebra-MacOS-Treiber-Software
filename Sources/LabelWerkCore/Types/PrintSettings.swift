@@ -252,10 +252,11 @@ public enum CUPSOptionName {
         headCloseAction,
     ]
 
-    /// Optionen ohne PPD-Eintrag (Base64url-Rohbefehle und Steuerzeichen): nur als
-    /// Warteschlangen-Standard (`-o name-default=…`) bzw. Auftragsoption möglich.
+    /// Optionen ohne PPD-Eintrag (Base64url-Rohbefehle, Steuerzeichen und die veraltete
+    /// `lwRotate180`): nur als Warteschlangen-Standard (`-o name-default=…`) bzw. Auftragsoption möglich.
     public static let nonPPD: [String] = [
         startCommands, endCommands, labelStartCommands, labelEndCommands, formatPrefix, controlPrefix, delimiter,
+        rotate180,
     ]
 }
 

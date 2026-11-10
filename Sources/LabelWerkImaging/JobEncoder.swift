@@ -25,8 +25,10 @@ import LabelWerkCore
 /// gesamte Seitenfolge `copies`-mal wiederholt, jeweils mit Menge 1.
 ///
 /// Echtzeituhr (`^ST`, nur ZPL): Die Zeit liefert ``now`` (Standard: Systemzeit), umgerechnet in
-/// ``timeZone`` (Standard: aktuelle Zeitzone) und auf ganze Sekunden abgerundet. Tests und
-/// `lwctl encode --fixed-time` setzen eine feste Zeit.
+/// ``timeZone`` (Standard: aktuelle Zeitzone) und auf ganze Sekunden abgerundet; Etikett k
+/// (0-basiert) sieht zusätzlich k · ``timeStepSeconds`` (Standard 0). Tests und
+/// `lwctl encode --fixed-time … --time-step …` setzen eine feste Zeit – wie `LW_FIXED_TIME` und
+/// `LW_TIME_STEP_SECONDS` beim C-Filter.
 ///
 /// „Aufträge vor dem Drucken abbrechen“: Der Encoder schreibt nur die `~JA`-Zeile; warten muss
 /// der Aufrufer (``cancelPrefixLength()`` liefert die Stelle, `PrinterClient.printImages` wartet
@@ -48,6 +50,9 @@ public struct JobEncoder: Sendable {
     /// Zeitquelle für `^ST`; wird beim Auftragsbeginn und – je nach ``PrintSettings/rtcUpdate`` –
     /// vor Etiketten abgefragt.
     public var now: @Sendable () -> Date
+    /// Für Tests: Etikett k (0-basiert, Auftragsreihenfolge inkl. Sortierwiederholungen) sieht die
+    /// Zeit `now() + k · timeStepSeconds` (Standard 0 = Systemzeit bzw. feste Zeit für alle).
+    public var timeStepSeconds: Int64 = 0
 
     /// Höchstmenge je Etikett (`^PQ` erlaubt bis 99 999 999).
     static let maxQuantity = 99_999_999
@@ -189,7 +194,7 @@ public struct JobEncoder: Sendable {
                            settings s: PrintSettings) throws -> Data {
         var out = JobWriter(lineEnding: [0x0A])
         let z = ZPLDialect(s.effectiveControlCharacters)
-        var clock = RTCClock(update: s.rtcUpdate, now: now, timeZone: timeZone, dialect: z)
+        var clock = RTCClock(update: s.rtcUpdate, now: now, timeStep: timeStepSeconds, timeZone: timeZone, dialect: z)
 
         if !s.startCommands.isEmpty { out.line(s.startCommands) }
         if s.cancelJobsBeforePrint { out.line(z.control("JA")) }
@@ -208,7 +213,7 @@ public struct JobEncoder: Sendable {
         // Grafikfelder je Seite nur einmal kodieren (Sortierung wiederholt Seiten).
         var fields = [String?](repeating: nil, count: pages.count)
         var isFirstLabel = true
-        for item in sequence {
+        for (labelIndex, item) in sequence.enumerated() {
             let page = pages[item.page]
             let payload: String
             if let cached = fields[item.page] {
@@ -219,7 +224,7 @@ public struct JobEncoder: Sendable {
                 payload = try Self.graphicPayload(page, compression: s.compression)
                 fields[item.page] = payload
             }
-            if let line = clock.beforeLabel(isFirst: isFirstLabel) { out.line(line) }
+            if let line = clock.beforeLabel(labelIndex) { out.line(line) }
             out.line(z.format("XA"))
             if !s.labelStartCommands.isEmpty { out.line(s.labelStartCommands) }
             if let code = s.printMode?.mmCode { out.line(z.format("MM", code)) }

@@ -183,7 +183,7 @@ extension PrinterClient {
             if let top = s.labelTop { format.append(ZPL.labelTop(top)) }
             if let left = s.labelLeft { format.append(ZPL.labelShift(left)) }
             if let powerUp = s.powerUpAction, let headClose = s.headCloseAction {
-                format.append(ZPL.mediaFeed(powerUp: powerUp, headClose: headClose))
+                format.append(ZPL.mediaFeed(powerUpAction: powerUp, headCloseAction: headClose))
             }
             if permanently { format.append(ZPL.saveSettings()) }
             if !format.isEmpty {

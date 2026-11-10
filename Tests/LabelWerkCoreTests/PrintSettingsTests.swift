@@ -53,7 +53,9 @@ struct PrintSettingsTests {
     func enumRoundTrips() {
         for mode in PrintMode.allCases {
             #expect(PrintSettings(cupsOptions: PrintSettings(printMode: mode).cupsOptions()).printMode == mode)
-            #expect(PrintMode(zplCode: mode.zplCode) == mode)
+            // Linerless-Modi haben keinen eigenen ^MM-Code: zplCode ist der des klassischen Gegenstücks.
+            #expect(PrintMode(zplCode: mode.zplCode) == mode.classicEquivalent)
+            #expect(PrintMode(sgdValue: mode.sgdValue) == mode)
         }
         for tracking in MediaTracking.allCases {
             #expect(PrintSettings(cupsOptions: PrintSettings(tracking: tracking).cupsOptions()).tracking == tracking)

@@ -19,7 +19,13 @@ Die Matrix deckt alle Rasterverfahren, Schwellen, Z64/ACS/Hex, ZPL/EPL/CPCL, ung
 (1…833 Punkte), hohe Seiten, Kopien und Sortierung, Negativ/Spiegeln/180°, Schwärzung,
 Geschwindigkeit, Abreißposition, Rückzug (``~JS``), Versatz, Druckverfahren, Medienerkennung,
 Druckmodus, Schneiden, Kalibrieren, Speichern, Start-/Endbefehle, leere Seiten, Abschneiden auf
-die Druckbreite, Auflösungen und Etikettenlücken ab. Bei einer Abweichung nennt die Meldung die
+die Druckbreite, Auflösungen und Etikettenlücken ab – dazu die Optionen der Windows-Druckeinstellungen:
+Drehung 0/90/180/270°, Markenversatz, Seitenkerben, Linerless-Modi, Bei letztem Element stoppen,
+Pausieren, eigene Steuerzeichen, RTC (``^ST`` mit fester Uhr, Schritt je Etikett und Zeitzone:
+``lwctl --fixed-time/--time-step/--time-zone`` ↔ Filter ``LW_FIXED_TIME``/``LW_TIME_STEP_SECONDS``/``TZ``
+↔ Referenz ``now``/``time_step``), ``~JA``, Etikettenbefehle und ``^MF``. Kennt das gebaute ``lwctl``
+eine der neuen Optionen noch nicht, werden genau die Fälle, die sie brauchen, mit Hinweis übersprungen.
+Bei einer Abweichung nennt die Meldung die
 erste abweichende Befehlszeile (Zeile, Spalte, Auszug) und – bei Grafikdaten – das erste
 abweichende Pixel; die Dateien des Falls bleiben erhalten.
 
@@ -50,8 +56,10 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zlib
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -77,7 +85,13 @@ LANGS = ("ZPL", "EPL", "CPCL")
 COMPRESSIONS = ("Z64", "ACS", "Hex")
 DITHERS = ("Threshold", "Ordered", "Halftone", "FloydSteinberg", "Atkinson", "Stucki")
 PRINT_MODES = ("TearOff", "PeelOff", "Cutter", "DelayedCut", "Rewind", "Applicator", "Kiosk")
-TRACKINGS = ("Gap", "BlackMark", "Continuous", "Auto")
+LINERLESS_MODES = ("LinerlessPeel", "LinerlessCut", "LinerlessDelayedCut", "LinerlessRewind", "LinerlessTear")
+TRACKINGS = ("Gap", "BlackMark", "Continuous", "Auto", "Notch")
+RTC_MODES = ("JobStart", "EveryLabel", "EveryMinute")
+MEDIA_ACTIONS = ("Feed", "Calibrate", "Length", "NoMotion", "ShortCal")
+#: Feste Uhr der RTC-Fälle: 14.11.2023 22:13:20 UTC; Sommerzeit-Fall: 2.7.2024 10:00 UTC.
+FIXED_TIME = 1700000000
+SUMMER_TIME = 1719914400
 MEDIA_TYPES = ("DirectThermal", "ThermalTransfer")
 BACKFEEDS = ("After", "Before", "Normal", "Off")
 DEFAULT_STOCK = "w4h6in"           # Standard von lwctl ohne --model/--stock
@@ -133,6 +147,9 @@ class Case:
     max_width: Optional[int] = None          # *lwMaxPrintWidthDots bzw. --max-width
     stock: Optional[str] = None              # --stock (EPL-Lücke); None = Standard von lwctl
     formats: Tuple[str, ...] = ()            # Bildformat je Seite für lwctl; leer = abwechselnd
+    fixed_time: Optional[int] = None         # Uhr für ^ST (lwRTC): --fixed-time / LW_FIXED_TIME / now
+    time_step: int = 0                       # Sekunden je Etikett (--time-step / LW_TIME_STEP_SECONDS)
+    time_zone: str = "UTC"                   # --time-zone / TZ
 
     def image_format(self, index: int) -> str:
         if self.formats:
@@ -145,8 +162,11 @@ def build_cases() -> List[Case]:
 
     def add(name: str, pages: Sequence[Page], copies: int = 1, collate: bool = True, dpi: int = 203,
             max_width: Optional[int] = None, stock: Optional[str] = None, formats: Tuple[str, ...] = (),
-            **settings) -> None:
-        cases.append(Case(name, tuple(pages), dict(settings), copies, collate, dpi, max_width, stock, formats))
+            fixed_time: Optional[int] = None, time_step: int = 0, time_zone: str = "UTC", **settings) -> None:
+        if settings.get("rtc") and fixed_time is None:
+            fixed_time = FIXED_TIME            # ^ST nur mit fester Uhr reproduzierbar
+        cases.append(Case(name, tuple(pages), dict(settings), copies, collate, dpi, max_width, stock, formats,
+                          fixed_time, time_step, time_zone))
 
     # 1. Sprache × Kompression × Rasterverfahren
     for lang in LANGS:
@@ -332,9 +352,132 @@ def build_cases() -> List[Case]:
             save_settings=rng.random() < 0.2, skip_blank=rng.random() < 0.4,
             start_commands=rng.choice(raw_commands), end_commands=rng.choice(raw_commands))
 
+    windows_cases(add)
+
     names = [case.name for case in cases]
     assert len(names) == len(set(names)), "doppelte Fallnamen"
     return cases
+
+
+def windows_cases(add) -> None:
+    """14. Optionen der Windows-Druckeinstellungen (ZDesigner „Druckeinstellungen für ZD421 …“)."""
+    p_tall_noise = Page(60, 900, "noise", 4)
+    p_top = Page(96, 120, "dots", 9)
+
+    # Drehung: 90/270 in Software vor dem Abschneiden, 180 wie bisher (auch als lwRotate180-Ersatz)
+    for lang in LANGS:
+        for rotation in (90, 180, 270):
+            add("drehung_%s_%d" % (lang, rotation), [P_TEXT, P_ODD], language=lang, compression="ACS",
+                dither=DITHERS[rotation // 90], rotation=rotation)
+        add("drehung_%s_90_mit_alt_180" % lang, [P_SMALL], language=lang, rotation=90, rotate180=True)
+        add("drehung_%s_270_abschneiden_NM" % lang, [p_tall_noise, P_SMALL], max_width=832, language=lang,
+            rotation=270, mirror=True, negative=True, dither="FloydSteinberg")
+    add("drehung_ZPL_90_kopien_sortiert", [P_TEXT, P_ODD, P_GRAD], copies=2, rotation=90, compression="Hex")
+
+    # Medientyp: Seitenkerben, Markierung Versatz
+    for lang in LANGS:
+        add("kerben_%s" % lang, [P_SMALL, P_ODD], language=lang, tracking="Notch")
+    for offset in (-80, -1, 0, 37, 283):
+        add("markenversatz_%s" % str(offset).replace("-", "m"), [P_ODD], tracking="BlackMark", mark_offset=offset)
+    add("markenversatz_nur_schwarze_marke", [P_ODD], tracking="Gap", mark_offset=40)
+    add("markenversatz_EPL_ignoriert", [P_ODD], language="EPL", tracking="BlackMark", mark_offset=40)
+
+    # Linerless-Modi: SGD media.printmode im Kopf, kein ^MM
+    for mode in LINERLESS_MODES:
+        for lang in LANGS:
+            add("linerless_%s_%s" % (lang, mode), [P_SMALL, P_ODD], copies=2, language=lang, print_mode=mode,
+                media_type="DirectThermal")
+
+    # Bei letztem Element stoppen (nur Endlosmaterial; alle Sprachen)
+    for lang in LANGS:
+        for offset in (0, 24, 5000):
+            add("stoppen_%s_%d" % (lang, offset), [P_TEXT, P_GRAD, p_top], language=lang, tracking="Continuous",
+                stop_at_last=True, stop_offset=offset)
+    add("stoppen_leer_ueberspringen", [P_BLANK, P_TEXT], tracking="Continuous", stop_at_last=True,
+        skip_blank=True)
+    add("stoppen_leer_eine_zeile", [P_BLANK], tracking="Continuous", stop_at_last=True, compression="Hex")
+    add("stoppen_nur_endlos", [P_TEXT], tracking="Gap", stop_at_last=True, stop_offset=16)
+    add("stoppen_negativ_gedreht", [p_tall_noise], tracking="Continuous", stop_at_last=True, stop_offset=8,
+        negative=True, rotation=90, max_width=832)
+
+    # Pausieren (Vorrang vor Schneiden)
+    for pause in (1, 5, 9999):
+        for collate in (True, False):
+            add("pause_%d_%s" % (pause, "sortiert" if collate else "einzeln"), [P_SMALL, P_ODD], copies=3,
+                collate=collate, pause_every=pause)
+    add("pause_vor_schneiden", [P_ODD], copies=8, pause_every=4, cut_every=2)
+    add("pause_EPL_CPCL_ignoriert_EPL", [P_ODD], copies=2, language="EPL", pause_every=3)
+
+    # Eigene Steuerzeichen („Intern“)
+    everything = dict(darkness=12, tear_off=-10, backfeed="After", calibrate=True, cancel_before=True,
+                      power_up_action="Feed", head_close_action="Length", rtc="EveryLabel", tracking="BlackMark",
+                      mark_offset=-20, speed=5, label_top=8, label_left=-4, pause_every=2, save_settings=True,
+                      start_commands=b"^XA^FX,~^XZ", label_start_commands=b"^FO1,1^FD~,^FS",
+                      label_end_commands=b"^FX,", end_commands=b"~JR")
+    for label, chars in (("raute", (35, 64, 59)), ("vertauscht", (126, 94, 44)), ("nur_trenner", (94, 126, 124))):
+        for comp in COMPRESSIONS:
+            add("steuerzeichen_%s_%s" % (label, comp), [P_TEXT, P_ODD], copies=2, compression=comp,
+                control_chars=chars, **everything)
+    add("steuerzeichen_EPL_ignoriert", [P_ODD], language="EPL", control_chars=(35, 64, 59), cancel_before=True)
+
+    # Echtzeituhr (^ST): feste Uhr, Schritt je Etikett, Zeitzone
+    for mode in RTC_MODES:
+        for step in (0, 25, 61):
+            add("rtc_%s_%d" % (mode, step), [P_ODD, P_SMALL, P_TEXT], copies=3, rtc=mode, time_step=step)
+        add("rtc_%s_einzeln" % mode, [P_ODD, P_SMALL], copies=4, collate=False, rtc=mode, time_step=30)
+    add("rtc_sommerzeit_berlin", [P_ODD], copies=2, rtc="EveryLabel", fixed_time=SUMMER_TIME, time_step=3600,
+        time_zone="Europe/Berlin")
+    add("rtc_ohne_etiketten", [P_BLANK], rtc="JobStart", skip_blank=True)
+    for lang in ("EPL", "CPCL"):
+        add("rtc_%s_ignoriert" % lang, [P_ODD], copies=2, language=lang, rtc="EveryLabel", time_step=60)
+
+    # Aufträge vor dem Drucken abbrechen (~JA; Wartezeit nur beim Drucken)
+    for lang in LANGS:
+        add("abbrechen_%s" % lang, [P_ODD], language=lang, cancel_before=True, cancel_delay=250,
+            start_commands=b"~JR", end_commands=b"END")
+
+    # Etikettenbefehle
+    for lang in LANGS:
+        for collate in (True, False):
+            add("etikettenbefehle_%s_%s" % (lang, "sortiert" if collate else "einzeln"), [P_SMALL, P_ODD], copies=2,
+                collate=collate, language=lang, label_start_commands="^FO10,10^A0N,20,20^FDÄnfang €^FS".encode("utf-8"),
+                label_end_commands=b"^FX Ende\nzweite Zeile")
+
+    # ^MF nur mit beiden Aktionen
+    for power, head in (("Feed", "Calibrate"), ("Length", "NoMotion"), ("ShortCal", None), (None, "Feed")):
+        add("medienaktion_%s_%s" % (power or "ohne", head or "ohne"), [P_ODD], power_up_action=power,
+            head_close_action=head)
+    add("medienaktion_EPL_ignoriert", [P_ODD], language="EPL", power_up_action="Feed", head_close_action="Feed")
+
+    # Alles zusammen
+    for lang in LANGS:
+        add("windows_alle_%s" % lang, [P_TEXT, p_top, P_ODD], copies=2, language=lang, compression="ACS",
+            time_step=40, **dict(everything, rotation=90, tracking="Continuous", stop_at_last=True, stop_offset=12,
+                                 print_mode="LinerlessRewind", control_chars=(36, 126, 44), rtc="EveryMinute"))
+
+    # Zufällige Kombinationen der neuen Optionen (eigener Zufallsgenerator – Abschnitt 13 bleibt gleich)
+    rng = random.Random(20261111)
+
+    def maybe(values, chance=0.5):
+        return rng.choice(values) if rng.random() < chance else None
+
+    patterns = ("gradient", "hgrad", "vgrad", "text", "checker", "noise", "blank", "black", "bars", "dots")
+    for index in range(40):
+        pages = [Page(rng.randint(1, 300), rng.randint(1, 200), rng.choice(patterns), rng.randint(0, 999))
+                 for _ in range(rng.choice((1, 2, 3)))]
+        chars = maybe(((35, 64, 59), (126, 94, 44), (36, 126, 124)), 0.3)
+        add("zufall_windows_%03d" % index, pages, copies=rng.choice((1, 2, 3)), collate=rng.random() < 0.6,
+            dpi=rng.choice((203, 300)), max_width=maybe(range(1, 400), 0.3), time_step=rng.choice((0, 20, 70)),
+            language=rng.choice(LANGS), compression=rng.choice(COMPRESSIONS), dither=rng.choice(DITHERS),
+            rotation=rng.choice((0, 0, 90, 180, 270)), rotate180=rng.random() < 0.2,
+            tracking=maybe(TRACKINGS, 0.7), mark_offset=maybe(range(-80, 284)), stop_at_last=rng.random() < 0.5,
+            stop_offset=rng.choice((0, 0, rng.randint(0, 200))), pause_every=rng.choice((0, 0, rng.randint(1, 9))),
+            cut_every=rng.choice((0, rng.randint(1, 9))), control_chars=chars, rtc=maybe(RTC_MODES),
+            cancel_before=rng.random() < 0.3, print_mode=maybe(PRINT_MODES + LINERLESS_MODES),
+            power_up_action=maybe(MEDIA_ACTIONS), head_close_action=maybe(MEDIA_ACTIONS),
+            label_start_commands=rng.choice((b"", b"^FX start", b"A10,10,0,1,1,1,N,\"x\"")),
+            label_end_commands=rng.choice((b"", b"^FX ende,~")), negative=rng.random() < 0.3,
+            mirror=rng.random() < 0.3, skip_blank=rng.random() < 0.3, darkness=maybe(range(0, 31)))
 
 
 CASES = build_cases()
@@ -396,6 +539,10 @@ class Tools:
     filter: Path
     mkraster: Path
     stock_gaps_mm: Dict[str, float] = field(default_factory=dict)
+    help_text: str = ""
+
+    def missing_flags(self, flags: Sequence[str]) -> List[str]:
+        return [flag for flag in flags if flag not in self.help_text]
 
 
 def _executable(path: Path) -> bool:
@@ -467,7 +614,7 @@ def find_tools() -> Tools:
     if missing:
         raise _unavailable("lwctl (%s) ist veraltet (es fehlen %s) – „swift build --product lwctl“ "
                            "ausführen" % (lwctl, ", ".join(missing)))
-    return Tools(lwctl=lwctl, filter=filter_path, mkraster=mkraster, stock_gaps_mm=gaps)
+    return Tools(lwctl=lwctl, filter=filter_path, mkraster=mkraster, stock_gaps_mm=gaps, help_text=help_text)
 
 
 def gap_dots(gap_mm: float, dpi: int) -> int:
@@ -501,8 +648,57 @@ def cups_options(s, collate: bool) -> str:
         ("lwCalibrate", flag(s.calibrate)), ("lwSaveSettings", flag(s.save_settings)),
         ("lwSkipBlank", flag(s.skip_blank)), ("lwStartCmd", commands(s.start_commands)),
         ("lwEndCmd", commands(s.end_commands)), ("collate", "true" if collate else "false"),
+        ("lwRotation", str(s.rotation)), ("lwMarkOffset", opt(s.mark_offset)), ("lwStopAtLast", flag(s.stop_at_last)),
+        ("lwStopOffset", str(s.stop_offset)), ("lwPauseEvery", str(s.pause_every)),
+        ("lwControlChars", "Standard" if s.control_chars is None else "Printer"),
+        ("lwRTC", opt(s.rtc)), ("lwCancelBefore", flag(s.cancel_before)), ("lwCancelDelay", str(s.cancel_delay)),
+        ("lwLabelStartCmd", commands(s.label_start_commands)), ("lwLabelEndCmd", commands(s.label_end_commands)),
+        ("lwPowerUpAction", opt(s.power_up_action)), ("lwHeadCloseAction", opt(s.head_close_action)),
     ]
+    chars = s.control_chars or ref.STANDARD_CONTROL_CHARS
+    pairs += [("lwFormatPrefix", str(chars[0])), ("lwControlPrefix", str(chars[1])), ("lwDelimiter", str(chars[2]))]
     return " ".join("%s=%s" % pair for pair in pairs)
+
+
+#: lwctl-Optionen der Windows-Druckeinstellungen (werden je Fall geprüft, siehe ``needed_flags``).
+NEW_FLAGS = ("--rotation", "--mark-offset", "--stop-at-last", "--stop-offset", "--pause-every", "--control-chars",
+             "--format-prefix", "--control-prefix", "--delimiter", "--rtc", "--fixed-time", "--cancel-before",
+             "--cancel-delay", "--label-start-commands", "--label-end-commands", "--power-up-action",
+             "--head-close-action")
+
+
+def needed_flags(case: Case, s) -> List[str]:
+    """Neue lwctl-Optionen, die ein Fall braucht (für das Überspringen mit älterem lwctl)."""
+    flags = []
+    if s.rotation:
+        flags.append("--rotation")
+    if s.mark_offset is not None:
+        flags.append("--mark-offset")
+    if s.stop_at_last:
+        flags.append("--stop-at-last")
+    if s.stop_offset:
+        flags.append("--stop-offset")
+    if s.pause_every:
+        flags.append("--pause-every")
+    if s.control_chars is not None:
+        flags += ["--control-chars", "--format-prefix", "--control-prefix", "--delimiter"]
+    if s.rtc:
+        flags += ["--rtc", "--fixed-time", "--time-zone"] + (["--time-step"] if case.time_step else [])
+    if s.cancel_before:
+        flags.append("--cancel-before")
+    if s.cancel_delay != 1000:
+        flags.append("--cancel-delay")
+    if s.label_start_commands:
+        flags.append("--label-start-commands")
+    if s.label_end_commands:
+        flags.append("--label-end-commands")
+    if s.power_up_action:
+        flags.append("--power-up-action")
+    if s.head_close_action:
+        flags.append("--head-close-action")
+    if s.tracking == "Notch" or (s.print_mode or "").startswith("Linerless"):
+        flags.append("--rotation")   # Stellvertreter: lwctl ohne neue Optionen kennt auch Notch/Linerless nicht
+    return flags
 
 
 def lwctl_arguments(case: Case, s, files: Sequence[Path], output: Path) -> List[str]:
@@ -533,7 +729,54 @@ def lwctl_arguments(case: Case, s, files: Sequence[Path], output: Path) -> List[
         args += ["--start-commands", s.start_commands.decode("utf-8")]
     if s.end_commands:
         args += ["--end-commands", s.end_commands.decode("utf-8")]
+    if s.rotation:
+        args += ["--rotation", str(s.rotation)]
+    if s.mark_offset is not None:
+        args += ["--mark-offset", str(s.mark_offset)]
+    if s.stop_at_last:
+        args.append("--stop-at-last")
+    if s.stop_offset:
+        args += ["--stop-offset", str(s.stop_offset)]
+    if s.pause_every:
+        args += ["--pause-every", str(s.pause_every)]
+    if s.control_chars is not None:
+        args += ["--control-chars", "printer", "--format-prefix", str(s.control_chars[0]),
+                 "--control-prefix", str(s.control_chars[1]), "--delimiter", str(s.control_chars[2])]
+    if s.rtc:
+        args += ["--rtc", s.rtc]
+    if s.cancel_before:
+        args.append("--cancel-before")
+    if s.cancel_delay != 1000:
+        args += ["--cancel-delay", str(s.cancel_delay)]
+    if s.label_start_commands:
+        args += ["--label-start-commands", s.label_start_commands.decode("utf-8")]
+    if s.label_end_commands:
+        args += ["--label-end-commands", s.label_end_commands.decode("utf-8")]
+    if s.power_up_action:
+        args += ["--power-up-action", s.power_up_action]
+    if s.head_close_action:
+        args += ["--head-close-action", s.head_close_action]
+    if case.fixed_time is not None:
+        args += ["--fixed-time", str(case.fixed_time), "--time-zone", case.time_zone]
+        if case.time_step:
+            args += ["--time-step", str(case.time_step)]
     return args
+
+
+@contextmanager
+def time_zone(tz: str):
+    """TZ für die Referenzrechnung (``time.localtime``) setzen und wiederherstellen."""
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = tz
+    time.tzset()
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
 
 
 def write_ppd(path: Path, max_width: Optional[int], gap: int) -> None:
@@ -554,12 +797,21 @@ def write_ppd(path: Path, max_width: Optional[int], gap: int) -> None:
 # --------------------------------------------------------------------------------------------
 
 GFA = re.compile(rb"\^GFA,(\d+),(\d+),(\d+),")
-# Beginn eines Etiketts (ZPL: ^XA, dem ^PW folgt – Rohbefehle mit ^XA…^XZ zählen nicht)
-LABEL_START = {
-    "ZPL": re.compile(rb"\^XA\n(?=(?:\^M[MNT]\w\n|\^PR\d+,\d+,\d+\n)*\^PW\d+\n)"),
-    "EPL": re.compile(rb"\nN\nq\d+\n"),
-    "CPCL": re.compile(rb"(?:^|(?<=\r\n))! 0 \d+ \d+ \d+ \d+\r\nPAGE-WIDTH "),
-}
+CPCL_LABEL = re.compile(rb"(?:^|(?<=\r\n))! 0 \d+ \d+ \d+ \d+\r\nPAGE-WIDTH ")
+
+
+def label_starts(data: bytes, language: str, control_chars=None) -> List[int]:
+    """Anfang jedes Etiketts: ZPL das ``^XA`` vor dem Grafikfeld (auch mit eigenen Steuerzeichen
+    und Etikettenbefehlen dazwischen), EPL das ``N`` vor ``GW``, CPCL die Kopfzeile."""
+    if language == "CPCL":
+        return [m.start() for m in CPCL_LABEL.finditer(data)]
+    if language == "EPL":
+        anchor, start = re.compile(rb"GW0,0,\d+,\d+,"), b"\nN\n"
+    else:
+        f, _, d = (bytes([c]) for c in (control_chars or (0x5E, 0x7E, 0x2C)))
+        anchor = re.compile(re.escape(f + b"FO0" + d + b"0" + f + b"GFA" + d))
+        start = f + b"XA\n"
+    return [max(0, data.rfind(start, 0, m.start())) for m in anchor.finditer(data)]
 BINARY_GRAPHICS = (re.compile(rb"GW0,0,(\d+),(\d+),"), re.compile(rb"CG (\d+) (\d+) 0 0 "))
 
 
@@ -642,7 +894,7 @@ def _graphic_hint(a: bytes, b: bytes, pos: int, line_a: bytes, line_b: bytes) ->
     return None
 
 
-def describe_mismatch(name_a: str, a: bytes, name_b: str, b: bytes, language: str) -> str:
+def describe_mismatch(name_a: str, a: bytes, name_b: str, b: bytes, language: str, control_chars=None) -> str:
     """Erste abweichende Befehlszeile zweier Aufträge: Lage, Befehl, Auszüge und ggf. Pixel."""
     pos = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
     line_start = a.rfind(b"\n", 0, pos) + 1
@@ -656,7 +908,7 @@ def describe_mismatch(name_a: str, a: bytes, name_b: str, b: bytes, language: st
     else:
         match = GFA.search(line_a) or GFA.search(line_b)
         head = (line_a if GFA.search(line_a) else line_b)[:match.end()] if match else line_a[:60]
-    starts = [m.start() for m in LABEL_START[language].finditer(a)]
+    starts = label_starts(a, language, control_chars)
     label = sum(1 for start in starts if start <= pos)
     where = "Etikett %d von %d" % (label, len(starts)) if label else "Auftragskopf"
     lines = [
@@ -775,6 +1027,11 @@ class EncoderConformanceTest(unittest.TestCase):
         directory = self.workdir / "faelle" / case.name
         directory.mkdir(parents=True, exist_ok=True)
 
+        missing = self.tools.missing_flags(needed_flags(case, s))
+        if missing:
+            self.skipTest("lwctl (%s) kennt %s noch nicht – „swift build --product lwctl“ ausführen"
+                          % (self.tools.lwctl, ", ".join(sorted(set(missing)))))
+
         # Testrahmen: Die CUPS-Optionen müssen genau diese Einstellungen ergeben (§9).
         options = cups_options(s, case.collate)
         argv = ref.parse_cups_options(options)
@@ -788,8 +1045,14 @@ class EncoderConformanceTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, "lwctl %s\n%s" % (" ".join(args), result.stderr.decode("utf-8", "replace")))
         swift = swift_out.read_bytes()
 
-        # (2) C-Filter
-        env = dict(os.environ, PPD=str(self.ppd_for(case.max_width, gap)))
+        # (2) C-Filter (Wartezeit nach ~JA abgeschaltet, Uhr und Zeitzone wie bei lwctl)
+        env = dict(os.environ, PPD=str(self.ppd_for(case.max_width, gap)), LW_CANCEL_DELAY_SCALE="0",
+                   TZ=case.time_zone)
+        for name in ("LW_FIXED_TIME", "LW_TIME_STEP_SECONDS"):
+            env.pop(name, None)
+        if case.fixed_time is not None:
+            env["LW_FIXED_TIME"] = str(case.fixed_time)
+            env["LW_TIME_STEP_SECONDS"] = str(case.time_step)
         result = subprocess.run([str(self.tools.filter), "1", "konformitaet", case.name, str(case.copies), options,
                                  str(prepared.raster)], capture_output=True, env=env, timeout=TIMEOUT)
         stderr = result.stderr.decode("utf-8", "replace")
@@ -798,9 +1061,11 @@ class EncoderConformanceTest(unittest.TestCase):
         (directory / "c.out").write_bytes(c_output)
 
         # (3) Python-Referenz
-        python = ref.encode_job_from_luminance(prepared.images, s, resolution_dpi=case.dpi,
-                                               max_width=case.max_width or 0, gap_dots=gap,
-                                               copies=case.copies, collate=case.collate)
+        with time_zone(case.time_zone):
+            python = ref.encode_job_from_luminance(prepared.images, s, resolution_dpi=case.dpi,
+                                                   max_width=case.max_width or 0, gap_dots=gap,
+                                                   copies=case.copies, collate=case.collate,
+                                                   now=case.fixed_time, time_step=case.time_step)
         (directory / "python.out").write_bytes(python)
 
         # Gegen triviale Übereinstimmung (z. B. alle leer): Die Referenz muss genau die erwarteten
@@ -809,7 +1074,7 @@ class EncoderConformanceTest(unittest.TestCase):
                                                   case.max_width or 0)
                                    for w, h, lum in prepared.images) if bm is not None]
         labels = len(ref.label_sequence(len(processed), case.copies, case.collate))
-        self.assertEqual(len(LABEL_START[s.language].findall(python)), labels,
+        self.assertEqual(len(label_starts(python, s.language, s.clamped().control_chars)), labels,
                          "Referenz: Anzahl Etiketten in %s" % case.name)
 
         outputs = {SWIFT: swift, C_FILTER: c_output, PYTHON: python}
@@ -819,17 +1084,20 @@ class EncoderConformanceTest(unittest.TestCase):
             return
         type(self).failures_seen = True
         reports = []
+        chars = s.clamped().control_chars
         if swift != python:
-            reports.append(describe_mismatch(SWIFT, swift, PYTHON, python, s.language))
+            reports.append(describe_mismatch(SWIFT, swift, PYTHON, python, s.language, chars))
         if c_output != python:
-            reports.append(describe_mismatch(C_FILTER, c_output, PYTHON, python, s.language))
+            reports.append(describe_mismatch(C_FILTER, c_output, PYTHON, python, s.language, chars))
         if swift != python and c_output != python and swift != c_output:
-            reports.append(describe_mismatch(SWIFT, swift, C_FILTER, c_output, s.language))
+            reports.append(describe_mismatch(SWIFT, swift, C_FILTER, c_output, s.language, chars))
         agreeing = [name for name in outputs if sum(outputs[name] == other for other in outputs.values()) >= 2]
         summary = "Fall %s: Druckaufträge weichen ab%s" % (
             case.name, " (übereinstimmend: %s)" % ", ".join(agreeing) if agreeing else "")
         self.fail("\n".join([summary] + reports + [
-            "    Einstellungen: %s" % options,
+            "    Einstellungen: %s%s" % (options, "" if case.fixed_time is None else
+                                        "  (LW_FIXED_TIME=%d LW_TIME_STEP_SECONDS=%d TZ=%s)"
+                                        % (case.fixed_time, case.time_step, case.time_zone)),
             "    lwctl %s" % " ".join(args),
             "    Dateien: %s" % directory]))
 
@@ -840,7 +1108,22 @@ class EncoderConformanceTest(unittest.TestCase):
         self.assertTrue(set(LANGS) <= values("language"))
         self.assertTrue(set(DITHERS) <= values("dither"))
         self.assertTrue(set(COMPRESSIONS) <= values("compression") | {None})
-        self.assertTrue(set(PRINT_MODES) <= values("print_mode"))
+        self.assertTrue(set(PRINT_MODES) | set(LINERLESS_MODES) <= values("print_mode"))
+        self.assertTrue({90, 180, 270} <= values("rotation"))
+        self.assertTrue(set(RTC_MODES) <= values("rtc"))
+        self.assertTrue(set(MEDIA_ACTIONS) <= values("power_up_action") | values("head_close_action"))
+        self.assertTrue({-80, 0, 283} <= values("mark_offset"))
+        for key in ("stop_at_last", "cancel_before"):
+            self.assertIn(True, values(key), key)
+        for key in ("stop_offset", "pause_every", "label_start_commands", "label_end_commands"):
+            self.assertGreater(len(values(key) - {None, 0, b""}), 1, key)
+        self.assertTrue(len(values("control_chars") - {None}) >= 3)
+        for lang in LANGS:   # jede neue Option auch in EPL und CPCL (dort teils ohne Wirkung)
+            for key in ("rotation", "stop_at_last", "rtc", "cancel_before", "label_start_commands", "control_chars"):
+                self.assertTrue(any(case.settings.get(key) and case.settings.get("language", "ZPL") == lang
+                                    for case in CASES), (lang, key))
+        self.assertTrue(any(case.time_step for case in CASES if case.settings.get("rtc") == "EveryMinute"))
+        self.assertTrue(any(case.time_zone != "UTC" for case in CASES))
         self.assertTrue(set(TRACKINGS) <= values("tracking"))
         self.assertTrue(set(MEDIA_TYPES) <= values("media_type"))
         self.assertTrue(set(BACKFEEDS) <= values("backfeed"))

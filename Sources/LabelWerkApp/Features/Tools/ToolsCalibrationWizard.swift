@@ -324,6 +324,8 @@ struct ToolsCalibrationWizard: View {
             return tr("Endlosmaterial: Der Sensor erkennt nur, ob Material eingelegt ist – die Position ist unkritisch.")
         case .autoDetect:
             return tr("Automatische Erkennung: Den Sensor mittig ausrichten, der Drucker erkennt die Medienart selbst.")
+        case .notch:
+            return tr("Seitenkerben: Den Sensor genau unter die Kerben am Etikettenrand schieben.")
         }
     }
 

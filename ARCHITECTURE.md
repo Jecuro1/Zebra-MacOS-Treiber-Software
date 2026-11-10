@@ -707,22 +707,46 @@ PRINT\r\n
 | Option | Werte | Bedeutung |
 |---|---|---|
 | `lwLanguage` | `ZPL` `EPL` `CPCL` | Ausgabesprache |
-| `lwDarkness` | `Default`, `0`…`30` | `~SD` |
+| `lwDarkness` | `Default`, `0`…`30` (PPD: 1…30) | `~SD` („Temperatur“) |
 | `lwSpeed` | `Default`, `1`…`14` (PPD: bis Modellmaximum) | `^PR` |
-| `lwMediaType` | `Default` `DirectThermal` `ThermalTransfer` | `^MT` |
-| `lwMediaTracking` | `Default` `Gap` `BlackMark` `Continuous` `Auto` | `^MN` |
-| `lwPrintMode` | `Default` `TearOff` `PeelOff` `Cutter` `DelayedCut` `Rewind` `Applicator` `Kiosk` | `^MM` |
+| `lwMediaType` | `Default` `DirectThermal` `ThermalTransfer` | `^MT` („Druckmodus“) |
+| `lwMediaTracking` | `Default` `Gap` `BlackMark` `Continuous` `Auto` `Notch` | `^MN` („Medientyp“; `Notch` = `^MNW`, EPL wie `Gap`) |
+| `lwPrintMode` | `Default` `TearOff` `PeelOff` `Cutter` `DelayedCut` `Rewind` `Applicator` `Kiosk` `LinerlessPeel` `LinerlessCut` `LinerlessDelayedCut` `LinerlessRewind` `LinerlessTear` | `^MM`; Linerless: kein `^MM`, SGD `media.printmode` im Auftragskopf (PPD: Linerless nur bei Modellen mit Linerless-Ausstattung) |
 | `lwLabelTop` | `Default`, `-120`…`120` (PPD: Schritte von 10) | `^LT` |
 | `lwLabelLeft` | `Default`, `-9999`…`9999` (PPD: −200…200, Schritte 10) | `^LS` |
 | `lwTearOff` | `Default`, `-120`…`120` (PPD: Schritte von 10) | `~TA` |
 | `lwBackfeed` | `Default` `After` `Before` `Normal` `Off` | `~JS` |
-| `lwMirror` `lwNegative` `lwRotate180` | `False` `True` | |
+| `lwMirror` `lwNegative` | `False` `True` | |
+| `lwRotate180` | `False` `True` (nicht in der PPD, veraltet) | wirkt nur bei `lwRotation=0` (dann wie `180`) |
+| `lwRotation` | `0` `90` `180` `270` | Drehung im Uhrzeigersinn: 90/270 in Software vor dem Abschneiden, 180 per `^POI`/`ZB`/CPCL-Bitmap |
+| `lwMarkOffset` | `Default`, `-80`…`283` Punkte (PPD: -10 -5 -3 -2 -1 0 1 2 3 4 5 10 15 20 25 30 35 mm je Auflösung) | `^MNM,n` (nur `BlackMark`, nur ZPL); mm-Werte außerhalb des Bereichs entfallen |
+| `lwStopAtLast` | `False` `True` | nur `Continuous`: Seitenhöhe = letzte schwarze Zeile + 1 + `lwStopOffset` |
+| `lwStopOffset` | `0`…`32000` Punkte (PPD: 0 1 2 3 5 10 mm je Auflösung) | Abstand nach dem letzten Element |
+| `lwPauseEvery` | `0`…`9999` (PPD: 0 1 2 5 10 25 50 100) | `^PQn,p,0,N` (Vorrang vor `lwCutEvery`) |
+| `lwControlChars` | `Standard` `Printer` | `Printer` („Intern“): eigene Steuerzeichen aus `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` |
+| `lwFormatPrefix` `lwControlPrefix` `lwDelimiter` | `33`…`126` (dezimaler ASCII-Code, nicht in der PPD) | ersetzt `^` / `~` / `,`; fehlend oder ungültig → Standardzeichen |
+| `lwRTC` | `Default` `JobStart` `EveryLabel` `EveryMinute` | `^ST` (Ortszeit) |
+| `lwCancelBefore` | `False` `True` | `~JA` vor dem Auftrag (ZPL, EPL) |
+| `lwCancelDelay` | `0`…`10000` ms (PPD: 0 250 500 1000 2000 3000 5000 10000) | Wartezeit des Filters nach `~JA` (Standard 1000) |
+| `lwPowerUpAction` `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` | `^MFa,b` (nur wenn beide gesetzt) |
 | `lwDither` | `Threshold` `Ordered` `Halftone` `FloydSteinberg` `Atkinson` `Stucki` | |
 | `lwThreshold` | `1`…`254` (PPD: 64 96 128 160 192) | |
 | `lwCompression` | `Z64` `ACS` `Hex` | |
 | `lwCutEvery` | `0`…`9999` (PPD: 0 1 2 5 10 25 50 100) | |
 | `lwCalibrate` `lwSaveSettings` `lwSkipBlank` | `False` `True` | |
-| `lwStartCmd` `lwEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle |
+| `lwStartCmd` `lwEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle vor/nach dem Auftrag |
+| `lwLabelStartCmd` `lwLabelEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle am Anfang/Ende jedes Etiketts |
+
+Nicht in der PPD (frei wählbare Werte bzw. veraltet; nur als Warteschlangen-Standard per `lpadmin`
+oder Auftragsoption): `lwStartCmd`, `lwEndCmd`, `lwLabelStartCmd`, `lwLabelEndCmd`, `lwFormatPrefix`,
+`lwControlPrefix`, `lwDelimiter`, `lwRotate180`. Die PPD gruppiert die übrigen Optionen wie der
+Windows-Treiber: „Seite einrichten“ (Seitengröße, `lwMediaTracking`, `lwMarkOffset`, `lwRotation`,
+`lwMirror`, `lwNegative`, `lwStopAtLast`, `lwStopOffset`), „Druckoptionen“ (`lwSpeed`, `lwDarkness`,
+`lwMediaType`, `lwLabelTop`, `lwLabelLeft`, `lwBackfeed`, `lwPauseEvery`, `lwControlChars`, `lwRTC`,
+`lwCancelBefore`, `lwCancelDelay`), „Bedienermodus“ (`lwPrintMode`, `lwTearOff`, `lwCutEvery`),
+„Grafik Optionen“ (`lwDither`, `lwThreshold`, `lwCompression`) und „Erweitert“ (`lwLanguage`,
+`lwCalibrate`, `lwSaveSettings`, `lwSkipBlank`, `lwPowerUpAction`, `lwHeadCloseAction`, Auflösung,
+Farbmodell).
 
 Vorrang im Filter: Wert aus `argv[5]` (Job-/Warteschlangen-Optionen) **vor** markierter PPD-Auswahl
 **vor** PPD-Default. Ganzzahlen außerhalb der PPD-Auswahl sind erlaubt. Warteschlangen-Standardwerte

@@ -133,17 +133,29 @@ SHORT_NICKNAME_MAX = 31     # PPD-Spezifikation / cupstestppd
 # ---------------------------------------------------------------------------------------------
 
 LANGUAGE_CUPS = {"zpl": "ZPL", "epl": "EPL", "cpcl": "CPCL"}
-MEDIA_TYPE_CUPS = {"directThermal": "DirectThermal", "thermalTransfer": "ThermalTransfer"}
-TRACKING_CUPS = {"gap": "Gap", "blackMark": "BlackMark", "continuous": "Continuous", "autoDetect": "Auto"}
+#: Reihenfolge wie im Windows-Treiber (Druckmodus: Thermotransfer | Thermo-Direkt).
+MEDIA_TYPE_CUPS = {"thermalTransfer": "ThermalTransfer", "directThermal": "DirectThermal"}
+TRACKING_CUPS = {"gap": "Gap", "blackMark": "BlackMark", "continuous": "Continuous", "autoDetect": "Auto",
+                 "notch": "Notch"}
+#: Reihenfolge wie im Windows-Treiber (Bedienermodus → Modus).
 PRINT_MODE_CUPS = {
     "tearOff": "TearOff",
     "peelOff": "PeelOff",
     "cutter": "Cutter",
     "delayedCut": "DelayedCut",
     "rewind": "Rewind",
+    "linerlessPeel": "LinerlessPeel",
+    "linerlessCut": "LinerlessCut",
+    "linerlessDelayedCut": "LinerlessDelayedCut",
+    "linerlessRewind": "LinerlessRewind",
+    "linerlessTear": "LinerlessTear",
     "applicator": "Applicator",
     "kiosk": "Kiosk",
 }
+#: Linerless-Modi: nur ZPL (SGD ``media.printmode``) und nur für Modelle mit Ausstattung ``linerless``.
+LINERLESS_PRINT_MODES = ("linerlessPeel", "linerlessCut", "linerlessDelayedCut", "linerlessRewind",
+                         "linerlessTear")
+LINERLESS_FEATURE = "linerless"
 #: ``CMD:``-Kürzel im IEEE-1284-Geräte-String.
 LANGUAGE_IEEE1284 = {"zpl": "ZPL", "epl": "EPL2", "cpcl": "CPCL"}
 #: Anzeigenamen der generischen PPDs.
@@ -175,19 +187,54 @@ OPT_CUT_EVERY = "lwCutEvery"
 OPT_CALIBRATE = "lwCalibrate"
 OPT_SAVE = "lwSaveSettings"
 OPT_SKIP_BLANK = "lwSkipBlank"
+OPT_ROTATION = "lwRotation"
+OPT_MARK_OFFSET = "lwMarkOffset"
+OPT_STOP_AT_LAST = "lwStopAtLast"
+OPT_STOP_OFFSET = "lwStopOffset"
+OPT_PAUSE_EVERY = "lwPauseEvery"
+OPT_CONTROL_CHARS = "lwControlChars"
+OPT_RTC = "lwRTC"
+OPT_CANCEL_BEFORE = "lwCancelBefore"
+OPT_CANCEL_DELAY = "lwCancelDelay"
+OPT_POWER_UP = "lwPowerUpAction"
+OPT_HEAD_CLOSE = "lwHeadCloseAction"
 #: Freie Base64url-Werte – bewusst keine PPD-Optionen (siehe README, Abschnitt „Optionen“).
 OPT_START_CMD = "lwStartCmd"
 OPT_END_CMD = "lwEndCmd"
+OPT_LABEL_START_CMD = "lwLabelStartCmd"
+OPT_LABEL_END_CMD = "lwLabelEndCmd"
+#: Eigene Steuerzeichen (dezimaler ASCII-Code 33…126) – frei wählbar, daher keine PPD-Optionen.
+OPT_FORMAT_PREFIX = "lwFormatPrefix"
+OPT_CONTROL_PREFIX = "lwControlPrefix"
+OPT_DELIMITER = "lwDelimiter"
+
+#: Optionen aus §9, die bewusst nicht in der PPD stehen: freie Werte (Base64url, ASCII-Codes)
+#: und das veraltete ``lwRotate180`` (ersetzt durch ``lwRotation``; der Filter wertet es weiter aus).
+NON_PPD_OPTIONS = frozenset({OPT_START_CMD, OPT_END_CMD, OPT_LABEL_START_CMD, OPT_LABEL_END_CMD,
+                             OPT_FORMAT_PREFIX, OPT_CONTROL_PREFIX, OPT_DELIMITER, OPT_ROTATE})
 
 #: Feste Auswahllisten aus §9 (PPD-Teilmengen, wo §9 sie vorgibt).
-DARKNESS_VALUES = tuple(range(0, 31))
+DARKNESS_VALUES = tuple(range(1, 31))            # „Temperatur“ 1…30 wie im Windows-Treiber
 LABEL_TOP_VALUES = tuple(range(-120, 121, 10))
 LABEL_LEFT_VALUES = tuple(range(-200, 201, 10))
 TEAR_OFF_VALUES = tuple(range(-120, 121, 10))
 THRESHOLD_VALUES = (64, 96, 128, 160, 192)
 CUT_EVERY_VALUES = (0, 1, 2, 5, 10, 25, 50, 100)
-TRACKING_VALUES = ("Gap", "BlackMark", "Continuous", "Auto")
-BACKFEED_VALUES = ("After", "Before", "Normal", "Off")
+PAUSE_EVERY_VALUES = (0, 1, 2, 5, 10, 25, 50, 100)
+CANCEL_DELAY_VALUES = (0, 250, 500, 1000, 2000, 3000, 5000, 10000)
+#: Markierung Versatz in mm (umgerechnet in Punkte der Auflösung; nur Werte in −80…283 Punkten).
+MARK_OFFSET_MM = (-10, -5, -3, -2, -1, 0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35)
+MARK_OFFSET_RANGE = (-80, 283)
+#: Stoppversatz in mm (umgerechnet in Punkte der Auflösung).
+STOP_OFFSET_MM = (0, 1, 2, 3, 5, 10)
+ROTATION_VALUES = ("0", "90", "180", "270")
+#: Reihenfolge wie im Windows-Treiber (Seite einrichten → Medientyp).
+TRACKING_VALUES = ("Continuous", "Gap", "BlackMark", "Notch", "Auto")
+#: Reihenfolge wie im Windows-Treiber (Rückzug: Kein Rückzug | Vor | Nach | Standard).
+BACKFEED_VALUES = ("Off", "Before", "After", "Normal")
+CONTROL_CHARS_VALUES = ("Standard", "Printer")
+RTC_VALUES = ("JobStart", "EveryLabel", "EveryMinute")
+MEDIA_ACTION_VALUES = ("Feed", "Calibrate", "Length", "NoMotion", "ShortCal")
 DITHER_VALUES = ("Threshold", "Ordered", "Halftone", "FloydSteinberg", "Atkinson", "Stucki")
 COMPRESSION_VALUES = ("Z64", "ACS", "Hex")
 PRINT_MODE_VALUES = tuple(PRINT_MODE_CUPS.values())
@@ -217,6 +264,17 @@ OPTION_LANGUAGES: Dict[str, Tuple[str, ...]] = {
     OPT_CALIBRATE: ("zpl",),
     OPT_SAVE: ("zpl",),
     OPT_SKIP_BLANK: ("zpl", "epl", "cpcl"),
+    OPT_ROTATION: ("zpl", "epl", "cpcl"),
+    OPT_MARK_OFFSET: ("zpl",),
+    OPT_STOP_AT_LAST: ("zpl", "epl", "cpcl"),
+    OPT_STOP_OFFSET: ("zpl", "epl", "cpcl"),
+    OPT_PAUSE_EVERY: ("zpl",),
+    OPT_CONTROL_CHARS: ("zpl",),
+    OPT_RTC: ("zpl",),
+    OPT_CANCEL_BEFORE: ("zpl", "epl"),
+    OPT_CANCEL_DELAY: ("zpl", "epl"),
+    OPT_POWER_UP: ("zpl",),
+    OPT_HEAD_CLOSE: ("zpl",),
 }
 
 #: Druckmodi, bei denen ``lwCutEvery`` (``^PQ``-Schnittzähler) sinnvoll ist.
@@ -226,78 +284,128 @@ EPL_PRINT_MODES = ("tearOff", "peelOff", "cutter")
 
 # --- Texte (englische ASCII-Grundtexte, deutsche Übersetzungen) ------------------------------
 
+#: PPD-Gruppen wie die Seitenleiste des Windows-Treibers („Druckeinstellungen für ZD421 …“):
+#: (Schlüsselwort, englischer Text, deutscher Text). „Seite einrichten“ enthält zusätzlich die
+#: Seitengrößen, „Erweitert“ Auflösung und Farbmodell.
 GROUPS: Tuple[Tuple[str, str, str], ...] = (
-    ("General", "General", "Allgemein"),
-    ("PrinterSettings", "Printer Settings", "Druckereinstellungen"),
-    ("Media", "Media", "Medien"),
-    ("Position", "Label Position", "Etikettenposition"),
-    ("Image", "Image", "Bild"),
+    ("PageSetup", "Page Setup", "Seite einrichten"),
+    ("PrintOptions", "Print Options", "Druckoptionen"),
+    ("OperationMode", "Operation Mode", "Bedienermodus"),
+    ("Graphics", "Graphics Options", "Grafik Optionen"),
     ("Advanced", "Advanced", "Erweitert"),
 )
+#: Gruppe der Standardoptionen PageSize/PageRegion (vorn) bzw. Resolution/ColorModel (hinten).
+PAGE_GROUP = "PageSetup"
+DEVICE_GROUP = "Advanced"
 
-#: Option → (Gruppe, englischer Text, deutscher Text).
+#: Option → (Gruppe, englischer Text, deutscher Text) – deutsche Begriffe wie im Windows-Treiber.
 OPTION_TEXTS: Dict[str, Tuple[str, str, str]] = {
-    OPT_LANGUAGE: ("PrinterSettings", "Printer Language", "Druckersprache"),
-    OPT_DARKNESS: ("PrinterSettings", "Darkness", "Schwärzung"),
-    OPT_SPEED: ("PrinterSettings", "Print Speed", "Druckgeschwindigkeit"),
-    OPT_PRINT_MODE: ("PrinterSettings", "Print Mode", "Druckmodus"),
-    OPT_CUT_EVERY: ("PrinterSettings", "Cut After", "Schneiden nach"),
-    OPT_BACKFEED: ("PrinterSettings", "Backfeed", "Rückzug"),
-    OPT_MEDIA_TYPE: ("Media", "Media Type", "Medientyp"),
-    OPT_TRACKING: ("Media", "Media Tracking", "Medienerkennung"),
-    OPT_LABEL_TOP: ("Position", "Label Top", "Etikettenanfang (vertikal)"),
-    OPT_LABEL_LEFT: ("Position", "Label Shift (Left)", "Horizontaler Versatz"),
-    OPT_TEAR_OFF: ("Position", "Tear-Off Adjust", "Abreißposition"),
-    OPT_ROTATE: ("Image", "Rotate 180 Degrees", "Um 180° drehen"),
-    OPT_MIRROR: ("Image", "Mirror Image", "Spiegeln"),
-    OPT_NEGATIVE: ("Image", "Negative Image", "Negativdruck"),
-    OPT_DITHER: ("Image", "Dithering", "Rasterung"),
-    OPT_THRESHOLD: ("Image", "Threshold", "Schwellenwert"),
-    OPT_COMPRESSION: ("Advanced", "Graphics Compression", "Grafikkompression"),
-    OPT_SKIP_BLANK: ("Advanced", "Skip Blank Labels", "Leere Etiketten überspringen"),
+    OPT_TRACKING: ("PageSetup", "Media Type", "Medientyp"),
+    OPT_MARK_OFFSET: ("PageSetup", "Mark Offset", "Markierung Versatz"),
+    OPT_ROTATION: ("PageSetup", "Rotation", "Drehung"),
+    OPT_MIRROR: ("PageSetup", "Mirror Image", "Spiegeln"),
+    OPT_NEGATIVE: ("PageSetup", "Inverse", "Invers"),
+    OPT_STOP_AT_LAST: ("PageSetup", "Stop at Last Element", "Bei letztem Element stoppen"),
+    OPT_STOP_OFFSET: ("PageSetup", "Stop Offset", "Stoppversatz"),
+    OPT_SPEED: ("PrintOptions", "Speed", "Geschwindigkeit"),
+    OPT_DARKNESS: ("PrintOptions", "Darkness", "Temperatur"),
+    OPT_MEDIA_TYPE: ("PrintOptions", "Print Method", "Druckmodus"),
+    OPT_LABEL_TOP: ("PrintOptions", "Top Offset", "Versatz oben"),
+    OPT_LABEL_LEFT: ("PrintOptions", "Left Offset", "Versatz links"),
+    OPT_BACKFEED: ("PrintOptions", "Backfeed", "Rückzug"),
+    OPT_PAUSE_EVERY: ("PrintOptions", "Pause", "Pausieren"),
+    OPT_CONTROL_CHARS: ("PrintOptions", "Control Characters", "Steuerzeichen"),
+    OPT_RTC: ("PrintOptions", "Update RTC", "RTC aktualisieren"),
+    OPT_CANCEL_BEFORE: ("PrintOptions", "Cancel Jobs Before Printing", "Aufträge vor dem Drucken abbrechen"),
+    OPT_CANCEL_DELAY: ("PrintOptions", "Cancel Delay", "Verzögerung (Abbrechen)"),
+    OPT_PRINT_MODE: ("OperationMode", "Mode", "Modus"),
+    OPT_TEAR_OFF: ("OperationMode", "Tear-Off Adjust", "Versatz"),
+    OPT_CUT_EVERY: ("OperationMode", "Cut Every", "Schneiden alle"),
+    OPT_DITHER: ("Graphics", "Dithering", "Rasterung"),
+    OPT_THRESHOLD: ("Graphics", "Threshold", "Schwellenwert"),
+    OPT_COMPRESSION: ("Graphics", "Graphics Compression", "Grafikkompression"),
+    OPT_LANGUAGE: ("Advanced", "Printer Language", "Druckersprache"),
     OPT_CALIBRATE: ("Advanced", "Calibrate Before Job", "Vor dem Auftrag kalibrieren"),
     OPT_SAVE: ("Advanced", "Save Settings to Printer", "Einstellungen im Drucker speichern"),
+    OPT_SKIP_BLANK: ("Advanced", "Skip Blank Labels", "Leere Etiketten überspringen"),
+    OPT_POWER_UP: ("Advanced", "Power Up Action", "Aktion beim Einschalten"),
+    OPT_HEAD_CLOSE: ("Advanced", "Head Close Action", "Aktion beim Schließen des Druckkopfs"),
 }
 
-#: Reihenfolge der lw-Optionen in der PPD (innerhalb ihrer Gruppen).
+#: Reihenfolge der lw-Optionen in der PPD (innerhalb ihrer Gruppen, wie im Windows-Dialog).
 OPTION_ORDER: Tuple[str, ...] = (
-    OPT_LANGUAGE, OPT_DARKNESS, OPT_SPEED, OPT_PRINT_MODE, OPT_CUT_EVERY, OPT_BACKFEED,
-    OPT_MEDIA_TYPE, OPT_TRACKING,
-    OPT_LABEL_TOP, OPT_LABEL_LEFT, OPT_TEAR_OFF,
-    OPT_ROTATE, OPT_MIRROR, OPT_NEGATIVE, OPT_DITHER, OPT_THRESHOLD,
-    OPT_COMPRESSION, OPT_SKIP_BLANK, OPT_CALIBRATE, OPT_SAVE,
+    OPT_TRACKING, OPT_MARK_OFFSET, OPT_ROTATION, OPT_MIRROR, OPT_NEGATIVE, OPT_STOP_AT_LAST,
+    OPT_STOP_OFFSET,
+    OPT_SPEED, OPT_DARKNESS, OPT_MEDIA_TYPE, OPT_LABEL_TOP, OPT_LABEL_LEFT, OPT_BACKFEED,
+    OPT_PAUSE_EVERY, OPT_CONTROL_CHARS, OPT_RTC, OPT_CANCEL_BEFORE, OPT_CANCEL_DELAY,
+    OPT_PRINT_MODE, OPT_TEAR_OFF, OPT_CUT_EVERY,
+    OPT_DITHER, OPT_THRESHOLD, OPT_COMPRESSION,
+    OPT_LANGUAGE, OPT_CALIBRATE, OPT_SAVE, OPT_SKIP_BLANK, OPT_POWER_UP, OPT_HEAD_CLOSE,
 )
 
 #: Boolesche Optionen (UI-Typ ``Boolean``, Standard ``False``).
-BOOLEAN_OPTIONS = (OPT_MIRROR, OPT_NEGATIVE, OPT_ROTATE, OPT_CALIBRATE, OPT_SAVE, OPT_SKIP_BLANK)
+BOOLEAN_OPTIONS = (OPT_MIRROR, OPT_NEGATIVE, OPT_STOP_AT_LAST, OPT_CANCEL_BEFORE, OPT_CALIBRATE, OPT_SAVE,
+                   OPT_SKIP_BLANK)
 
 DEFAULT_TEXT = ("Printer Default", "Druckereinstellung")
 BOOLEAN_TEXTS = {"True": ("On", "Ein"), "False": ("Off", "Aus")}
+#: Abweichende Texte der „Ein“-Wahl (wie die Kontrollkästchen im Windows-Dialog).
+BOOLEAN_TRUE_TEXTS = {
+    OPT_CANCEL_BEFORE: ("Delete All Current and Pending Jobs", "Alle aktuellen und nächsten Druckjobs löschen"),
+}
 LANGUAGE_TEXTS = {"ZPL": ("ZPL II", "ZPL II"), "EPL": ("EPL2", "EPL2"), "CPCL": ("CPCL", "CPCL")}
 MEDIA_TYPE_TEXTS = {
-    "DirectThermal": ("Direct Thermal", "Thermodirekt"),
+    "DirectThermal": ("Direct Thermal", "Thermo-Direkt"),
     "ThermalTransfer": ("Thermal Transfer", "Thermotransfer"),
 }
 TRACKING_TEXTS = {
-    "Gap": ("Gap or Notch", "Etiketten mit Lücke"),
-    "BlackMark": ("Black Mark", "Schwarze Markierung"),
-    "Continuous": ("Continuous", "Endlosmaterial"),
-    "Auto": ("Auto Detect", "Automatisch"),
+    "Continuous": ("Continuous Media", "Endlosmaterial"),
+    "Gap": ("Labels with Gaps", "Einzeletiketten"),
+    "BlackMark": ("Labels with Black Marks", "Etiketten mit schwarzen Markierungen"),
+    "Notch": ("Labels with Notches", "Etiketten mit Seitenkerben"),
+    "Auto": ("Auto Detect", "Automatisch erkennen"),
 }
 PRINT_MODE_TEXTS = {
     "TearOff": ("Tear Off", "Abreißen"),
-    "PeelOff": ("Peel Off", "Spenden (Peel-Off)"),
-    "Cutter": ("Cutter", "Schneiden"),
-    "DelayedCut": ("Delayed Cut", "Verzögert schneiden"),
+    "PeelOff": ("Peel Off", "Spendemodus"),
+    "Cutter": ("Cutter", "Abschneider"),
+    "DelayedCut": ("Delayed Cut", "Verzögerter Abschneider"),
     "Rewind": ("Rewind", "Aufwickeln"),
+    "LinerlessPeel": ("Linerless Peel", "Linerless ablösen"),
+    "LinerlessCut": ("Linerless Cut", "Linerless schneiden"),
+    "LinerlessDelayedCut": ("Linerless Delayed Cut", "Linerless verzögert schneiden"),
+    "LinerlessRewind": ("Linerless Rewind", "Linerless aufwickeln"),
+    "LinerlessTear": ("Linerless Tear", "Linerless-Abriss"),
     "Applicator": ("Applicator", "Applikator"),
     "Kiosk": ("Kiosk", "Kiosk"),
 }
 BACKFEED_TEXTS = {
-    "After": ("After Printing", "Nach dem Druck"),
-    "Before": ("Before Printing", "Vor dem Druck"),
-    "Normal": ("Normal (90/10)", "Normal (90/10)"),
-    "Off": ("Off", "Aus"),
+    "Off": ("No Backfeed", "Kein Rückzug"),
+    "Before": ("Before Printing", "Vor dem Drucken"),
+    "After": ("After Printing", "Nach dem Drucken"),
+    "Normal": ("Default (90/10)", "Standard"),
+}
+ROTATION_TEXTS = {
+    "0": ("0 degrees - Portrait", "0° – Hochformat"),
+    "90": ("90 degrees - Landscape", "90° – Querformat"),
+    "180": ("180 degrees - Portrait", "180° – Hochformat"),
+    "270": ("270 degrees - Landscape", "270° – Querformat"),
+}
+CONTROL_CHARS_TEXTS = {
+    "Standard": ("Standard", "Standard"),
+    "Printer": ("Printer (Internal)", "Intern"),
+}
+RTC_TEXTS = {
+    "JobStart": ("At Job Start", "Druckzeit starten"),
+    "EveryLabel": ("Every Label", "Jedes Etikett"),
+    "EveryMinute": ("Every Minute", "Jede Minute"),
+}
+MEDIA_ACTION_TEXTS = {
+    "Feed": ("Feed", "Vorschub"),
+    "Calibrate": ("Calibrate", "Kalibrieren"),
+    "Length": ("Measure Length", "Länge messen"),
+    "NoMotion": ("No Motion", "Keine Bewegung"),
+    "ShortCal": ("Short Calibration", "Kurzkalibrierung"),
 }
 DITHER_TEXTS = {
     "Threshold": ("Threshold (Text and Barcodes)", "Schwellenwert (Text & Barcodes)"),
@@ -535,6 +643,7 @@ class Model:
     print_modes: Tuple[str, ...]
     ieee1284: Tuple[str, ...]
     default_stock: str
+    features: Tuple[str, ...] = ()
 
     def max_speed(self, dpi: int) -> int:
         """Höchstgeschwindigkeit wie ``PrinterModel.maxSpeed(_:)`` (Fallback: kleinster Wert, sonst 4)."""
@@ -647,9 +756,11 @@ def parse_catalog(data: dict) -> Catalog:
             max_label_length_mm=_require(raw, "maxLabelLengthMM", float, where),
             max_speed_ips=speeds,
             media_types=_require_values(_require(raw, "mediaTypes", list, where), MEDIA_TYPE_CUPS, where, "mediaTypes"),
-            print_modes=_require_values(_require(raw, "printModes", list, where), PRINT_MODE_CUPS, where, "printModes"),
+            print_modes=_require_values(_require(raw, "printModes", list, where), PRINT_MODE_CUPS, where,
+                                        "printModes"),
             ieee1284=tuple(str(v) for v in raw.get("ieee1284", [])),
             default_stock=_require(raw, "defaultStock", str, where),
+            features=tuple(str(v) for v in raw.get("features", [])),
         )
         if model.print_width_mm <= 0 or model.max_label_length_mm <= 0:
             raise CatalogError(f"{where}: ungültige Druckbreite oder Etikettenlänge")
@@ -715,6 +826,7 @@ class Target:
     model_number: int
     is_generic: bool
     pc_file_name: str = ""
+    linerless: bool = False          # Ausstattung „linerless“ (Linerless-Modi in ZPL)
 
     @property
     def stem(self) -> str:
@@ -786,11 +898,15 @@ class Target:
     def effective_print_modes(self) -> Tuple[str, ...]:
         """Druckmodi, die der Filter in einer Sprache des Modells ausdrücken kann.
 
-        ZPL kennt alle Modi (``^MM``); ohne ZPL bleiben nur die EPL2-Modi übrig.
+        ZPL kennt alle Modi (``^MM``) und – bei Modellen mit Linerless-Ausstattung – die fünf
+        Linerless-Modi (SGD ``media.printmode``); ohne ZPL bleiben nur die EPL2-Modi übrig.
+        Reihenfolge wie ``PRINT_MODE_CUPS`` (Windows-Dialog).
         """
         if "zpl" in self.languages:
-            return self.print_modes
-        return tuple(m for m in self.print_modes if m in EPL_PRINT_MODES)
+            modes = set(self.print_modes) | (set(LINERLESS_PRINT_MODES) if self.linerless else set())
+        else:
+            modes = {m for m in self.print_modes if m in EPL_PRINT_MODES}
+        return tuple(m for m in PRINT_MODE_CUPS if m in modes)
 
     def supports_option(self, option: str) -> bool:
         """Wird die Option von mindestens einer Sprache des Modells ausgewertet?"""
@@ -927,6 +1043,7 @@ def build_targets(catalog: Catalog) -> List[Target]:
                 ieee1284_names=model.ieee1284,
                 model_number=index + 1,
                 is_generic=False,
+                linerless=LINERLESS_FEATURE in model.features,
             ))
     for index, (language, dpi) in enumerate(GENERIC_TARGETS):
         targets.append(build_generic_target(catalog, language, dpi, GENERIC_MODEL_NUMBER_BASE + index + 1))
@@ -955,6 +1072,7 @@ def build_generic_target(catalog: Catalog, language: str, dpi: int, model_number
         speed = GENERIC_FALLBACK["max_speed"]
     media = tuple(v for v in MEDIA_TYPE_CUPS if any(v in m.media_types for m in with_dpi)) or tuple(MEDIA_TYPE_CUPS)
     modes = tuple(v for v in PRINT_MODE_CUPS if any(v in m.print_modes for m in with_dpi)) or ("tearOff",)
+    linerless = any(LINERLESS_FEATURE in m.features for m in with_dpi)
 
     # Standardformat: häufigstes Standardformat der Modelle (Gleichstand: Katalogreihenfolge),
     # ohne Modelle der Sprache 4 × 6 Zoll bzw. das erste passende Format.
@@ -990,6 +1108,7 @@ def build_generic_target(catalog: Catalog, language: str, dpi: int, model_number
         ieee1284_names=(),
         model_number=model_number,
         is_generic=True,
+        linerless=linerless,
     )
 
 
@@ -1037,18 +1156,44 @@ def _signed(value: int) -> str:
 
 
 def _offset_choices(values: Iterable[int], dpi: int) -> List[Choice]:
-    """Versatz-Auswahl in Punkten mit Millimeterangabe für die Auflösung."""
+    """Versatz-Auswahl in Punkten, angezeigt in Millimetern (wie der Windows-Treiber) mit Punkten."""
     choices = [Choice(DEFAULT_CHOICE, *DEFAULT_TEXT)]
     for value in values:
         if value == 0:
-            choices.append(Choice("0", "0 (no offset)", "0 (kein Versatz)"))
+            choices.append(Choice("0", "0 mm (no offset)", "0 mm (kein Versatz)"))
             continue
         mm = value * 25.4 / dpi
         choices.append(Choice(
             str(value),
-            f"{_signed(value)} dots ({'+' if mm > 0 else ''}{mm:.1f} mm)",
-            f"{_signed(value)} Punkte ({'+' if mm > 0 else ''}{format_german_decimal(mm)} mm)",
+            f"{'+' if mm > 0 else ''}{mm:.1f} mm ({_signed(value)} dots)",
+            f"{'+' if mm > 0 else ''}{format_german_decimal(mm)} mm ({_signed(value)} Punkte)",
         ))
+    return choices
+
+
+def mm_choice_dots(values_mm: Iterable[int], dpi: int, low: int, high: int) -> List[Tuple[int, int]]:
+    """(mm, Punkte) je mm-Wert für die Auflösung; Punkte außerhalb von ``low…high`` und doppelte
+    Punktwerte entfallen (Reihenfolge der mm-Werte)."""
+    result: List[Tuple[int, int]] = []
+    seen = set()
+    for mm in values_mm:
+        dots = mm_to_dots(float(mm), dpi)
+        if low <= dots <= high and dots not in seen:
+            seen.add(dots)
+            result.append((mm, dots))
+    return result
+
+
+def _mm_dot_choices(values_mm: Iterable[int], dpi: int, low: int, high: int, zero_text: Tuple[str, str],
+                    signed: bool) -> List[Choice]:
+    """Auswahl in Punkten, beschriftet mit Millimetern (``+5 mm (40 Punkte)`` bzw. ``5 mm (40 Punkte)``)."""
+    choices = []
+    for mm, dots in mm_choice_dots(values_mm, dpi, low, high):
+        if dots == 0:
+            choices.append(Choice("0", *zero_text))
+            continue
+        label = _signed(mm) if signed else str(mm)
+        choices.append(Choice(str(dots), f"{label} mm ({dots} dots)", f"{label} mm ({dots} Punkte)"))
     return choices
 
 
@@ -1074,14 +1219,15 @@ def build_options(target: Target) -> List[UIOption]:
 
     darkness = [Choice(DEFAULT_CHOICE, *DEFAULT_TEXT)]
     for value in DARKNESS_VALUES:
-        note = {0: (" (lightest)", " (am hellsten)"), 30: (" (darkest)", " (am dunkelsten)")}.get(value, ("", ""))
+        note = {1: (" (lightest)", " (am hellsten)"), 30: (" (darkest)", " (am dunkelsten)")}.get(value, ("", ""))
         darkness.append(Choice(str(value), f"{value}{note[0]}", f"{value}{note[1]}"))
     add(OPT_DARKNESS, darkness, DEFAULT_CHOICE)
 
+    # Geschwindigkeit wie im Windows-Treiber in mm/s (51, 76, 102 … = 2, 3, 4 … Zoll/s).
     speeds = [Choice(DEFAULT_CHOICE, *DEFAULT_TEXT)]
     for value in range(1, target.max_speed + 1):
         mm_s = swift_round(value * 25.4)
-        speeds.append(Choice(str(value), f"{value} ips ({mm_s} mm/s)", f"{value} Zoll/s ({mm_s} mm/s)"))
+        speeds.append(Choice(str(value), f"{mm_s} mm/s ({value} ips)", f"{mm_s} mm/s ({value} Zoll/s)"))
     add(OPT_SPEED, speeds, DEFAULT_CHOICE)
 
     modes = [PRINT_MODE_CUPS[m] for m in PRINT_MODE_CUPS if m in target.effective_print_modes]
@@ -1092,24 +1238,50 @@ def build_options(target: Target) -> List[UIOption]:
         if value == 0:
             cut.append(Choice("0", "End of Job Only", "Nur am Auftragsende"))
         elif value == 1:
-            cut.append(Choice("1", "Every Label", "Nach jedem Etikett"))
+            cut.append(Choice("1", "1 Label", "1 Etikett"))
         else:
-            cut.append(Choice(str(value), f"Every {value} Labels", f"Nach je {value} Etiketten"))
+            cut.append(Choice(str(value), f"{value} Labels", f"{value} Etiketten"))
     add(OPT_CUT_EVERY, cut, "0")
+
+    pause = []
+    for value in PAUSE_EVERY_VALUES:
+        if value == 0:
+            pause.append(Choice("0", "No Pause", "Keine Pause"))
+        elif value == 1:
+            pause.append(Choice("1", "After Every Label", "Nach jedem Etikett"))
+        else:
+            pause.append(Choice(str(value), f"After Every {value} Labels", f"Nach je {value} Etiketten"))
+    add(OPT_PAUSE_EVERY, pause, "0")
 
     add(OPT_BACKFEED, _mapped_choices(BACKFEED_VALUES, BACKFEED_TEXTS, True), DEFAULT_CHOICE)
 
     media = [MEDIA_TYPE_CUPS[m] for m in MEDIA_TYPE_CUPS if m in target.media_types]
     add(OPT_MEDIA_TYPE, _mapped_choices(media, MEDIA_TYPE_TEXTS, True), DEFAULT_CHOICE)
     add(OPT_TRACKING, _mapped_choices(TRACKING_VALUES, TRACKING_TEXTS, True), DEFAULT_CHOICE)
+    add(OPT_MARK_OFFSET, [Choice(DEFAULT_CHOICE, *DEFAULT_TEXT)]
+        + _mm_dot_choices(MARK_OFFSET_MM, target.dpi, *MARK_OFFSET_RANGE, ("0 mm", "0 mm"), signed=True),
+        DEFAULT_CHOICE)
+    add(OPT_ROTATION, _mapped_choices(ROTATION_VALUES, ROTATION_TEXTS, False), "0")
+    add(OPT_STOP_OFFSET, _mm_dot_choices(STOP_OFFSET_MM, target.dpi, 0, 32000,
+                                         ("0 mm (no offset)", "0 mm (kein Versatz)"), signed=False), "0")
 
     add(OPT_LABEL_TOP, _offset_choices(LABEL_TOP_VALUES, target.dpi), DEFAULT_CHOICE)
     add(OPT_LABEL_LEFT, _offset_choices(LABEL_LEFT_VALUES, target.dpi), DEFAULT_CHOICE)
     add(OPT_TEAR_OFF, _offset_choices(TEAR_OFF_VALUES, target.dpi), DEFAULT_CHOICE)
 
+    add(OPT_CONTROL_CHARS, _mapped_choices(CONTROL_CHARS_VALUES, CONTROL_CHARS_TEXTS, False), "Standard")
+    add(OPT_RTC, _mapped_choices(RTC_VALUES, RTC_TEXTS, True), DEFAULT_CHOICE)
+    delays = []
+    for value in CANCEL_DELAY_VALUES:
+        note = (" (default)", " (Standard)") if value == 1000 else ("", "")
+        delays.append(Choice(str(value), f"{value} ms{note[0]}", f"{value} ms{note[1]}"))
+    add(OPT_CANCEL_DELAY, delays, "1000")
+    for keyword in (OPT_POWER_UP, OPT_HEAD_CLOSE):
+        add(keyword, _mapped_choices(MEDIA_ACTION_VALUES, MEDIA_ACTION_TEXTS, True), DEFAULT_CHOICE)
+
     for keyword in BOOLEAN_OPTIONS:
-        add(keyword, [Choice("False", *BOOLEAN_TEXTS["False"]), Choice("True", *BOOLEAN_TEXTS["True"])],
-            "False", ui="Boolean")
+        on = BOOLEAN_TRUE_TEXTS.get(keyword, BOOLEAN_TEXTS["True"])
+        add(keyword, [Choice("False", *BOOLEAN_TEXTS["False"]), Choice("True", *on)], "False", ui="Boolean")
 
     add(OPT_DITHER, _mapped_choices(DITHER_VALUES, DITHER_TEXTS, False), "Threshold")
     threshold = []
@@ -1214,8 +1386,9 @@ def render_ppd(target: Target, file_version: str = DEFAULT_FILE_VERSION) -> byte
     w.comment("Automatisch erzeugt von Driver/ppd/generate_ppds.py aus Catalog/models.json.")
     w.comment("Nicht von Hand bearbeiten - Aenderungen gehen beim naechsten Erzeugen verloren.")
     w.comment("Filter: rastertolabelwerk (CUPS-Raster, 8 Bit Graustufen) -> ZPL II / EPL2 / CPCL.")
-    w.comment("Optionen und Werte: ARCHITECTURE.md Abschnitt 9. lwStartCmd/lwEndCmd (Base64url)")
-    w.comment("sind freie Werte und werden je Warteschlange per 'lpadmin -o' gesetzt.")
+    w.comment("Optionen und Werte: ARCHITECTURE.md Abschnitt 9. Gruppen wie der Windows-Treiber.")
+    w.comment("Freie Werte (lwStartCmd, lwEndCmd, lwLabelStartCmd, lwLabelEndCmd, lwFormatPrefix,")
+    w.comment("lwControlPrefix, lwDelimiter) setzt die App je Warteschlange per 'lpadmin -o'.")
     w.comment("Zebra ist eine Marke der Zebra Technologies Corp.; LabelWerk ist unabhaengig.")
     w.comment("=" * 72)
     w.attr("FormatVersion", "4.3")
@@ -1257,18 +1430,20 @@ def render_ppd(target: Target, file_version: str = DEFAULT_FILE_VERSION) -> byte
     w.attr("lwMaxPrintWidthDots", str(target.max_print_width_dots))
     w.attr("lwDefaultGapDots", str(target.default_gap_dots))
 
-    _emit_general_group(w, target)
-
     options = build_options(target)
-    for group, text_en, text_de in GROUPS[1:]:
+    for group, text_en, text_de in GROUPS:
         members = [o for o in options if OPTION_TEXTS[o.keyword][0] == group]
-        if not members:
+        if not members and group not in (PAGE_GROUP, DEVICE_GROUP):
             continue
         w.blank()
         w.raw(f"*OpenGroup: {group}/{text_en}")
+        if group == PAGE_GROUP:
+            _emit_page_sizes(w, target)
         for option in members:
             w.blank()
             _emit_option(w, option)
+        if group == DEVICE_GROUP:
+            _emit_device_options(w, target)
         w.blank()
         w.raw(f"*CloseGroup: {group}")
         w.translation("de", "Translation", group, text_de)
@@ -1278,12 +1453,9 @@ def render_ppd(target: Target, file_version: str = DEFAULT_FILE_VERSION) -> byte
     return w.render()
 
 
-def _emit_general_group(w: PPDWriter, target: Target) -> None:
-    """Seitengrößen, eigene Größe, Auflösung und Farbmodell."""
+def _emit_page_sizes(w: PPDWriter, target: Target) -> None:
+    """Seitengrößen und eigene Größe (Gruppe „Seite einrichten“)."""
     default_keyword = next(p.keyword for p in target.page_sizes if p.stock.id == target.default_stock.id)
-    group_en, group_de = GROUPS[0][1], GROUPS[0][2]
-    w.blank()
-    w.raw(f"*OpenGroup: General/{group_en}")
 
     def page_code(size: PageSize) -> str:
         return (f"<</PageSize[{format_number(size.stock.width_points)} "
@@ -1335,6 +1507,9 @@ def _emit_general_group(w: PPDWriter, target: Target) -> None:
     for name, _, _, text_de in CUSTOM_PARAM_TEXTS:
         w.translation("de", "ParamCustomPageSize", name, text_de)
 
+
+def _emit_device_options(w: PPDWriter, target: Target) -> None:
+    """Auflösung und Farbmodell (Gruppe „Erweitert“; je eine feste Wahl)."""
     dpmm = {152: 6, 203: 8, 300: 12, 600: 24}.get(target.dpi, mm_to_dots(1.0, target.dpi))
     text_en, text_de = STANDARD_TEXTS["Resolution"]
     w.blank()
@@ -1356,10 +1531,6 @@ def _emit_general_group(w: PPDWriter, target: Target) -> None:
     w.raw("*CloseUI: *ColorModel")
     w.translation("de", "Translation", "ColorModel", text_de)
     w.translation("de", "ColorModel", "Gray", "Graustufen")
-
-    w.blank()
-    w.raw("*CloseGroup: General")
-    w.translation("de", "Translation", "General", group_de)
 
 
 # ---------------------------------------------------------------------------------------------

@@ -548,9 +548,10 @@ public enum ZPL {
         ZPLCommand(.caret, "MF", [powerUp.rawValue, headClose.rawValue])
     }
 
-    /// `^MF{p},{h}` mit den Werten aus ``PrintSettings`` (``MediaFeedAction``).
-    public static func mediaFeed(powerUp: MediaFeedAction, headClose: MediaFeedAction) -> ZPLCommand {
-        ZPLCommand(.caret, "MF", [powerUp.zplCode, headClose.zplCode])
+    /// `^MF{p},{h}` mit den Werten aus ``PrintSettings`` (``MediaFeedAction``). Eigene
+    /// Parameternamen, damit `mediaFeed(powerUp: .calibrate, …)` mit ``FeedAction`` eindeutig bleibt.
+    public static func mediaFeed(powerUpAction: MediaFeedAction, headCloseAction: MediaFeedAction) -> ZPLCommand {
+        ZPLCommand(.caret, "MF", [powerUpAction.zplCode, headCloseAction.zplCode])
     }
 
     /// `^ST{MM},{DD},{YYYY},{HH},{mm},{SS},M` – Echtzeituhr stellen (24-Stunden-Format, alle

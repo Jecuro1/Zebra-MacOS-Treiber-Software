@@ -1541,6 +1541,689 @@ static void test_job_preprocess(void)
 }
 
 /* ------------------------------------------------------------------------------------------ */
+/* Windows-Druckeinstellungen (Drehung, RTC, Steuerzeichen, Linerless …)                       */
+/* ------------------------------------------------------------------------------------------ */
+
+static void test_parse_new_values(void)
+{
+    lw_tracking tr;
+    CHECK_INT(lw_parse_tracking("notch", &tr), LW_PARSE_OK); CHECK_INT(tr, LW_TRACKING_NOTCH);
+    CHECK_INT(lw_tracking_code(LW_TRACKING_NOTCH), 'W');
+    lw_print_mode pm;
+    CHECK_INT(lw_parse_print_mode("LinerlessDelayedCut", &pm), LW_PARSE_OK);
+    CHECK_INT(pm, LW_PRINT_MODE_LINERLESS_DELAYED_CUT);
+    CHECK_INT(lw_parse_print_mode("linerlesstear", &pm), LW_PARSE_OK); CHECK_INT(pm, LW_PRINT_MODE_LINERLESS_TEAR);
+    CHECK_INT(lw_parse_print_mode("LinerlessPeel", &pm), LW_PARSE_OK); CHECK_INT(pm, LW_PRINT_MODE_LINERLESS_PEEL);
+    CHECK_INT(lw_parse_print_mode("LinerlessCut", &pm), LW_PARSE_OK); CHECK_INT(pm, LW_PRINT_MODE_LINERLESS_CUT);
+    CHECK_INT(lw_parse_print_mode("LinerlessRewind", &pm), LW_PARSE_OK); CHECK_INT(pm, LW_PRINT_MODE_LINERLESS_REWIND);
+    CHECK(lw_print_mode_is_linerless(LW_PRINT_MODE_LINERLESS_PEEL));
+    CHECK(lw_print_mode_is_linerless(LW_PRINT_MODE_LINERLESS_TEAR));
+    CHECK(!lw_print_mode_is_linerless(LW_PRINT_MODE_KIOSK));
+    CHECK(!lw_print_mode_is_linerless(LW_PRINT_MODE_UNSET));
+    CHECK_INT(lw_print_mode_code(LW_PRINT_MODE_LINERLESS_CUT), 0);
+    static const char *const sgd[] = { NULL, "tear off", "peel off", "cutter", "delayed cut", "rewind",
+                                       "applicator", "kiosk", "linerless peel", "linerless cut",
+                                       "linerless delayed cut", "linerless rewind", "linerless tear" };
+    CHECK(lw_print_mode_sgd(LW_PRINT_MODE_UNSET) == NULL);
+    for (int m = 1; m <= LW_PRINT_MODE_LINERLESS_TEAR; m++)
+        CHECK(strcmp(lw_print_mode_sgd((lw_print_mode)m), sgd[m]) == 0);
+
+    int rot = -1;
+    CHECK_INT(lw_parse_rotation("270", &rot), LW_PARSE_OK); CHECK_INT(rot, 270);
+    CHECK_INT(lw_parse_rotation("0", &rot), LW_PARSE_OK); CHECK_INT(rot, 0);
+    CHECK_INT(lw_parse_rotation("45", &rot), LW_PARSE_INVALID);
+    CHECK_INT(lw_parse_rotation("090", &rot), LW_PARSE_INVALID);
+    CHECK_INT(lw_parse_rotation("Default", &rot), LW_PARSE_DEFAULT);
+
+    lw_rtc rtc;
+    CHECK_INT(lw_parse_rtc("everyminute", &rtc), LW_PARSE_OK); CHECK_INT(rtc, LW_RTC_EVERY_MINUTE);
+    CHECK_INT(lw_parse_rtc("JobStart", &rtc), LW_PARSE_OK); CHECK_INT(rtc, LW_RTC_JOB_START);
+    CHECK_INT(lw_parse_rtc("Hourly", &rtc), LW_PARSE_INVALID);
+    CHECK(strcmp(lw_rtc_name(LW_RTC_EVERY_LABEL), "EveryLabel") == 0);
+    CHECK(strcmp(lw_rtc_name(LW_RTC_UNSET), "-") == 0);
+
+    lw_media_action ma;
+    static const char *const names[] = { "Feed", "Calibrate", "Length", "NoMotion", "ShortCal" };
+    static const char codes[] = { 'F', 'C', 'L', 'N', 'S' };
+    for (int i = 0; i < 5; i++) {
+        CHECK_INT(lw_parse_media_action(names[i], &ma), LW_PARSE_OK);
+        CHECK_INT(lw_media_action_code(ma), codes[i]);
+    }
+    CHECK_INT(lw_parse_media_action("shortcal", &ma), LW_PARSE_OK);
+    CHECK_INT(lw_parse_media_action("Rewind", &ma), LW_PARSE_INVALID);
+    CHECK_INT(lw_media_action_code(LW_MEDIA_ACTION_UNSET), 0);
+
+    bool printer = false;
+    CHECK_INT(lw_parse_control_chars("Printer", &printer), LW_PARSE_OK); CHECK(printer);
+    CHECK_INT(lw_parse_control_chars("standard", &printer), LW_PARSE_OK); CHECK(!printer);
+    CHECK_INT(lw_parse_control_chars("Intern", &printer), LW_PARSE_INVALID);
+    CHECK_INT(lw_parse_control_chars("Default", &printer), LW_PARSE_DEFAULT);
+    int ch = 0;
+    CHECK_INT(lw_parse_control_char("35", &ch), LW_PARSE_OK); CHECK_INT(ch, '#');
+    CHECK_INT(lw_parse_control_char("33", &ch), LW_PARSE_OK);
+    CHECK_INT(lw_parse_control_char("126", &ch), LW_PARSE_OK); CHECK_INT(ch, '~');
+    CHECK_INT(lw_parse_control_char("32", &ch), LW_PARSE_INVALID);
+    CHECK_INT(lw_parse_control_char("127", &ch), LW_PARSE_INVALID);
+    CHECK_INT(lw_parse_control_char("#", &ch), LW_PARSE_INVALID);
+    CHECK_INT(lw_parse_control_char("Default", &ch), LW_PARSE_DEFAULT);
+}
+
+static void test_resolve_new(void)
+{
+    static const char *const empty[] = { NULL };
+    table_lookup t0 = { { empty, empty, empty } };
+    lw_settings s;
+    lw_settings_init(&s);
+    CHECK_INT(lw_settings_resolve(&s, table_lookup_fn, &t0, NULL), 0);
+    CHECK_INT(s.rotation, 0);
+    CHECK_INT(s.mark_offset, LW_UNSET);
+    CHECK(!s.stop_at_last && !s.control_printer && !s.cancel_before);
+    CHECK_INT(s.stop_offset, 0);
+    CHECK_INT(s.pause_every, 0);
+    CHECK_INT(s.format_prefix, '^');
+    CHECK_INT(s.control_prefix, '~');
+    CHECK_INT(s.delimiter, ',');
+    CHECK_INT(s.rtc, LW_RTC_UNSET);
+    CHECK_INT(s.cancel_delay, 1000);
+    CHECK(s.label_start_commands == NULL && s.label_end_commands == NULL);
+    CHECK_INT(s.power_up_action, LW_MEDIA_ACTION_UNSET);
+    CHECK_INT(s.head_close_action, LW_MEDIA_ACTION_UNSET);
+    CHECK_INT(lw_settings_effective_rotation(&s), 0);
+    lw_settings_free(&s);
+
+    static const char *const argv_level[] = {
+        "lwRotation", "90", "lwRotate180", "True", "lwMarkOffset", "-100", "lwStopAtLast", "yes",
+        "lwStopOffset", "40000", "lwPauseEvery", "12", "lwControlChars", "Printer", "lwFormatPrefix", "35",
+        "lwControlPrefix", "200", "lwRTC", "EveryMinute", "lwCancelBefore", "True", "lwCancelDelay", "-5",
+        "lwLabelStartCmd", "XkZPMQ", "lwPowerUpAction", "Feed", "lwHeadCloseAction", "Bogus",
+        "lwMediaTracking", "Notch", "lwPrintMode", "LinerlessRewind", NULL
+    };
+    static const char *const marked_level[] = { "lwControlPrefix", "64", "lwDelimiter", "Default", NULL };
+    static const char *const default_level[] = {
+        "lwHeadCloseAction", "Calibrate", "lwLabelEndCmd", "RU5E", "lwDelimiter", "59", NULL
+    };
+    table_lookup t1 = { { argv_level, marked_level, default_level } };
+    int warnings = 0;
+    lw_logger log = { discard_log, &warnings };
+    lw_settings_init(&s);
+    CHECK_INT(lw_settings_resolve(&s, table_lookup_fn, &t1, &log), 2);   /* lwControlPrefix=200, Bogus */
+    CHECK_INT(warnings, 2);
+    CHECK_INT(s.rotation, 90);
+    CHECK(s.rotate180);
+    CHECK_INT(lw_settings_effective_rotation(&s), 90);
+    CHECK_INT(s.mark_offset, -80);
+    CHECK(s.stop_at_last);
+    CHECK_INT(s.stop_offset, 32000);
+    CHECK_INT(s.pause_every, 12);
+    CHECK(s.control_printer);
+    CHECK_INT(s.format_prefix, '#');
+    CHECK_INT(s.control_prefix, '@');
+    CHECK_INT(s.delimiter, ',');           /* "Default" auf der markierten Ebene schlägt die PPD */
+    CHECK_INT(s.rtc, LW_RTC_EVERY_MINUTE);
+    CHECK(s.cancel_before);
+    CHECK_INT(s.cancel_delay, 0);
+    CHECK_BYTES(s.label_start_commands, s.label_start_commands_len, "^FO1", 4);
+    CHECK_BYTES(s.label_end_commands, s.label_end_commands_len, "END", 3);
+    CHECK_INT(s.power_up_action, LW_MEDIA_ACTION_FEED);
+    CHECK_INT(s.head_close_action, LW_MEDIA_ACTION_CALIBRATE);
+    CHECK_INT(s.tracking, LW_TRACKING_NOTCH);
+    CHECK_INT(s.print_mode, LW_PRINT_MODE_LINERLESS_REWIND);
+    lw_settings_free(&s);
+
+    /* Begrenzungen: Markenversatz oben, Pause, Verzögerung; nur lwRotate180 → 180°. */
+    static const char *const clamp_level[] = {
+        "lwMarkOffset", "500", "lwPauseEvery", "123456", "lwCancelDelay", "99999", "lwRotate180", "on",
+        "lwStopOffset", "-3", "lwRotation", "Default", NULL
+    };
+    table_lookup t2 = { { clamp_level, empty, empty } };
+    lw_settings_init(&s);
+    lw_settings_resolve(&s, table_lookup_fn, &t2, NULL);
+    CHECK_INT(s.mark_offset, 283);
+    CHECK_INT(s.pause_every, 9999);
+    CHECK_INT(s.cancel_delay, 10000);
+    CHECK_INT(s.stop_offset, 0);
+    CHECK_INT(s.rotation, 0);
+    CHECK_INT(lw_settings_effective_rotation(&s), 180);
+    lw_settings_free(&s);
+
+    /* Direkt gesetzte ungültige Werte begrenzt lw_settings_clamp. */
+    lw_settings_init(&s);
+    s.rotation = 45;
+    s.format_prefix = 0;
+    s.control_prefix = 200;
+    s.delimiter = ' ';
+    lw_settings_clamp(&s);
+    CHECK_INT(s.rotation, 0);
+    CHECK_INT(s.format_prefix, '^');
+    CHECK_INT(s.control_prefix, '~');
+    CHECK_INT(s.delimiter, ',');
+}
+
+static void test_bitmap_quarter(void)
+{
+    for (int w = 1; w <= 19; w += 3) {
+        for (int h = 1; h <= 17; h += 4) {
+            lw_bitmap a, b;
+            lw_bitmap_init(&a);
+            lw_bitmap_init(&b);
+            random_bitmap(&a, w, h);
+            for (int deg = 90; deg <= 270; deg += 180) {
+                random_bitmap(&b, w, h);
+                memcpy(b.data, a.data, lw_bitmap_size(&a));
+                CHECK(lw_bitmap_rotate_quarter(&b, deg));
+                CHECK_INT(b.width, h);
+                CHECK_INT(b.height, w);
+                CHECK_INT(b.bpr, (h + 7) / 8);
+                bool ok = true;
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++) {
+                        int nx = deg == 90 ? h - 1 - y : y;
+                        int ny = deg == 90 ? x : w - 1 - x;
+                        if (lw_bitmap_get(&a, x, y) != lw_bitmap_get(&b, nx, ny))
+                            ok = false;
+                    }
+                CHECK(ok);
+                CHECK(padding_clear(&b));
+            }
+            /* zweimal 90° = 180° */
+            random_bitmap(&b, w, h);
+            memcpy(b.data, a.data, lw_bitmap_size(&a));
+            CHECK(lw_bitmap_rotate_quarter(&b, 90));
+            CHECK(lw_bitmap_rotate_quarter(&b, 90));
+            lw_bitmap c;
+            lw_bitmap_init(&c);
+            random_bitmap(&c, w, h);
+            memcpy(c.data, a.data, lw_bitmap_size(&a));
+            CHECK(lw_bitmap_rotate180(&c));
+            CHECK_BYTES(b.data, lw_bitmap_size(&b), c.data, lw_bitmap_size(&c));
+            lw_bitmap_free(&a);
+            lw_bitmap_free(&b);
+            lw_bitmap_free(&c);
+        }
+    }
+    lw_bitmap e;
+    lw_bitmap_init(&e);
+    lw_bitmap_alloc(&e, 12, 5);
+    CHECK_INT(lw_bitmap_last_black_row(&e), -1);
+    lw_bitmap_set(&e, 11, 3, true);
+    CHECK_INT(lw_bitmap_last_black_row(&e), 3);
+    CHECK(lw_bitmap_rotate_quarter(&e, 0));          /* andere Winkel: unverändert */
+    CHECK_INT(e.width, 12);
+    CHECK(lw_bitmap_set_height(&e, 9));               /* verlängern: weiße Zeilen */
+    CHECK_INT(e.height, 9);
+    CHECK(lw_bitmap_get(&e, 11, 3));
+    CHECK_INT(lw_bitmap_last_black_row(&e), 3);
+    CHECK(lw_bitmap_set_height(&e, 2));               /* kürzen */
+    CHECK_INT(lw_bitmap_last_black_row(&e), -1);
+    CHECK(!lw_bitmap_set_height(&e, -1));
+    CHECK(!lw_bitmap_set_height(&e, 2000000000));     /* > 256 MiB */
+    CHECK_INT(e.height, 2);
+    lw_bitmap_free(&e);
+}
+
+/* Wartehaken: zählt Aufrufe und merkt sich die bis dahin geschriebene Ausgabelänge. */
+typedef struct wait_capture {
+    job_capture *cap;
+    int calls;
+    int last_ms;
+    size_t out_len;
+} wait_capture;
+
+static void capture_wait(void *ctx, int ms)
+{
+    wait_capture *w = ctx;
+    w->calls++;
+    w->last_ms = ms;
+    w->out_len = w->cap->out.len;
+}
+
+static void capture_label_w(void *ctx, int page, int quantity)
+{
+    capture_label(((wait_capture *)ctx)->cap, page, quantity);
+}
+
+/* Auftrag mit fester Uhr (T0 + k·step) und Wartehaken. */
+static void run_job_clock(job_capture *cap, wait_capture *wc, const lw_settings *s, int max_width, int copies,
+                          bool collate, lw_bitmap *pages, int count, long long t0, long long step)
+{
+    capture_init(cap);
+    memset(wc, 0, sizeof(*wc));
+    wc->cap = cap;
+    lw_job_config cfg = { s, 203, max_width, -1, copies, collate, true, t0, step };
+    lw_job_hooks hooks = { capture_label_w, NULL, NULL, wc, NULL, capture_wait };
+    lw_job job;
+    CHECK(lw_job_init(&job, &cfg, &cap->sink, &hooks));
+    for (int i = 0; i < count; i++)
+        CHECK(lw_job_add_page(&job, &pages[i], i + 1));
+    CHECK(lw_job_finish(&job, false));
+    lw_job_free(&job);
+}
+
+#define T0 1700000000LL   /* 14.11.2023 22:13:20 UTC */
+
+static void use_utc(void)
+{
+    setenv("TZ", "UTC0", 1);
+    tzset();
+}
+
+static void test_job_zpl_extended(void)
+{
+    use_utc();
+    lw_settings s;
+    lw_settings_init(&s);
+    s.start_commands = "S";
+    s.start_commands_len = 1;
+    s.end_commands = "E";
+    s.end_commands_len = 1;
+    s.cancel_before = true;
+    s.cancel_delay = 250;
+    s.darkness = 8;
+    s.tear_off = -5;
+    s.backfeed = LW_BACKFEED_BEFORE;
+    s.calibrate = true;
+    s.print_mode = LW_PRINT_MODE_LINERLESS_CUT;
+    s.power_up_action = LW_MEDIA_ACTION_FEED;
+    s.head_close_action = LW_MEDIA_ACTION_SHORT_CAL;
+    s.rtc = LW_RTC_JOB_START;
+    s.tracking = LW_TRACKING_BLACK_MARK;
+    s.mark_offset = -7;
+    s.media_type = LW_MEDIA_TYPE_DIRECT_THERMAL;
+    s.speed = 4;
+    s.label_top = 20;
+    s.label_left = -30;
+    s.label_start_commands = "LS";
+    s.label_start_commands_len = 2;
+    s.label_end_commands = "LE";
+    s.label_end_commands_len = 2;
+    s.save_settings = true;
+    s.pause_every = 3;
+    s.cut_every = 5;               /* Pause hat Vorrang */
+    s.compression = LW_COMPRESSION_HEX;
+    lw_bitmap page;
+    lw_bitmap_init(&page);
+    sample_page(&page);
+    job_capture cap;
+    wait_capture wc;
+    run_job_clock(&cap, &wc, &s, 0, 1, true, &page, 1, T0, 0);
+    static const char expected[] =
+        "S\n~JA\n~SD08\n~TA-05\n~JSB\n~JC\n! U1 setvar \"media.printmode\" \"linerless cut\"\r\n"
+        "^XA^MFF,S^XZ\n^XA^ST11,14,2023,22,13,20,M^XZ\n"
+        "^XA\nLS\n^MNM,-7\n^MTD\n^PR4,4,4\n^PW10\n^LL2\n^LH0,0\n^LT20\n^LS-30\n^PON\n^PMN\n"
+        "^FO0,0^GFA,4,4,2,C0400000^FS\n^PQ1,3,0,N\n^JUS\nLE\n^XZ\nE\n";
+    CHECK_BYTES(cap.out.data, cap.out.len, expected, sizeof(expected) - 1);
+    CHECK_INT(wc.calls, 1);
+    CHECK_INT(wc.last_ms, 250);
+    CHECK_INT(wc.out_len, strlen("S\n~JA\n"));     /* gewartet wird direkt nach ~JA */
+    lw_buf_free(&cap.out);
+
+    /* Eigene Steuerzeichen (vertauscht ^/~, Trennzeichen ;): nur selbst erzeugte Befehle, nicht
+     * Rohbefehle, SGD-Zeile und Grafikdaten (ACS enthält ','). */
+    s.control_printer = true;
+    s.format_prefix = '~';
+    s.control_prefix = '^';
+    s.delimiter = ';';
+    s.compression = LW_COMPRESSION_ACS;
+    s.start_commands = "^S,~";
+    s.start_commands_len = 4;
+    s.label_start_commands = "^L,S";
+    s.label_start_commands_len = 4;
+    s.label_end_commands = "~L,E";
+    s.label_end_commands_len = 4;
+    sample_page(&page);
+    run_job_clock(&cap, &wc, &s, 0, 2, true, &page, 1, T0, 0);
+    static const char mapped[] =
+        "^S,~\n^JA\n^SD08\n^TA-05\n^JSB\n^JC\n! U1 setvar \"media.printmode\" \"linerless cut\"\r\n"
+        "~XA~MFF;S~XZ\n~XA~ST11;14;2023;22;13;20;M~XZ\n"
+        "~XA\n^L,S\n~MNM;-7\n~MTD\n~PR4;4;4\n~PW10\n~LL2\n~LH0;0\n~LT20\n~LS-30\n~PON\n~PMN\n"
+        "~FO0;0~GFA;4;4;2;C040,~FS\n~PQ2;3;0;N\n~JUS\n~L,E\n~XZ\nE\n";
+    CHECK_BYTES(cap.out.data, cap.out.len, mapped, sizeof(mapped) - 1);
+    lw_buf_free(&cap.out);
+
+    /* Steuerzeichen „Printer“ mit Standardwerten = Standardausgabe; ^MF nur mit beiden Aktionen;
+     * Kerben ^MNW; Markenversatz nur bei schwarzer Marke; Schneiden ohne Pause. */
+    lw_settings_init(&s);
+    s.control_printer = true;
+    s.power_up_action = LW_MEDIA_ACTION_CALIBRATE;
+    s.tracking = LW_TRACKING_NOTCH;
+    s.mark_offset = 50;
+    s.print_mode = LW_PRINT_MODE_KIOSK;
+    s.cut_every = 7;
+    s.compression = LW_COMPRESSION_HEX;
+    sample_page(&page);
+    run_job_clock(&cap, &wc, &s, 0, 1, true, &page, 1, T0, 0);
+    CHECK_BUF_STR(cap.out, "^XA\n^MMK\n^MNW\n^PW10\n^LL2\n^LH0,0\n^PON\n^PMN\n^FO0,0^GFA,4,4,2,C0400000^FS\n"
+                           "^PQ1,7,0,Y\n^XZ\n");
+    CHECK_INT(wc.calls, 0);
+    lw_buf_free(&cap.out);
+
+    /* ~JA ohne Wartezeit: kein Warteaufruf; SGD auch für Linerless-Abriss genau einmal. */
+    lw_settings_init(&s);
+    s.cancel_before = true;
+    s.cancel_delay = 0;
+    s.print_mode = LW_PRINT_MODE_LINERLESS_TEAR;
+    s.compression = LW_COMPRESSION_HEX;
+    lw_bitmap pages[3];
+    make_pages(pages, 3, -1);
+    run_job_clock(&cap, &wc, &s, 0, 1, true, pages, 3, T0, 0);
+    CHECK_INT(wc.calls, 0);
+    CHECK_INT(count_occurrences(&cap.out, "~JA\n"), 1);
+    CHECK_INT(count_occurrences(&cap.out, "! U1 setvar \"media.printmode\" \"linerless tear\"\r\n"), 1);
+    CHECK_INT(count_occurrences(&cap.out, "^MM"), 0);
+    lw_buf_free(&cap.out);
+    free_pages(pages, 3);
+    lw_bitmap_free(&page);
+}
+
+static void test_job_rtc(void)
+{
+    use_utc();
+    lw_settings s;
+    lw_settings_init(&s);
+    s.compression = LW_COMPRESSION_HEX;
+    s.rtc = LW_RTC_EVERY_LABEL;
+    lw_bitmap pages[2];
+    job_capture cap;
+    wait_capture wc;
+    /* 2 Seiten × 2 Kopien sortiert = 4 Etiketten; Uhr T0 + k·30 s. */
+    make_pages(pages, 2, -1);
+    run_job_clock(&cap, &wc, &s, 0, 2, true, pages, 2, T0, 30);
+    CHECK_INT(cap.labels, 4);
+    CHECK_INT(count_occurrences(&cap.out, "^XA^ST"), 4);
+    CHECK_INT(count_occurrences(&cap.out, "^XA^ST11,14,2023,22,13,20,M^XZ\n"), 1);
+    CHECK_INT(count_occurrences(&cap.out, "^XA^ST11,14,2023,22,13,50,M^XZ\n^XA\n^PW17"), 1);
+    CHECK_INT(count_occurrences(&cap.out, "^XA^ST11,14,2023,22,14,20,M^XZ\n^XA\n^PW16"), 1);
+    CHECK_INT(count_occurrences(&cap.out, "^XA^ST11,14,2023,22,14,50,M^XZ\n^XA\n^PW17"), 1);
+    static const char first[] = "^XA^ST11,14,2023,22,13,20,M^XZ\n^XA\n^PW16\n";
+    CHECK(cap.out.len > sizeof(first) && memcmp(cap.out.data, first, sizeof(first) - 1) == 0);
+    lw_buf_free(&cap.out);
+    free_pages(pages, 2);
+
+    /* Jede Minute: 6 Etiketten bei 25 s Abstand → ^ST im Kopf und vor Etikett 4 (75 s). */
+    s.rtc = LW_RTC_EVERY_MINUTE;
+    make_pages(pages, 2, -1);
+    run_job_clock(&cap, &wc, &s, 0, 3, true, pages, 2, T0, 25);
+    CHECK_INT(cap.labels, 6);
+    CHECK_INT(count_occurrences(&cap.out, "^XA^ST"), 2);
+    CHECK_INT(count_occurrences(&cap.out, "^XA^ST11,14,2023,22,14,35,M^XZ\n^XA\n^PW17"), 1);
+    const char *second = strstr((const char *)cap.out.data + 10, "^XA^ST");
+    CHECK(second != NULL && count_occurrences(&(lw_buf){ cap.out.data, (size_t)((const uint8_t *)second - cap.out.data), 0, false }, "^PQ1\n") == 3);
+    lw_buf_free(&cap.out);
+    free_pages(pages, 2);
+
+    /* Jede Minute mit fester Uhr (Schritt 0): nur im Kopf. */
+    make_pages(pages, 2, -1);
+    run_job_clock(&cap, &wc, &s, 0, 3, true, pages, 2, T0, 0);
+    CHECK_INT(count_occurrences(&cap.out, "^XA^ST"), 1);
+    lw_buf_free(&cap.out);
+    free_pages(pages, 2);
+
+    /* Auftragsbeginn: genau einmal – auch ohne Etiketten. */
+    s.rtc = LW_RTC_JOB_START;
+    make_pages(pages, 2, -1);
+    run_job_clock(&cap, &wc, &s, 0, 3, true, pages, 2, T0, 100);
+    CHECK_INT(count_occurrences(&cap.out, "^XA^ST"), 1);
+    lw_buf_free(&cap.out);
+    free_pages(pages, 2);
+    run_job_clock(&cap, &wc, &s, 0, 1, true, NULL, 0, T0, 0);
+    CHECK_BUF_STR(cap.out, "^XA^ST11,14,2023,22,13,20,M^XZ\n");
+    lw_buf_free(&cap.out);
+
+    /* EPL/CPCL: keine Uhr. */
+    s.rtc = LW_RTC_EVERY_LABEL;
+    for (int lang = LW_LANGUAGE_EPL; lang <= LW_LANGUAGE_CPCL; lang++) {
+        s.language = (lw_language)lang;
+        make_pages(pages, 2, -1);
+        run_job_clock(&cap, &wc, &s, 0, 2, true, pages, 2, T0, 30);
+        CHECK_INT(count_occurrences(&cap.out, "ST"), 0);
+        lw_buf_free(&cap.out);
+        free_pages(pages, 2);
+    }
+
+    /* Systemuhr: ^ST mit dem aktuellen Jahr. */
+    s.language = LW_LANGUAGE_ZPL;
+    s.rtc = LW_RTC_JOB_START;
+    capture_init(&cap);
+    {
+        lw_job_config cfg = { &s, 203, 0, -1, 1, true, false, 0, 0 };
+        lw_job_hooks hooks = { capture_label, NULL, NULL, &cap, NULL, NULL };
+        lw_job job;
+        lw_job_init(&job, &cfg, &cap.sink, &hooks);
+        time_t before = time(NULL);
+        CHECK(lw_job_finish(&job, false));
+        lw_job_free(&job);
+        struct tm tm;
+        gmtime_r(&before, &tm);
+        char year[32];
+        snprintf(year, sizeof(year), ",%04d,", tm.tm_year + 1900);
+        CHECK(strstr((const char *)cap.out.data, year) != NULL);
+    }
+    lw_buf_free(&cap.out);
+}
+
+static void test_job_rotation(void)
+{
+    lw_settings s;
+    lw_settings_init(&s);
+    s.compression = LW_COMPRESSION_HEX;
+    lw_bitmap page;
+    lw_bitmap_init(&page);
+    job_capture cap;
+
+    /* 90°: (x, y) → (h − 1 − y, x) – 10 × 2 wird 2 × 10. */
+    s.rotation = 90;
+    s.rotate180 = true;               /* lwRotation hat Vorrang */
+    sample_page(&page);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK_BUF_STR(cap.out, "^XA\n^PW2\n^LL10\n^LH0,0\n^PON\n^PMN\n^FO0,0^GFA,10,10,1,40400000000000000040^FS\n"
+                           "^PQ1\n^XZ\n");
+    lw_buf_free(&cap.out);
+
+    /* 270°: (x, y) → (y, w − 1 − x) */
+    s.rotation = 270;
+    s.rotate180 = false;
+    sample_page(&page);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK(strstr((const char *)cap.out.data, "^PW2\n^LL10\n") != NULL);
+    CHECK(strstr((const char *)cap.out.data, "^GFA,10,10,1,80000000000000008080^FS") != NULL);
+    lw_buf_free(&cap.out);
+
+    /* Erst drehen, dann abschneiden: 2 Punkte breit → 1 (Spalte 0 = leere Zeile 1). */
+    s.rotation = 90;
+    sample_page(&page);
+    run_job(&cap, &s, 203, 1, -1, 1, true, &page, 1, false);
+    CHECK(strstr((const char *)cap.out.data, "^PW1\n^LL10\n") != NULL);
+    CHECK(strstr((const char *)cap.out.data, "^GFA,10,10,1,00000000000000000000^FS") != NULL);
+    lw_buf_free(&cap.out);
+
+    /* 180° über lwRotation: ZPL ^POI, EPL ZB, CPCL Bitmap */
+    s.rotation = 180;
+    sample_page(&page);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK(strstr((const char *)cap.out.data, "^POI\n") != NULL);
+    lw_buf_free(&cap.out);
+    s.language = LW_LANGUAGE_EPL;
+    sample_page(&page);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK(strstr((const char *)cap.out.data, "\nZB\n") != NULL);
+    lw_buf_free(&cap.out);
+    s.language = LW_LANGUAGE_CPCL;
+    sample_page(&page);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    static const char cpcl180[] = "! 0 200 200 2 1\r\nPAGE-WIDTH 10\r\nCG 2 2 0 0 \x00\x00\x80\xC0\r\nFORM\r\nPRINT\r\n";
+    CHECK_BYTES(cap.out.data, cap.out.len, cpcl180, sizeof(cpcl180) - 1);
+    lw_buf_free(&cap.out);
+
+    /* EPL/CPCL 90°: Bitmap gedreht, ZT */
+    s.rotation = 90;
+    s.language = LW_LANGUAGE_EPL;
+    sample_page(&page);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK(strstr((const char *)cap.out.data, "q2\nQ10,24\nZT\n") != NULL);
+    lw_buf_free(&cap.out);
+    s.language = LW_LANGUAGE_CPCL;
+    sample_page(&page);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK(memcmp(cap.out.data, "! 0 200 200 10 1\r\nPAGE-WIDTH 2\r\nCG 1 10 0 0 \x40\x40", 46) == 0);
+    lw_buf_free(&cap.out);
+    lw_bitmap_free(&page);
+}
+
+/* 10 × 6, schwarzer Punkt bei (0, 1). */
+static void tall_page(lw_bitmap *bm, bool blank)
+{
+    lw_bitmap_alloc(bm, 10, 6);
+    if (!blank)
+        lw_bitmap_set(bm, 0, 1, true);
+}
+
+static int zpl_label_length(const lw_buf *b)
+{
+    const char *ll = strstr((const char *)b->data, "^LL");
+    return ll != NULL ? atoi(ll + 3) : -1;
+}
+
+static void test_job_stop_at_last(void)
+{
+    lw_settings s;
+    lw_settings_init(&s);
+    s.compression = LW_COMPRESSION_HEX;
+    s.tracking = LW_TRACKING_CONTINUOUS;
+    s.stop_at_last = true;
+    lw_bitmap page;
+    lw_bitmap_init(&page);
+    job_capture cap;
+    static const int offsets[] = { 0, 3, 10 };
+    static const int heights[] = { 2, 5, 12 };     /* 12 > 6: weiße Zeilen werden angehängt */
+    for (int i = 0; i < 3; i++) {
+        s.stop_offset = offsets[i];
+        tall_page(&page, false);
+        run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+        CHECK_INT(zpl_label_length(&cap.out), heights[i]);
+        lw_buf_free(&cap.out);
+    }
+    s.stop_offset = 10;
+    tall_page(&page, false);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK(strstr((const char *)cap.out.data, "^GFA,24,24,2,000080000000000000000000000000000000000000000000^FS") != NULL);
+    lw_buf_free(&cap.out);
+    /* leere Seite: mindestens 1 Zeile */
+    s.stop_offset = 0;
+    tall_page(&page, true);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK_INT(zpl_label_length(&cap.out), 1);
+    lw_buf_free(&cap.out);
+    /* vor dem Negativ: die Höhe richtet sich nach dem Original */
+    s.negative = true;
+    tall_page(&page, false);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK(strstr((const char *)cap.out.data, "^LL2\n") != NULL);
+    CHECK(strstr((const char *)cap.out.data, "^GFA,4,4,2,FFC07FC0^FS") != NULL);
+    lw_buf_free(&cap.out);
+    s.negative = false;
+    /* nur bei Endlosmaterial */
+    s.tracking = LW_TRACKING_GAP;
+    tall_page(&page, false);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK_INT(zpl_label_length(&cap.out), 6);
+    lw_buf_free(&cap.out);
+    s.tracking = LW_TRACKING_UNSET;
+    tall_page(&page, false);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK_INT(zpl_label_length(&cap.out), 6);
+    lw_buf_free(&cap.out);
+    /* EPL und CPCL ebenfalls */
+    s.tracking = LW_TRACKING_CONTINUOUS;
+    s.language = LW_LANGUAGE_EPL;
+    tall_page(&page, false);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK(strstr((const char *)cap.out.data, "q10\nQ2,0\n") != NULL);
+    lw_buf_free(&cap.out);
+    s.language = LW_LANGUAGE_CPCL;
+    tall_page(&page, false);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK(memcmp(cap.out.data, "! 0 200 200 2 1\r\n", 17) == 0);
+    lw_buf_free(&cap.out);
+    /* übersprungene leere Seite: erst kürzen, dann prüfen (bleibt leer → übersprungen) */
+    s.language = LW_LANGUAGE_ZPL;
+    s.skip_blank = true;
+    tall_page(&page, true);
+    run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
+    CHECK_INT(cap.labels, 0);
+    lw_buf_free(&cap.out);
+    lw_bitmap_free(&page);
+}
+
+static void test_job_epl_cpcl_extended(void)
+{
+    use_utc();
+    lw_settings s;
+    lw_settings_init(&s);
+    s.language = LW_LANGUAGE_EPL;
+    s.start_commands = "S";
+    s.start_commands_len = 1;
+    s.end_commands = "E";
+    s.end_commands_len = 1;
+    s.cancel_before = true;
+    s.cancel_delay = 40;
+    s.label_start_commands = "^L,S";
+    s.label_start_commands_len = 4;
+    s.label_end_commands = "LE";
+    s.label_end_commands_len = 2;
+    s.tracking = LW_TRACKING_NOTCH;
+    s.print_mode = LW_PRINT_MODE_LINERLESS_TEAR;
+    /* ZPL-Optionen ohne Wirkung in EPL/CPCL */
+    s.rtc = LW_RTC_EVERY_LABEL;
+    s.pause_every = 4;
+    s.mark_offset = 10;
+    s.control_printer = true;
+    s.format_prefix = '#';
+    s.control_prefix = '@';
+    s.delimiter = ';';
+    s.power_up_action = LW_MEDIA_ACTION_FEED;
+    s.head_close_action = LW_MEDIA_ACTION_FEED;
+    lw_bitmap page;
+    lw_bitmap_init(&page);
+    sample_page(&page);
+    job_capture cap;
+    wait_capture wc;
+    run_job_clock(&cap, &wc, &s, 0, 1, true, &page, 1, T0, 60);
+    static const char epl[] = "S\n~JA\n\nN\n^L,S\nq10\nQ2,24\nZT\nO\nGW0,0,2,2,\x3F\xBF\xFF\xFF\nLE\nP1\nE\n";
+    CHECK_BYTES(cap.out.data, cap.out.len, epl, sizeof(epl) - 1);
+    CHECK_INT(wc.calls, 1);
+    CHECK_INT(wc.last_ms, 40);
+    CHECK_INT(wc.out_len, 6);                  /* "S\n~JA\n" */
+    lw_buf_free(&cap.out);
+
+    /* CPCL: weder ~JA noch Etikettenbefehle (wie Start-/Endbefehle); Kerben → FORM */
+    s.language = LW_LANGUAGE_CPCL;
+    sample_page(&page);
+    run_job_clock(&cap, &wc, &s, 0, 1, true, &page, 1, T0, 60);
+    static const char cpcl[] = "! 0 200 200 2 1\r\nPAGE-WIDTH 10\r\nCG 2 2 0 0 \xC0\x40\x00\x00\r\nFORM\r\nPRINT\r\n";
+    CHECK_BYTES(cap.out.data, cap.out.len, cpcl, sizeof(cpcl) - 1);
+    CHECK_INT(wc.calls, 0);
+    lw_buf_free(&cap.out);
+
+    /* Abbruch vor dem Kopf: kein ~JA und kein Warten */
+    s.language = LW_LANGUAGE_ZPL;
+    capture_init(&cap);
+    memset(&wc, 0, sizeof(wc));
+    wc.cap = &cap;
+    {
+        lw_job_config cfg = { &s, 203, 0, -1, 1, true, true, T0, 0 };
+        lw_job_hooks hooks = { capture_label_w, NULL, NULL, &wc, NULL, capture_wait };
+        lw_job job;
+        lw_job_init(&job, &cfg, &cap.sink, &hooks);
+        CHECK(lw_job_finish(&job, true));
+        lw_job_free(&job);
+    }
+    CHECK_INT(cap.out.len, 0);
+    CHECK_INT(wc.calls, 0);
+    lw_buf_free(&cap.out);
+    lw_bitmap_free(&page);
+}
+
+/* ------------------------------------------------------------------------------------------ */
 /* Hilfen                                                                                     */
 /* ------------------------------------------------------------------------------------------ */
 
@@ -1615,6 +2298,14 @@ static const test_case tests[] = {
     { "job_copies", test_job_copies },
     { "job_cancel_early", test_job_cancel_early },
     { "job_preprocess", test_job_preprocess },
+    { "parse_new_values", test_parse_new_values },
+    { "resolve_new", test_resolve_new },
+    { "bitmap_quarter", test_bitmap_quarter },
+    { "job_zpl_extended", test_job_zpl_extended },
+    { "job_rtc", test_job_rtc },
+    { "job_rotation", test_job_rotation },
+    { "job_stop_at_last", test_job_stop_at_last },
+    { "job_epl_cpcl_ext", test_job_epl_cpcl_extended },
     { "util", test_util },
 };
 
