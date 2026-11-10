@@ -75,7 +75,7 @@ private struct PrintingSettings: View {
         Form {
             Section(tr("Bilder & Fotos")) {
                 Picker(tr("Standard-Rasterung"), selection: $model.preferences.imageDither) {
-                    ForEach(DitherAlgorithm.allCases) { Text($0.displayName).tag($0) }
+                    ForEach(DitherAlgorithm.allCases) { Text(tr($0.displayName)).tag($0) }
                 }
                 Text(tr("Gilt für Bilder und PDFs im Designer. Für Text und Barcodes empfiehlt sich „Schwellenwert“."))
                     .font(.system(size: 11.5))
@@ -137,6 +137,8 @@ private struct AdvancedSettings: View {
 }
 
 private struct AboutView: View {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
     @State private var appeared = false
 
     private var version: String {
@@ -166,6 +168,11 @@ private struct AboutView: View {
         }
         .padding(30)
         .frame(maxWidth: .infinity, minHeight: 360)
-        .onAppear { withAnimation(.spring(response: 0.7, dampingFraction: 0.6)) { appeared = true } }
+        .onAppear {
+            withAnimation(Motion.animation(.spring(response: 0.7, dampingFraction: 0.6),
+                                           reduceMotion: systemReduceMotion || appReduceMotion)) {
+                appeared = true
+            }
+        }
     }
 }

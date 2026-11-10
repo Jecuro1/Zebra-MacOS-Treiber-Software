@@ -178,10 +178,13 @@ final class DriverInstaller {
 
     // MARK: Installieren / Aktualisieren
 
+    /// Installiert bzw. aktualisiert den Treiber aus dem App-Paket. Ist bereits eine neuere Version
+    /// installiert, wäre das ein Downgrade – nur mit `allowDowngrade` (nach ausdrücklicher Rückfrage).
     @discardableResult
-    func install() async -> Bool {
+    func install(allowDowngrade: Bool = false) async -> Bool {
         guard !isBusy else { return false }
         if snapshot == nil { await refresh() }
+        if case .newerInstalled = status, !allowDowngrade { return false }
         let operation: Operation = isInstalled ? .update : .install
         guard let payload = payloadURL else {
             setPhase(.failed(operation, tr("Diese App enthält kein Treiberpaket. Bitte das App-Bundle mit „Scripts/build_app.sh“ erstellen.")))

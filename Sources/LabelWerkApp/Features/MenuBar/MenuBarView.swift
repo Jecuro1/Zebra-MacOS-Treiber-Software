@@ -99,9 +99,13 @@ struct MenuBarView: View {
         .padding(8)
     }
 
+    /// Holt das Hauptfenster nach vorn; nur wenn keins offen ist, wird eins geöffnet.
     private func openMain() {
-        openWindow(id: "main")
+        NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if !MainWindow.bringToFront() {
+            openWindow(id: "main")
+        }
     }
 }
 
@@ -109,6 +113,8 @@ private struct MenuBarPrinterRow: View {
     let session: PrinterSession
     let open: () -> Void
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -138,7 +144,8 @@ private struct MenuBarPrinterRow: View {
                 HStack(spacing: 6) {
                     quickButton(tr("Vorschub"), "arrow.down.to.line") { await session.perform(.feedLabel) }
                     quickButton(tr("Test"), "checkmark.seal") { await session.printTestLabel() }
-                    if session.state == .paused {
+                    // Nicht `state == .paused`: Ein Fehler (z. B. Druckkopf offen) hat als Zustand Vorrang.
+                    if session.isPaused {
                         quickButton(tr("Fortsetzen"), "play.fill") { await session.perform(.resume) }
                     } else {
                         quickButton(tr("Pause"), "pause.fill") { await session.perform(.pause) }
@@ -150,12 +157,16 @@ private struct MenuBarPrinterRow: View {
         }
         .padding(10)
         .labelWerkGlass(cornerRadius: 12, tint: session.alerts.first?.severity.color)
-        .onHover { inside in withAnimation(Motion.snappy) { hovering = inside } }
+        .onHover { inside in
+            withAnimation(Motion.animation(Motion.snappy, reduceMotion: systemReduceMotion || appReduceMotion)) {
+                hovering = inside
+            }
+        }
     }
 
     private var detail: String {
         if let activity = session.activity { return activity }
-        if let alert = session.alerts.first { return alert.title }
+        if let alert = session.alerts.first { return tr(alert.title) }
         return "\(session.state.displayName) · \(session.saved.descriptor.displayString)"
     }
 

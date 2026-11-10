@@ -6,6 +6,17 @@ import LabelWerkKit
 struct DashboardView: View {
     @Bindable var session: PrinterSession
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+
+    private var reduceMotion: Bool { systemReduceMotion || model.preferences.reduceMotion }
+
+    /// „Keine Meldungen“ nur mit einem gültigen Status, der wirklich „bereit“ bzw. „druckt“ meldet –
+    /// nicht ohne Status (erste Abfragen fehlgeschlagen) oder mit unbekanntem Zustand.
+    private var isAllGood: Bool {
+        guard session.connectionState.isConnected, session.supportsStatus,
+              let state = session.status?.state else { return false }
+        return state == .ready || state == .printing
+    }
 
     var body: some View {
         ScrollView {
@@ -15,7 +26,7 @@ struct DashboardView: View {
                 if !session.alerts.isEmpty {
                     AlertsSection(session: session)
                         .transition(.opacity.combined(with: .move(edge: .top)))
-                } else if session.connectionState.isConnected && session.supportsStatus {
+                } else if isAllGood {
                     AllGoodBanner()
                         .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
@@ -51,7 +62,7 @@ struct DashboardView: View {
             .padding(.bottom, Theme.Metrics.paddingLarge)
             .frame(maxWidth: Theme.Metrics.contentMaxWidth)
             .frame(maxWidth: .infinity)
-            .animation(Motion.spring, value: session.alerts.map(\.kind))
+            .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: session.alerts.map(\.kind))
         }
     }
 }
@@ -61,6 +72,9 @@ struct DashboardView: View {
 private struct HeroCard: View {
     @Bindable var session: PrinterSession
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+
+    private var reduceMotion: Bool { systemReduceMotion || model.preferences.reduceMotion }
 
     private var labelAspect: CGFloat {
         let stock = session.stock
@@ -116,7 +130,8 @@ private struct HeroCard: View {
                     if let updated = session.lastUpdated, session.supportsStatus {
                         HStack(spacing: 4) {
                             Image(systemName: "dot.radiowaves.left.and.right")
-                                .symbolEffect(.variableColor.iterative, options: .repeating, isActive: session.connectionState.isConnected)
+                                .symbolEffect(.variableColor.iterative, options: .repeating,
+                                              isActive: session.connectionState.isConnected && !reduceMotion)
                             Text(tr("Aktualisiert"))
                             Text(updated, style: .relative)
                             Text(tr("her"))
@@ -149,7 +164,7 @@ private struct HeroCard: View {
             if !session.supportsStatus {
                 return tr("Diese Verbindung sendet nur Druckdaten – Live-Status ist nicht verfügbar.")
             }
-            if let alert = session.alerts.first { return alert.recovery }
+            if let alert = session.alerts.first { return tr(alert.recovery) }
             switch session.state {
             case .printing:
                 let remaining = session.status?.hostStatus?.labelsRemainingInBatch ?? 0
@@ -186,7 +201,8 @@ private struct HeroCard: View {
                 }
                 .buttonStyle(.labelWerkSecondary)
 
-                if session.state == .paused {
+                // Nicht `state == .paused`: Ein Fehler (z. B. Druckkopf offen) hat als Zustand Vorrang.
+                if session.isPaused {
                     Button {
                         Task { await session.perform(.resume) }
                     } label: {
@@ -254,18 +270,23 @@ private struct AlertsSection: View {
 private struct AlertCard: View {
     let alert: PrinterAlert
     let session: PrinterSession
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var appeared = false
+    @State private var confirmCancelAll = false
+
+    private var reduceMotion: Bool { systemReduceMotion || model.preferences.reduceMotion }
 
     var body: some View {
         GlassCard(padding: 14, tint: alert.severity.color) {
             HStack(alignment: .top, spacing: 14) {
                 IconBadge(systemImage: alert.systemImage, tint: alert.severity.color, size: 38)
-                    .symbolEffect(.pulse, options: .repeating, isActive: alert.severity == .error)
+                    .symbolEffect(.pulse, options: .repeating, isActive: alert.severity == .error && !reduceMotion)
                     .scaleEffect(appeared ? 1 : 0.5)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(alert.title)
+                    Text(tr(alert.title))
                         .font(.system(size: 14, weight: .semibold))
-                    Text(alert.recovery)
+                    Text(tr(alert.recovery))
                         .font(.system(size: 12.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -274,7 +295,9 @@ private struct AlertCard: View {
                 quickFix
             }
         }
-        .onAppear { withAnimation(Motion.bouncy) { appeared = true } }
+        .onAppear {
+            withAnimation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion)) { appeared = true }
+        }
     }
 
     @ViewBuilder
@@ -290,8 +313,23 @@ private struct AlertCard: View {
             Button(tr("Neu verbinden")) { Task { await session.reconnect() } }
                 .buttonStyle(.labelWerkPrimary).controlSize(.small)
         case .receiveBufferFull:
-            Button(tr("Aufträge abbrechen")) { Task { await session.perform(.cancelAll) } }
-                .buttonStyle(.labelWerkSecondary).controlSize(.small)
+            // ~JA löscht alle Aufträge im Drucker – wie unter „Werkzeuge“ nur nach Rückfrage.
+            Button(tr("Aufträge abbrechen")) {
+                if model.preferences.confirmDestructiveActions {
+                    confirmCancelAll = true
+                } else {
+                    Task { await session.perform(.cancelAll) }
+                }
+            }
+            .buttonStyle(.labelWerkSecondary).controlSize(.small)
+            .confirmationDialog(tr("Alle Aufträge abbrechen?"), isPresented: $confirmCancelAll) {
+                Button(tr(PrinterAction.cancelAll.displayName), role: .destructive) {
+                    Task { await session.perform(.cancelAll) }
+                }
+                Button(tr("Abbrechen"), role: .cancel) {}
+            } message: {
+                Text(tr(PrinterAction.cancelAll.detail))
+            }
         default:
             EmptyView()
         }
@@ -299,6 +337,8 @@ private struct AlertCard: View {
 }
 
 private struct AllGoodBanner: View {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
     @State private var drawn = false
 
     var body: some View {
@@ -322,7 +362,11 @@ private struct AllGoodBanner: View {
                 Spacer()
             }
         }
-        .onAppear { withAnimation(Motion.bouncy.delay(0.1)) { drawn = true } }
+        .onAppear {
+            withAnimation(Motion.animation(Motion.bouncy.delay(0.1), reduceMotion: systemReduceMotion || appReduceMotion)) {
+                drawn = true
+            }
+        }
     }
 }
 
@@ -466,18 +510,18 @@ private struct MediaCard: View {
                 }
                 KeyValueRow(tr("Etikett"), session.stock.name)
                 KeyValueRow(tr("Größe"), session.stock.sizeDescription)
-                KeyValueRow(tr("Erkennung"), (settings.tracking ?? session.stock.tracking).displayName)
+                KeyValueRow(tr("Erkennung"), tr((settings.tracking ?? session.stock.tracking).displayName))
                 if let hostStatus {
-                    KeyValueRow(tr("Druckverfahren"), hostStatus.thermalTransferMode ? MediaType.thermalTransfer.displayName
-                                                                                       : MediaType.directThermal.displayName)
+                    KeyValueRow(tr("Druckverfahren"), tr(hostStatus.thermalTransferMode ? MediaType.thermalTransfer.displayName
+                                                                                          : MediaType.directThermal.displayName))
                     if let mode = hostStatus.printMode {
-                        KeyValueRow(tr("Druckmodus"), mode.displayName)
+                        KeyValueRow(tr("Druckmodus"), tr(mode.displayName))
                     }
                     KeyValueRow(tr("Etikettenlänge (Drucker)"),
                                 tr("%d Punkte (%.1f mm)", hostStatus.labelLengthDots,
                                    session.resolution.mm(fromDots: hostStatus.labelLengthDots)))
                 } else {
-                    KeyValueRow(tr("Druckverfahren"), (settings.mediaType ?? .directThermal).displayName)
+                    KeyValueRow(tr("Druckverfahren"), tr((settings.mediaType ?? .directThermal).displayName))
                 }
             }
         }
@@ -569,14 +613,29 @@ private struct StatusTimelineCard: View {
 
 private struct SimulationCard: View {
     let session: PrinterSession
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
 
     private func isActive(_ kind: AlertKind) -> Bool { session.alerts.contains { $0.kind == kind } }
 
     var body: some View {
+        // Ohne Verbindung zeigt die Karte keinen Status – die Schalter wären blind.
+        let connected = session.connectionState.isConnected
         GlassCard(tint: Theme.magenta) {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(tr("Simulation"), subtitle: tr("Der Demo-Drucker reagiert wie ein echter ZD421t – probiere Fehlerzustände aus."),
-                              systemImage: "wand.and.stars")
+                              systemImage: "wand.and.stars") {
+                    if !connected {
+                        Button {
+                            Task { await session.connect() }
+                        } label: {
+                            Label(tr("Verbinden"), systemImage: "bolt.fill")
+                        }
+                        .buttonStyle(.labelWerkSecondary)
+                        .controlSize(.small)
+                        .disabled(session.connectionState == .connecting)
+                    }
+                }
                 HStack(spacing: 10) {
                     simToggle(tr("Druckkopf offen"), "printer.fill", isActive(.headOpen)) { on in
                         await session.virtualPrinter?.setHeadOpen(on)
@@ -591,6 +650,7 @@ private struct SimulationCard: View {
                         await session.virtualPrinter?.setPaused(on)
                     }
                 }
+                .disabled(!connected)
             }
         }
     }
@@ -607,7 +667,7 @@ private struct SimulationCard: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(active ? LabelWerkButtonStyle.labelWerkDestructive : LabelWerkButtonStyle.labelWerkSecondary)
-        .animation(Motion.spring, value: active)
+        .animation(Motion.animation(Motion.spring, reduceMotion: systemReduceMotion || appReduceMotion), value: active)
     }
 }
 
@@ -649,7 +709,7 @@ private struct RecentJobsCard: View {
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(.tertiary)
                                 .frame(width: 90, alignment: .trailing)
-                            if job.payload != nil {
+                            if job.isReprintable {
                                 Button {
                                     Task { await session.reprint(job) }
                                 } label: {

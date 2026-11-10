@@ -27,6 +27,10 @@ struct RFIDSettingsPanel: View {
 
     private var status: RFIDStatusValues? { workbench.status }
     private var isConnected: Bool { session.connectionState.isConnected }
+    /// Werte setzen ist gesperrt, solange ein Lese-, Kodier- oder Kalibrierauftrag läuft (die
+    /// SGD-Abfragen würden dessen Terminal-Dialog die ausstehenden Antworten wegnehmen), während einer
+    /// anderen Operation der Sitzung und ohne Verbindung.
+    private var isMutationBlocked: Bool { workbench.isBusy || session.isBusy || !isConnected }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
@@ -147,7 +151,7 @@ struct RFIDSettingsPanel: View {
 
                 if let result = workbench.calibration {
                     RFIDCalibrationResultView(result: result, currentPosition: status?.programPosition,
-                                              isBusy: workbench.isBusy || session.isBusy,
+                                              isBusy: isMutationBlocked,
                                               reduceMotion: reduceMotion) { position in
                         positionDraft = position
                         Task { await workbench.apply(RFIDStatusValues.positionKey, value: position, session: session) }
@@ -210,7 +214,7 @@ struct RFIDSettingsPanel: View {
                     Button(tr("Übernehmen")) { applyPosition() }
                         .buttonStyle(.labelWerkPrimary)
                         .controlSize(.small)
-                        .disabled(!assessment.isValid || !positionChanged || session.isBusy || !isConnected)
+                        .disabled(!assessment.isValid || !positionChanged || isMutationBlocked)
                     Spacer(minLength: 4)
                     if let current = status?.programPosition {
                         RFIDCapsule(text: tr("Aktuell: %@", current), systemImage: "mappin", tint: Theme.indigo)
@@ -322,7 +326,7 @@ struct RFIDSettingsPanel: View {
                     Button(tr("Übernehmen")) { applyPower() }
                         .buttonStyle(.labelWerkPrimary)
                         .controlSize(.small)
-                        .disabled(!powerChanged || session.isBusy || !isConnected)
+                        .disabled(!powerChanged || isMutationBlocked)
                 }
                 .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: powerChanged)
             }
@@ -355,7 +359,7 @@ struct RFIDSettingsPanel: View {
                         }
                     }
                     .toggleStyle(.switch)
-                    .disabled(session.isBusy || !isConnected)
+                    .disabled(isMutationBlocked)
                 }
                 tagTypeRow
                 KeyValueRow(tr("Kodierer-Firmware"), status?.firmware ?? "–", monospaced: true,
@@ -387,7 +391,7 @@ struct RFIDSettingsPanel: View {
                 Text(tr("Tag-Typ"))
             }
             .pickerStyle(.menu)
-            .disabled(session.isBusy || !isConnected)
+            .disabled(isMutationBlocked)
         } else {
             KeyValueRow(tr("Tag-Typ"), status?.tagType.map { RFIDStatusValues.tagTypeName($0) } ?? "–")
             if workbench.isLoadingSettings {
@@ -419,7 +423,7 @@ struct RFIDSettingsPanel: View {
                                     tint: Theme.warning) {
                     Task { await workbench.resetCounters(session: session) }
                 }
-                .disabled((status?.validCount == nil && status?.voidCount == nil) || !isConnected)
+                .disabled((status?.validCount == nil && status?.voidCount == nil) || isMutationBlocked)
             }
         }
     }
@@ -524,7 +528,7 @@ struct RFIDSettingsPanel: View {
                                 isFlashed: workbench.flashedSetting == row.name,
                                 isEditing: editingName == row.name,
                                 editingValue: $editingValue,
-                                isBusy: session.isBusy || !isConnected,
+                                isBusy: isMutationBlocked,
                                 onEdit: { beginEditing(row) },
                                 onCancel: { cancelEditing() },
                                 onCommit: { commitEditing(row) }

@@ -104,6 +104,7 @@ struct DiscoveryPrinterCard: View {
 
     private var tint: Color { DiscoverySourceStyle.tint(printer.source) }
     private var catalogModel: PrinterModel? { DiscoveryMatcher.model(for: printer) }
+    private var isUnidentified: Bool { DiscoveryMatcher.isUnidentified(printer) }
 
     var body: some View {
         Group {
@@ -220,13 +221,19 @@ struct DiscoveryPrinterCard: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 HStack(spacing: 4) {
-                    Image(systemName: printer.descriptor.systemImage)
+                    if isUnidentified {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Theme.warning)
+                    } else {
+                        Image(systemName: printer.descriptor.systemImage)
+                    }
                     Text(DiscoveryMatcher.modelLine(for: printer) ?? printer.descriptor.displayString)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
+                .help(isUnidentified ? DiscoveryMatcher.unidentifiedWarning : "")
             }
             Spacer(minLength: 4)
             actionArea
@@ -277,7 +284,13 @@ struct DiscoveryPrinterCard: View {
 
     @ViewBuilder
     private var modelLine: some View {
-        if let line = DiscoveryMatcher.modelLine(for: printer) {
+        if isUnidentified {
+            Label(tr("Nicht als Zebra-Drucker erkannt"), systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.warning)
+                .lineLimit(1)
+                .help(DiscoveryMatcher.unidentifiedWarning)
+        } else if let line = DiscoveryMatcher.modelLine(for: printer) {
             Label(line, systemImage: "checkmark.seal.fill")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.teal)

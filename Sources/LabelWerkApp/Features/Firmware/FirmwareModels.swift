@@ -392,6 +392,15 @@ final class FirmwareUpdateController {
 
     var canChooseFile: Bool { !isBusy && !isAnalyzing }
     var checklistComplete: Bool { checklist.count == FirmwareChecklistItem.allCases.count }
+
+    /// Firmware nur über eine direkte Verbindung (USB, Netzwerk, Bluetooth). Über eine macOS-Warteschlange
+    /// würde jeder 16-KB-Block zu einem eigenen CUPS-Auftrag – Tausende Aufträge, die CUPS ab `MaxJobs`
+    /// mitten in der Übertragung ablehnt –, und ohne Rückkanal lässt sich der Neustart nicht verfolgen.
+    static func supportsTransfer(on session: PrinterSession) -> Bool { session.supportsStatus }
+
+    static var unsupportedConnectionMessage: String {
+        tr("Firmware kann nicht über eine macOS-Warteschlange übertragen werden – den Drucker per USB oder Netzwerk direkt hinzufügen.")
+    }
     var transferredBytes: Int { Int(Double(file?.size ?? 0) * min(1, max(0, progress))) }
 
     /// Verbleibende Zeit aus der geglätteten Übertragungsrate.
@@ -468,7 +477,7 @@ final class FirmwareUpdateController {
     // MARK: Übertragung
 
     func start(session: PrinterSession, reduceMotion: Bool) {
-        guard let data, let file, !isBusy else { return }
+        guard let data, let file, !isBusy, Self.supportsTransfer(on: session) else { return }
         previousFirmware = session.identity?.firmware
         samples = []
         withAnimation(reduceMotion ? nil : Motion.spring) {

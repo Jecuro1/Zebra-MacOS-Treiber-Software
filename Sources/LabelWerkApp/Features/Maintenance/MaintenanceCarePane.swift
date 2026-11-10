@@ -329,7 +329,7 @@ private struct MaintHeadTestCard: View {
         let previewWidth: CGFloat = 230
         let previewHeight = min(300, max(110, previewWidth * aspect))
         let headDots = session.model?.printWidthDots(session.resolution)
-        let zplCapable = session.model?.supports(PrinterLanguage.zpl) ?? true
+        let zplCapable = MaintCareController.canPrintTestPattern(session)
         let languageMismatch = deviceLanguage.map {
             !MaintDeviceLanguage.isCompatible(deviceValue: $0, output: PrinterLanguage.zpl, model: session.model)
         } ?? false
@@ -609,7 +609,10 @@ private struct MaintCleaningGuideCard: View {
                 Label(tr("Druckkopftest drucken"), systemImage: "printer.fill")
             }
             .buttonStyle(.labelWerkPrimary)
-            .disabled(care.isPrintingTest)
+            .disabled(care.isPrintingTest || !MaintCareController.canPrintTestPattern(session))
+            .help(MaintCareController.canPrintTestPattern(session)
+                  ? tr("Testmuster über die volle Etikettenbreite – zeigt verschmutzte oder defekte Heizelemente")
+                  : tr("Dieses Modell versteht kein ZPL – das Testmuster ist nicht verfügbar."))
         }
         .padding(.top, 4)
     }
@@ -706,13 +709,17 @@ private struct MaintGuideSymbolScene: View {
     }
 }
 
-/// Reinigungsstift wischt den Heizstreifen von der Mitte nach außen (30 fps, nur solange sichtbar).
+/// Reinigungsstift wischt den Heizstreifen von der Mitte nach außen (30 fps, nur solange sichtbar und
+/// das Fenster aktiv ist).
 private struct MaintHeadCleaningScene: View {
     let reduceMotion: Bool
     @Environment(\.controlActiveState) private var controlActiveState
+    /// Im sichtbaren Bereich der Seite (aus dem Bild gescrollt: Zeitleiste anhalten).
+    @State private var isOnScreen = true
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion || controlActiveState == .inactive)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+                                paused: reduceMotion || controlActiveState == .inactive || !isOnScreen)) { timeline in
             Canvas { context, size in
                 let cycle = 4.4
                 let phase = reduceMotion
@@ -721,22 +728,28 @@ private struct MaintHeadCleaningScene: View {
                 MaintCleaningArt.drawHead(in: &context, size: size, phase: phase)
             }
         }
+        .maintScrollVisibility($isOnScreen)
         .accessibilityLabel(tr("Animation: Der Reinigungsstift wischt den Druckkopf von der Mitte nach außen."))
     }
 }
 
-/// Andruckwalze dreht sich unter einem Tupfer; Flecken verschwinden beim Vorbeidrehen.
+/// Andruckwalze dreht sich unter einem Tupfer; Flecken verschwinden beim Vorbeidrehen (30 fps, nur
+/// solange sichtbar und das Fenster aktiv ist).
 private struct MaintPlatenScene: View {
     let reduceMotion: Bool
     @Environment(\.controlActiveState) private var controlActiveState
+    /// Im sichtbaren Bereich der Seite (aus dem Bild gescrollt: Zeitleiste anhalten).
+    @State private var isOnScreen = true
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion || controlActiveState == .inactive)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+                                paused: reduceMotion || controlActiveState == .inactive || !isOnScreen)) { timeline in
             Canvas { context, size in
                 let time = reduceMotion ? 2.2 : timeline.date.timeIntervalSinceReferenceDate
                 MaintCleaningArt.drawPlaten(in: &context, size: size, time: time)
             }
         }
+        .maintScrollVisibility($isOnScreen)
         .accessibilityLabel(tr("Animation: Die Andruckwalze wird beim Drehen mit einem Tupfer gereinigt."))
     }
 }

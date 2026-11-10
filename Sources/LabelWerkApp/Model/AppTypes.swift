@@ -91,6 +91,10 @@ struct JobRecord: Codable, Identifiable, Hashable {
             case .settings: return "slider.horizontal.3"
             }
         }
+
+        /// Druckaufträge, deren gespeicherte Daten erneut gesendet werden dürfen. Rohdaten und
+        /// Gerätebefehle (z. B. ein Neustart) gehören ausdrücklich nicht dazu.
+        var isReprintable: Bool { self == .zpl || self == .image }
     }
 
     var id: UUID = UUID()
@@ -105,11 +109,17 @@ struct JobRecord: Codable, Identifiable, Hashable {
     var message: String?
     /// Kleine PNG-Vorschau (optional, max. ~40 KB).
     var previewPNG: Data?
-    /// Gesendete Druckdaten für „Erneut drucken“ (nur bis 512 KB gespeichert).
+    /// Gesendete Druckdaten für „Erneut drucken“ (nur bis 512 KB gespeichert). Nach dem Laden
+    /// `nil`: Die Daten liegen dann in einer eigenen Datei (`payloadFile`).
     var payload: Data?
+    /// Name der Datei mit den Druckdaten im Ordner `PersistenceStore.payloadDirectory`.
+    var payloadFile: String?
 
     /// Höchstgröße gespeicherter Druckdaten.
     static let maxStoredPayload = 512 * 1024
+
+    /// „Erneut drucken“ möglich: druckbare Auftragsart mit gespeicherten Druckdaten.
+    var isReprintable: Bool { kind.isReprintable && (payload != nil || payloadFile != nil) }
 }
 
 // MARK: - App-Einstellungen
@@ -155,8 +165,159 @@ struct PersistedState: Codable {
     var preferences: AppPreferences = AppPreferences()
     var history: [JobRecord] = []
     var hasCompletedOnboarding: Bool = false
+    /// Nur noch zum Lesen älterer Dateien – der Designer-Inhalt liegt in einer eigenen Datei.
     var designerDocument: String?
     var lastSelectedPrinterID: UUID?
+}
+
+// MARK: - Tolerantes Laden
+//
+// Die synthetisierte `Decodable`-Implementierung verlangt jeden Schlüssel und jeden bekannten
+// Aufzählungswert. Ein neues Feld in einer späteren Version oder ein unbekannter Wert nach einem
+// Downgrade machte sonst die ganze `state.json` unlesbar – mit allen Druckern, Formaten und dem
+// Verlauf. Darum: fehlende Werte → Standardwert, ungültige Einträge in Listen werden übersprungen.
+// Ungültige Werte (nicht bloß fehlende) meldet `PersistenceDecodeReport`, damit die Originaldatei
+// vor dem nächsten Speichern gesichert wird.
+
+extension AppPreferences {
+    init(from decoder: Decoder) throws {
+        let c = try LenientContainer(decoder, keyedBy: CodingKeys.self)
+        let d = AppPreferences()
+        self.init()
+        pollInterval = c.value(.pollInterval, default: d.pollInterval)
+        notificationsEnabled = c.value(.notificationsEnabled, default: d.notificationsEnabled)
+        showMenuBarExtra = c.value(.showMenuBarExtra, default: d.showMenuBarExtra)
+        playSounds = c.value(.playSounds, default: d.playSounds)
+        reduceMotion = c.value(.reduceMotion, default: d.reduceMotion)
+        appearance = c.value(.appearance, default: d.appearance)
+        autoConnect = c.value(.autoConnect, default: d.autoConnect)
+        imageDither = c.value(.imageDither, default: d.imageDither)
+        confirmDestructiveActions = c.value(.confirmDestructiveActions, default: d.confirmDestructiveActions)
+        developerMode = c.value(.developerMode, default: d.developerMode)
+        showDemoPrinter = c.value(.showDemoPrinter, default: d.showDemoPrinter)
+    }
+}
+
+extension SavedPrinter {
+    init(from decoder: Decoder) throws {
+        let c = try LenientContainer(decoder, keyedBy: CodingKeys.self)
+        // Ohne Kennung und Verbindung ist der Eintrag unbrauchbar (wird in der Liste übersprungen).
+        self.init(
+            id: try c.required(UUID.self, .id),
+            name: c.value(.name, default: tr("Drucker")),
+            descriptor: try c.required(ConnectionDescriptor.self, .descriptor),
+            modelID: c.optional(String.self, .modelID),
+            resolution: c.value(.resolution, default: .dpi203),
+            language: c.value(.language, default: .zpl),
+            stockID: c.value(.stockID, default: "w4h6in"),
+            settings: c.value(.settings, default: .default),
+            cupsQueueName: c.optional(String.self, .cupsQueueName),
+            accentHue: c.value(.accentHue, default: 0.72),
+            isFavorite: c.value(.isFavorite, default: false),
+            addedAt: c.value(.addedAt, default: Date()),
+            location: c.value(.location, default: "")
+        )
+    }
+}
+
+extension JobRecord {
+    init(from decoder: Decoder) throws {
+        let c = try LenientContainer(decoder, keyedBy: CodingKeys.self)
+        self.init(
+            id: c.value(.id, default: UUID()),
+            date: c.value(.date, default: Date.distantPast),
+            printerID: try c.required(UUID.self, .printerID),
+            printerName: c.value(.printerName, default: ""),
+            title: c.value(.title, default: ""),
+            kind: try c.required(Kind.self, .kind),
+            labels: c.value(.labels, default: 0),
+            bytes: c.value(.bytes, default: 0),
+            success: c.value(.success, default: true),
+            message: c.optional(String.self, .message),
+            previewPNG: c.optional(Data.self, .previewPNG),
+            payload: c.optional(Data.self, .payload),
+            payloadFile: c.optional(String.self, .payloadFile)
+        )
+    }
+}
+
+extension PersistedState {
+    init(from decoder: Decoder) throws {
+        let c = try LenientContainer(decoder, keyedBy: CodingKeys.self)
+        self.init()
+        printers = c.array(SavedPrinter.self, .printers)
+        customStocks = c.array(LabelStock.self, .customStocks)
+        preferences = c.value(.preferences, default: AppPreferences())
+        history = c.array(JobRecord.self, .history)
+        hasCompletedOnboarding = c.value(.hasCompletedOnboarding, default: false)
+        designerDocument = c.optional(String.self, .designerDocument)
+        lastSelectedPrinterID = c.optional(UUID.self, .lastSelectedPrinterID)
+    }
+}
+
+/// Sammelt beim Laden Werte, die ungültig waren und deshalb verworfen wurden (nur während eines
+/// einzelnen, synchronen Dekodiervorgangs benutzt).
+final class PersistenceDecodeReport: @unchecked Sendable {
+    static let key = CodingUserInfoKey(rawValue: "LabelWerk.PersistenceDecodeReport")!
+
+    private(set) var problems: [String] = []
+
+    func note(_ path: [CodingKey], _ error: Error) {
+        problems.append(path.map(\.stringValue).joined(separator: ".") + ": \(error)")
+    }
+}
+
+/// Liest Werte nachsichtig: Fehlt ein Schlüssel oder ist der Wert ungültig, gilt der Standardwert.
+struct LenientContainer<Key: CodingKey> {
+    private let container: KeyedDecodingContainer<Key>
+    private let report: PersistenceDecodeReport?
+
+    init(_ decoder: Decoder, keyedBy type: Key.Type) throws {
+        container = try decoder.container(keyedBy: type)
+        report = decoder.userInfo[PersistenceDecodeReport.key] as? PersistenceDecodeReport
+    }
+
+    func value<T: Decodable>(_ key: Key, default fallback: @autoclosure () -> T) -> T {
+        optional(T.self, key) ?? fallback()
+    }
+
+    func optional<T: Decodable>(_ type: T.Type, _ key: Key) -> T? {
+        do {
+            return try container.decodeIfPresent(type, forKey: key)
+        } catch {
+            report?.note(container.codingPath + [key], error)
+            return nil
+        }
+    }
+
+    func required<T: Decodable>(_ type: T.Type, _ key: Key) throws -> T {
+        try container.decode(type, forKey: key)
+    }
+
+    /// Liest eine Liste und überspringt ungültige Einträge.
+    func array<T: Decodable>(_ type: T.Type, _ key: Key) -> [T] {
+        guard let elements = optional([LossyElement<T>].self, key) else { return [] }
+        for element in elements {
+            if let error = element.error { report?.note(container.codingPath + [key], error) }
+        }
+        return elements.compactMap(\.value)
+    }
+}
+
+/// Listeneintrag, dessen Dekodierfehler abgefangen wird (der Listenzeiger rückt trotzdem vor).
+private struct LossyElement<T: Decodable>: Decodable {
+    let value: T?
+    let error: Error?
+
+    init(from decoder: Decoder) throws {
+        do {
+            value = try T(from: decoder)
+            error = nil
+        } catch {
+            value = nil
+            self.error = error
+        }
+    }
 }
 
 // MARK: - Hinweise (Toasts)

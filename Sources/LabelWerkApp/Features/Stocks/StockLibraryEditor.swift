@@ -356,6 +356,12 @@ struct StockLibraryEditor: View {
     // MARK: Speichern
 
     private func save() {
+        // Die Maßfelder übernehmen getippte Werte erst beim Beenden der Bearbeitung – ein Klick auf
+        // „Format anlegen“ beendet sie nicht. Sonst würde z. B. die zuletzt getippte Länge verworfen.
+        afterCommittingTextEditing { performSave() }
+    }
+
+    private func performSave() {
         guard errors.isEmpty else { return }
         let stock = LabelStock(
             id: draft.stock.id,

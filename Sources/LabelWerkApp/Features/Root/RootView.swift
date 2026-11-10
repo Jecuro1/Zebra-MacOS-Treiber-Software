@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import LabelWerkKit
 
@@ -15,6 +16,7 @@ struct RootView: View {
             DetailRouter()
         }
         .navigationSplitViewStyle(.balanced)
+        .background(MainWindowRegistrar())
         .overlay(alignment: .bottomTrailing) {
             ToastOverlay()
                 .padding(Theme.Metrics.paddingLarge)
@@ -35,7 +37,9 @@ struct RootView: View {
             if model.hasCompletedOnboarding { NotificationService.shared.setUp() }
             NotificationService.shared.onOpenPrinter = { id in
                 model.selection = .printer(id)
+                _ = MainWindow.bringToFront()
             }
+            // Wirkt nur beim ersten Hauptfenster (siehe `AppModel.start()`).
             model.start()
         }
     }
@@ -49,9 +53,46 @@ struct RootView: View {
     }
 }
 
+/// Das Hauptfenster der App. Menüleiste und Benachrichtigungen holen es nach vorn, statt ein
+/// weiteres zu öffnen (`openWindow` öffnet bei einer `WindowGroup` immer ein neues Fenster).
+@MainActor
+enum MainWindow {
+    private static weak var window: NSWindow?
+
+    static func register(_ window: NSWindow) {
+        self.window = window
+    }
+
+    /// Holt das offene Hauptfenster nach vorn; `false`, wenn keins offen ist.
+    static func bringToFront() -> Bool {
+        guard let window else { return false }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        } else if !window.isVisible {
+            return false
+        }
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
+}
+
+/// Meldet das Fenster, in dem `RootView` liegt, an `MainWindow`.
+private struct MainWindowRegistrar: NSViewRepresentable {
+    func makeNSView(context: Context) -> RegistrarView { RegistrarView() }
+    func updateNSView(_ nsView: RegistrarView, context: Context) {}
+
+    final class RegistrarView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { MainWindow.register(window) }
+        }
+    }
+}
+
 /// Wählt die Detailansicht passend zur Seitenleisten-Auswahl.
 struct DetailRouter: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     var body: some View {
         Group {
@@ -76,7 +117,8 @@ struct DetailRouter: View {
             }
         }
         .transition(.opacity.combined(with: .scale(scale: 0.985)))
-        .animation(Motion.spring, value: model.selection)
+        .animation(Motion.animation(Motion.spring, reduceMotion: systemReduceMotion || model.preferences.reduceMotion),
+                   value: model.selection)
     }
 
     private var noSelection: some View {

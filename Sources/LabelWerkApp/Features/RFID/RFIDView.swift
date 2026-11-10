@@ -154,7 +154,7 @@ private struct RFIDContent: View {
                 }
                 .buttonStyle(.labelWerkPrimary)
                 .controlSize(.small)
-                .disabled(session.isBusy)
+                .disabled(session.isBusy || workbench.isBusy)
             }
             .transition(.opacity.combined(with: .move(edge: .top)))
         case .unverified:

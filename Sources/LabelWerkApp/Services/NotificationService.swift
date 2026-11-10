@@ -34,8 +34,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         lastSent[key] = Date()
 
         let content = UNMutableNotificationContent()
-        content.title = "\(printerName): \(alert.title)"
-        content.body = alert.recovery
+        content.title = tr("%@: %@", printerName, tr(alert.title))
+        content.body = tr(alert.recovery)
         content.sound = alert.severity == .error ? .defaultCritical : .default
         content.userInfo = ["printerID": printerID.uuidString]
         content.threadIdentifier = printerID.uuidString

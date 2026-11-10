@@ -89,8 +89,11 @@ struct PrinterDetailView: View {
 /// Kopfbereich mit Name, Modell, Verbindung, Status und Verbindungsknopf.
 struct PrinterHeaderView: View {
     @Bindable var session: PrinterSession
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
     @State private var isRenaming = false
     @State private var draftName = ""
+    @FocusState private var nameFieldFocused: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -103,17 +106,18 @@ struct PrinterHeaderView: View {
                             .textFieldStyle(.roundedBorder)
                             .font(Theme.Typography.title)
                             .frame(maxWidth: 320)
+                            .focused($nameFieldFocused)
                             .onSubmit(commitRename)
                             .onExitCommand { isRenaming = false }
+                            .onAppear { nameFieldFocused = true }
                     } else {
                         Text(session.displayName)
                             .font(Theme.Typography.title)
                             .lineLimit(1)
-                            .onTapGesture(count: 2) {
-                                draftName = session.displayName
-                                isRenaming = true
-                            }
+                            .onTapGesture(count: 2, perform: beginRename)
                             .help(tr("Doppelklicken zum Umbenennen"))
+                            // Umbenennen auch ohne Maus (VoiceOver; außerdem im Kontextmenü der Seitenleiste).
+                            .accessibilityAction(named: tr("Umbenennen"), beginRename)
                     }
                     StatusPill(state: session.state)
                 }
@@ -143,7 +147,8 @@ struct PrinterHeaderView: View {
 
             connectButton
         }
-        .animation(Motion.spring, value: session.activity)
+        .animation(Motion.animation(Motion.spring, reduceMotion: systemReduceMotion || appReduceMotion),
+                   value: session.activity)
     }
 
     @ViewBuilder
@@ -170,6 +175,11 @@ struct PrinterHeaderView: View {
             }
             .buttonStyle(.labelWerkPrimary)
         }
+    }
+
+    private func beginRename() {
+        draftName = session.displayName
+        isRenaming = true
     }
 
     private func commitRename() {

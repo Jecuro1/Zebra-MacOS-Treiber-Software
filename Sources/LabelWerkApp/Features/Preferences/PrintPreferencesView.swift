@@ -316,7 +316,7 @@ struct PrintPreferencesView: View {
                     Label(tr("Profil importieren …"), systemImage: "square.and.arrow.down")
                 }
                 Button {
-                    exportProfile()
+                    afterCommittingTextEditing { exportProfile() }
                 } label: {
                     Label(tr("Profil exportieren …"), systemImage: "square.and.arrow.up")
                 }
@@ -348,7 +348,8 @@ struct PrintPreferencesView: View {
                   : tr("Diese Verbindung kann keine Werte lesen (nur Senden)."))
 
             Button {
-                applyAsMacDefault()
+                // Zahlenfelder (z. B. „Schneiden nach je“) übernehmen getippte Werte erst beim Verlassen.
+                afterCommittingTextEditing { applyAsMacDefault() }
             } label: {
                 barLabel(tr("Als macOS-Standard"), symbol: "macwindow.badge.plus", busy: isUpdatingCUPS, compact: compact)
             }
@@ -357,7 +358,7 @@ struct PrintPreferencesView: View {
             .help(tr("Als Standardwerte der macOS-Warteschlange übernehmen – gilt für alle Programme"))
 
             Button {
-                confirmPermanent = true
+                afterCommittingTextEditing { confirmPermanent = true }
             } label: {
                 barLabel(tr("Dauerhaft speichern"), symbol: "externaldrive.badge.checkmark", busy: false, compact: compact)
             }
@@ -366,7 +367,7 @@ struct PrintPreferencesView: View {
             .help(tr("An den Drucker senden und dort dauerhaft speichern (^JUS)"))
 
             Button {
-                send(permanently: false)
+                afterCommittingTextEditing { send(permanently: false) }
             } label: {
                 barLabel(tr("An Drucker senden"), symbol: "paperplane.fill", busy: isApplying, compact: false)
             }
@@ -427,11 +428,17 @@ struct PrintPreferencesView: View {
         let language = session.saved.language
         Task {
             do {
-                try await CUPSService.setDefaults(queue: queue, settings: settings,
-                                                  stock: stock.isCustom ? nil : stock, language: language)
-                let message = stock.isCustom
+                let approximated = try await CUPSService.setDefaults(queue: queue, settings: settings,
+                                                                     stock: stock.isCustom ? nil : stock,
+                                                                     language: language)
+                var message = stock.isCustom
                     ? tr("Alle Programme drucken auf „%@“ mit diesen Einstellungen. Eigene Etikettenformate im Druckdialog als Papiergröße wählen.", queue)
                     : tr("Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen.", queue)
+                if !approximated.isEmpty {
+                    // Exakte Werte gelten als Warteschlangen-Standard; der Druckdialog kennt nur die PPD-Auswahl.
+                    message += " " + tr("Im macOS-Druckdialog steht für %@ nur der nächstliegende Wert zur Auswahl.",
+                                        approximated.joined(separator: ", "))
+                }
                 model.toast(tr("macOS-Standard aktualisiert"), message: message, style: .success)
             } catch {
                 model.toast(tr("macOS-Standard konnte nicht gesetzt werden"),

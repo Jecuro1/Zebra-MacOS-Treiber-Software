@@ -233,6 +233,18 @@ enum DiscoveryMatcher {
         return nil
     }
 
+    /// Netzwerkgerät mit offenem Port, das sich weder per SNMP noch per `~HI` als Zebra zu erkennen gab
+    /// (SNMP aus, andere Community, nur SNMPv3). Es kann ein Bürodrucker sein, der die Statusabfragen
+    /// von LabelWerk (`~HS`, `~HI` …) als Textseiten ausdrucken würde.
+    static func isUnidentified(_ printer: DiscoveredPrinter) -> Bool {
+        printer.source == .network && printer.details["identifiedBy"] == nil
+    }
+
+    /// Warnung zu nicht identifizierten Geräten (Karte und Rückfrage vor dem Hinzufügen).
+    static var unidentifiedWarning: String {
+        tr("Das Gerät hat sich bei der Suche nicht als Zebra-Drucker zu erkennen gegeben (keine SNMP-Antwort). LabelWerk fragt nach dem Hinzufügen sofort und danach regelmäßig den Status ab – ein Büro- oder Tintenstrahldrucker würde diese Abfragen als Seiten voller Steuerzeichen drucken. Nur hinzufügen, wenn es sich um einen Zebra-Drucker handelt.")
+    }
+
     /// Kurze Beschreibung „Zebra ZD421t · 300 dpi“ für Karten.
     @MainActor
     static func modelLine(for printer: DiscoveredPrinter) -> String? {

@@ -53,7 +53,10 @@ final class FilesGraphicUpload: Identifiable {
     var contrast: Double = 0
     var invert = false
     var name = "LOGO"
-    var drive: FilesDrive
+    /// Ziellaufwerk; eine Änderung macht ein früheres Übertragungsergebnis ungültig.
+    var drive: FilesDrive {
+        didSet { if drive != oldValue { invalidateResult() } }
+    }
     /// Position des Vergleichsreglers (0 = nur Druckbild, 1 = nur Original).
     var split: CGFloat = 0.5
 
@@ -436,7 +439,7 @@ struct FilesGraphicComposer: View {
                 .foregroundStyle(.secondary)
             Picker(tr("Verfahren"), selection: $upload.algorithm) {
                 ForEach(DitherAlgorithm.allCases) { algorithm in
-                    Text(algorithm.displayName).tag(algorithm)
+                    Text(tr(algorithm.displayName)).tag(algorithm)
                 }
             }
             sliderRow(title: tr("Schwelle"), value: $upload.threshold, range: 1...254,

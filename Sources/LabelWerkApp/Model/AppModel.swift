@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import SwiftUI
@@ -24,8 +25,8 @@ final class AppModel {
         }
     }
     var hasCompletedOnboarding = false { didSet { scheduleSave() } }
-    /// Aktueller Inhalt des Designers (ZPL), bleibt zwischen Starts erhalten.
-    var designerDocument: String = "" { didSet { scheduleSave() } }
+    /// Aktueller Inhalt des Designers (ZPL), bleibt zwischen Starts erhalten (eigene Datei).
+    var designerDocument: String = "" { didSet { scheduleDesignerSave() } }
 
     // MARK: UI-Zustand
 
@@ -36,7 +37,10 @@ final class AppModel {
     var pendingSection: PrinterSection?
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var designerSaveTask: Task<Void, Never>?
+    @ObservationIgnored private let writer = PersistenceWriter()
     @ObservationIgnored private var isRestoring = false
+    @ObservationIgnored private var hasStarted = false
 
     // MARK: Init
 
@@ -54,6 +58,11 @@ final class AppModel {
         history = state.history
         hasCompletedOnboarding = state.hasCompletedOnboarding
         designerDocument = state.designerDocument ?? ""
+        // Ältere Zustände enthielten den Designer-Inhalt in `state.json`: in die eigene Datei
+        // übernehmen, bevor das nächste Speichern ihn dort weglässt (die Warteschlange ist seriell).
+        if !designerDocument.isEmpty, !FileManager.default.fileExists(atPath: PersistenceStore.designerURL.path) {
+            writer.saveDesigner(designerDocument)
+        }
         sessions = state.printers.map { PrinterSession(saved: $0, app: self) }
         if let last = state.lastSelectedPrinterID, sessions.contains(where: { $0.id == last }) {
             selection = .printer(last)
@@ -66,7 +75,11 @@ final class AppModel {
     }
 
     /// Wird von der App nach dem Start aufgerufen (Verbindungen aufbauen, Überwachung starten).
+    /// Nur der erste Aufruf wirkt – ein neu geöffnetes Hauptfenster verbindet bewusst getrennte
+    /// Drucker nicht erneut.
     func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
         guard preferences.autoConnect else { return }
         for session in sessions {
             Task { await session.connect() }
@@ -75,29 +88,49 @@ final class AppModel {
 
     // MARK: Persistenz
 
+    /// Speichert verzögert (Änderungen werden zusammengefasst). Kodiert und geschrieben wird im
+    /// Hintergrund – hier wird nur der aktuelle Stand übernommen.
     func scheduleSave() {
         guard !isRestoring else { return }
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            self?.saveNow()
+            guard !Task.isCancelled, let self else { return }
+            self.writer.save(self.persistedState())
         }
     }
 
+    private func scheduleDesignerSave() {
+        guard !isRestoring else { return }
+        designerSaveTask?.cancel()
+        designerSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let self else { return }
+            self.writer.saveDesigner(self.designerDocument)
+        }
+    }
+
+    /// Speichert sofort und wartet, bis alles geschrieben ist (beim Beenden).
     func saveNow() {
+        saveTask?.cancel()
+        designerSaveTask?.cancel()
+        writer.save(persistedState())
+        writer.saveDesigner(designerDocument)
+        writer.waitUntilIdle()
+    }
+
+    private func persistedState() -> PersistedState {
         var lastSelected: UUID?
         if case .printer(let id) = selection { lastSelected = id }
-        let state = PersistedState(
+        return PersistedState(
             printers: sessions.map(\.saved),
             customStocks: customStocks,
             preferences: preferences,
             history: Array(history.prefix(500)),
             hasCompletedOnboarding: hasCompletedOnboarding,
-            designerDocument: designerDocument,
+            designerDocument: nil,
             lastSelectedPrinterID: lastSelected
         )
-        PersistenceStore.save(state)
     }
 
     // MARK: Drucker verwalten
@@ -134,7 +167,7 @@ final class AppModel {
     @discardableResult
     func addPrinter(_ saved: SavedPrinter, connect: Bool = true) -> PrinterSession {
         let session = PrinterSession(saved: saved, app: self)
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+        animate(.spring(response: 0.45, dampingFraction: 0.82)) {
             sessions.append(session)
             selection = .printer(session.id)
         }
@@ -170,7 +203,7 @@ final class AppModel {
         let session = sessions[index]
         session.stopMonitoring()
         Task { await session.disconnect() }
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+        animate(.spring(response: 0.4, dampingFraction: 0.85)) {
             sessions.remove(at: index)
             if selection == .printer(id) {
                 selection = sessions.first.map { .printer($0.id) } ?? .discover
@@ -216,7 +249,7 @@ final class AppModel {
     // MARK: Verlauf
 
     func record(_ job: JobRecord) {
-        withAnimation(.snappy) {
+        animate(.snappy) {
             history.insert(job, at: 0)
             if history.count > 500 { history.removeLast(history.count - 500) }
         }
@@ -224,7 +257,7 @@ final class AppModel {
     }
 
     func clearHistory(printerID: UUID? = nil) {
-        withAnimation(.snappy) {
+        animate(.snappy) {
             if let printerID {
                 history.removeAll { $0.printerID == printerID }
             } else {
@@ -238,7 +271,7 @@ final class AppModel {
 
     func toast(_ title: String, message: String? = nil, style: Toast.Style = .info) {
         let toast = Toast(style: style, title: title, message: message)
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+        animate(.spring(response: 0.4, dampingFraction: 0.8)) {
             toasts.append(toast)
             if toasts.count > 4 { toasts.removeFirst(toasts.count - 4) }
         }
@@ -250,26 +283,45 @@ final class AppModel {
     }
 
     func dismissToast(_ id: UUID) {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+        animate(.spring(response: 0.35, dampingFraction: 0.9)) {
             toasts.removeAll { $0.id == id }
         }
     }
 
     // MARK: Gesamtstatus (Menüleiste)
 
-    /// Schlechtester Zustand aller Drucker – steuert das Menüleistensymbol.
+    /// Schlechtester Zustand aller Drucker – steuert das Menüleistensymbol. Berücksichtigt auch
+    /// Drucker ohne Status (nicht erreichbar, verbindet gerade, reine Druckwarteschlange).
     var aggregateState: PrinterState {
-        let states = sessions.compactMap { $0.status?.state }
+        let states = sessions.map(\.state)
         if states.contains(.error) { return .error }
         if states.contains(.warning) { return .warning }
         if states.contains(.paused) { return .paused }
         if states.contains(.printing) { return .printing }
         if states.contains(.ready) { return .ready }
+        if states.contains(.unknown) { return .unknown }
         return sessions.isEmpty ? .unknown : .offline
     }
 
+    /// Anzahl der Meldungen (Warnungen und Fehler); ein nicht erreichbarer Drucker zählt mindestens als eine.
     var activeAlertCount: Int {
-        sessions.reduce(0) { $0 + ($1.status?.alerts.filter { $0.severity >= .warning }.count ?? 0) }
+        sessions.reduce(0) { count, session in
+            let alerts = session.alerts.filter { $0.severity >= .warning }.count
+            if case .failed = session.connectionState { return count + max(1, alerts) }
+            return count + alerts
+        }
+    }
+
+    // MARK: Bewegung
+
+    /// „Bewegung reduzieren“ aus Systemeinstellung oder App-Einstellung.
+    var reducesMotion: Bool {
+        preferences.reduceMotion || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// Animiert eine vom Modell ausgelöste Änderung – ohne Animation bei reduzierter Bewegung.
+    func animate(_ animation: Animation, _ changes: () -> Void) {
+        withAnimation(Motion.animation(animation, reduceMotion: reducesMotion), changes)
     }
 
     // MARK: Hilfen

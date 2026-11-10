@@ -307,6 +307,34 @@ enum MaintSGDPolicy {
     /// Gruppen, die nur Zählerstände bzw. Messwerte enthalten.
     static let readOnlyGroups: Set<String> = ["odometer", "sensor"]
 
+    /// Bekannte nur lesbare bzw. ständig wechselnde Werte (Kennungen, Laufzeit, Mess- und Statuswerte).
+    /// Drucker ohne Link-OS-JSON (`allcv`) melden keinen Zugriff – ohne diese Liste gälten sie als
+    /// wiederherstellbar, würden gesichert, beim Wiederherstellen vorausgewählt und geschrieben.
+    static let readOnlyNames: Set<String> = [
+        "device.uptime", "device.unique_id", "device.product_name", "device.host_status",
+        "device.host_identification", "head.resolution.in_dpi", "head.latch", "media.status",
+        "power.percent_full", "power.health", "power.status", "power.voltage", "power.cycle_count",
+        "bluetooth.address", "bluetooth.radio_version",
+    ]
+
+    /// Namensanfänge nur lesbarer Werte: Firmware-Angaben und der aktuelle Zustand der aktiven
+    /// Netzwerkschnittstelle.
+    static let readOnlyPrefixes: [String] = ["appl.", "interface.network.active."]
+
+    /// Namensendungen nur lesbarer Werte (Hardwareadressen, Funkmesswerte).
+    static let readOnlySuffixes: [String] = [
+        ".mac_addr", ".mac_raw", ".signal_strength", ".signal_quality", ".signal_noise",
+    ]
+
+    /// `true` für bekannte nur lesbare bzw. ständig wechselnde Werte – unabhängig davon, ob der Drucker
+    /// einen Zugriff meldet.
+    static func isKnownReadOnly(name: String) -> Bool {
+        let lower = name.trimmingCharacters(in: .whitespaces).lowercased()
+        if readOnlyNames.contains(lower) { return true }
+        if readOnlyPrefixes.contains(where: { lower.hasPrefix($0) }) { return true }
+        return readOnlySuffixes.contains(where: { lower.hasSuffix($0) })
+    }
+
     /// SGD-Namen, die beim Schreiben eine Aktion auslösen.
     static let commandNames: Set<String> = [
         "device.reset", "device.restore_defaults", "device.frontpanel.key_press", "device.shutdown",
@@ -364,10 +392,12 @@ enum MaintSGDPolicy {
         isCommand(name: name, access: access) || isSecret(name: name, value: value)
     }
 
-    /// Lesbar, beschreibbar, kein Befehl, nicht geheim und nicht in einer Zählergruppe.
+    /// Lesbar, beschreibbar, kein Befehl, nicht geheim, nicht in einer Zählergruppe und nicht als nur
+    /// lesbar bekannt.
     static func isRestorable(_ setting: SGDSetting) -> Bool {
         guard !readOnlyGroups.contains(group(of: setting.name).lowercased()) else { return false }
         guard !isProtected(name: setting.name, value: setting.value, access: setting.access) else { return false }
+        guard !isKnownReadOnly(name: setting.name) else { return false }
         return isReadable(access: setting.access) && isWritable(access: setting.access)
     }
 
@@ -527,7 +557,7 @@ enum MaintDiff {
                 || MaintSGDPolicy.readOnlyGroups.contains(entry.group.lowercased()) {
                 status = .protected
             } else if let target {
-                if !MaintSGDPolicy.isWritable(access: access) {
+                if !MaintSGDPolicy.isWritable(access: access) || MaintSGDPolicy.isKnownReadOnly(name: entry.name) {
                     status = .readOnly
                 } else if valuesMatch(target.value, entry.value) {
                     status = .unchanged
@@ -709,6 +739,9 @@ enum MaintSaveSkip: Equatable {
     /// Der Drucker erwartet (nach der Übertragung) eine Sprache ohne ZPL, z. B. `epl` oder `line_print` –
     /// dort würde `^JUS` ignoriert oder sogar als Text gedruckt.
     case deviceLanguage(String)
+    /// Die Übertragung wurde abgebrochen (vom Benutzer oder nach einem Verbindungsfehler): Der halb
+    /// übertragene Stand wird nicht festgeschrieben.
+    case interrupted
 
     /// `nil`, wenn der Drucker `^JUS` versteht: Gerätesprache mit ZPL – oder, falls die Gerätesprache
     /// unbekannt ist, Ausgabesprache ZPL.
@@ -731,6 +764,8 @@ enum MaintSaveSkip: Equatable {
         case .deviceLanguage(let value):
             return tr("Dauerhaft speichern nicht möglich: Der Drucker erwartet „%@“ und würde den ZPL-Befehl ^JUS nicht verstehen. Ob die Werte einen Neustart überstehen, bitte danach prüfen.",
                       MaintDeviceLanguage.option(for: value)?.title ?? value)
+        case .interrupted:
+            return tr("Nicht dauerhaft gespeichert, weil die Übertragung abgebrochen wurde: Die bereits gesendeten Werte gelten nur bis zum Ausschalten des Druckers.")
         }
     }
 }

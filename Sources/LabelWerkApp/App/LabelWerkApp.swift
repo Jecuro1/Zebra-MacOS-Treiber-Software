@@ -77,7 +77,9 @@ struct LabelWerkCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
-        CommandGroup(after: .newItem) {
+        // Ersetzt „Neues Fenster“: Es gibt genau ein Hauptfenster (alle Fenster teilten sich sonst
+        // dieselben Sheets wie „Drucker hinzufügen“). Die Menüleiste holt es nach vorn.
+        CommandGroup(replacing: .newItem) {
             Button(tr("Drucker hinzufügen …")) { model.isAddPrinterPresented = true }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             Button(tr("Demo-Drucker hinzufügen")) { model.addDemoPrinter() }
@@ -107,14 +109,19 @@ struct LabelWerkCommands: Commands {
             .keyboardShortcut("f", modifiers: [.command, .shift])
             .disabled(model.selectedSession == nil)
 
-            Divider()
+            // ⌘1 … ⌘9 folgen den sichtbaren Bereichen des gewählten Druckers (wie die Tab-Leiste).
+            let sections = model.selectedSession?.availableSections ?? []
+            if !sections.isEmpty {
+                Divider()
 
-            ForEach(Array(PrinterSection.allCases.prefix(9).enumerated()), id: \.element) { index, section in
-                Button(section.title) {
-                    if let session = model.selectedSession { session.section = section }
+                ForEach(Array(sections.prefix(9).enumerated()), id: \.element) { index, section in
+                    Button(section.title) {
+                        if let session = model.selectedSession, session.availableSections.contains(section) {
+                            session.section = section
+                        }
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
                 }
-                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
-                .disabled(model.selectedSession == nil)
             }
         }
         CommandGroup(after: .sidebar) {

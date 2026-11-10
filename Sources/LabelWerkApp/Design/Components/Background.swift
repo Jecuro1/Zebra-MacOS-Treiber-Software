@@ -59,7 +59,8 @@ struct AnimatedBackground: View {
                 MeshBackground(palette: palette, intensity: intensity,
                                paused: reduceMotion || controlActiveState == .inactive)
             } else {
-                BlobBackground(palette: palette, intensity: intensity, animated: !reduceMotion)
+                BlobBackground(palette: palette, intensity: intensity,
+                               paused: reduceMotion || controlActiveState == .inactive)
             }
         }
         .animation(.easeInOut(duration: 1.2), value: style)
@@ -103,36 +104,40 @@ private struct MeshBackground: View {
     }
 }
 
+/// macOS 14: weichgezeichnete Farbflächen, die langsam hin und her wandern. Wie `MeshBackground`
+/// zeitgesteuert mit moderater Bildrate – angehalten bei „Bewegung reduzieren“ (auch wenn die
+/// Einstellung später umgeschaltet wird) und solange das Fenster inaktiv ist.
 private struct BlobBackground: View {
     let palette: [Color]
     let intensity: Double
-    let animated: Bool
-    @State private var drift = false
+    let paused: Bool
 
     var body: some View {
-        GeometryReader { proxy in
-            let size = proxy.size
-            ZStack {
-                ForEach(0..<4, id: \.self) { index in
-                    Circle()
-                        .fill(palette[index % palette.count])
-                        .frame(width: size.width * 0.7, height: size.width * 0.7)
-                        .offset(blobOffset(index, size: size))
-                        .blur(radius: 90)
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: paused)) { timeline in
+            let drift = Self.drift(at: timeline.date.timeIntervalSinceReferenceDate)
+            GeometryReader { proxy in
+                let size = proxy.size
+                ZStack {
+                    ForEach(0..<4, id: \.self) { index in
+                        Circle()
+                            .fill(palette[index % palette.count])
+                            .frame(width: size.width * 0.7, height: size.width * 0.7)
+                            .offset(blobOffset(index, size: size, drift: drift))
+                            .blur(radius: 90)
+                    }
                 }
-            }
-            .frame(width: size.width, height: size.height)
-            .opacity(intensity)
-        }
-        .onAppear {
-            guard animated else { return }
-            withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) {
-                drift = true
+                .frame(width: size.width, height: size.height)
+                .opacity(intensity)
             }
         }
     }
 
-    private func blobOffset(_ index: Int, size: CGSize) -> CGSize {
+    /// 0 → 1 → 0 mit sanftem Ein- und Auslaufen, 14 s je Richtung (wie die frühere Endlosanimation).
+    private static func drift(at time: TimeInterval) -> CGFloat {
+        CGFloat((1 - cos(time * .pi / 14)) / 2)
+    }
+
+    private func blobOffset(_ index: Int, size: CGSize, drift k: CGFloat) -> CGSize {
         let base: [CGSize] = [
             CGSize(width: -0.35, height: -0.35), CGSize(width: 0.4, height: -0.25),
             CGSize(width: -0.25, height: 0.4), CGSize(width: 0.35, height: 0.35),
@@ -142,7 +147,6 @@ private struct BlobBackground: View {
             CGSize(width: 0.1, height: -0.1), CGSize(width: -0.12, height: -0.06),
         ]
         let b = base[index], s = shift[index]
-        let k: CGFloat = drift ? 1 : 0
         return CGSize(width: (b.width + s.width * k) * size.width, height: (b.height + s.height * k) * size.height)
     }
 }

@@ -216,18 +216,21 @@ enum FilesNaming {
         return String(result.prefix(maxLength))
     }
 
-    /// 8.3-Name für eine Schriftdatei, z. B. „ARIAL.TTF“.
-    static func fontName(for url: URL, isOpenType: Bool) -> String {
+    /// 8.3-Name für eine Schriftdatei, z. B. „ARIAL.TTF“. Auch OpenType-Schriften erhalten „.TTF“:
+    /// `PrinterClient.uploadFont` überträgt jede Schrift mit `~DY…,B,T,…`, der Drucker legt sie
+    /// daher immer als `NAME.TTF` ab.
+    static func fontName(for url: URL) -> String {
         let base = sanitizedBase(url.deletingPathExtension().lastPathComponent, maxLength: 8)
-        return (base.isEmpty ? "FONT" : base) + (isOpenType ? ".OTF" : ".TTF")
+        return (base.isEmpty ? "FONT" : base) + ".TTF"
     }
 
-    /// Prüft einen Schriftnamen (1–16 Zeichen + .TTF/.OTF). Liefert eine Fehlermeldung oder nil.
+    /// Prüft einen Schriftnamen (1–16 Zeichen + .TTF). Liefert eine Fehlermeldung oder nil.
     static func fontNameProblem(_ name: String) -> String? {
         let parts = name.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 2 else { return tr("Name mit Endung angeben, z. B. ARIAL.TTF.") }
         let base = String(parts[0]), ext = String(parts[1])
-        guard ["TTF", "OTF"].contains(ext) else { return tr("Die Endung muss .TTF oder .OTF lauten.") }
+        // Der Drucker speichert auch OpenType-Schriften als .TTF (siehe `fontName(for:)`).
+        guard ext == "TTF" else { return tr("Die Endung muss .TTF lauten – auch OpenType-Schriften speichert der Drucker als .TTF.") }
         guard !base.isEmpty else { return tr("Der Name darf nicht leer sein.") }
         guard base.count <= 16 else { return tr("Höchstens 16 Zeichen vor der Endung.") }
         guard base.allSatisfy({ allowed.contains($0) }) else { return tr("Nur A–Z, 0–9 und _ verwenden.") }

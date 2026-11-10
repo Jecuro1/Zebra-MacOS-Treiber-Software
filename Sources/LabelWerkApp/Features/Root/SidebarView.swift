@@ -5,12 +5,14 @@ import LabelWerkKit
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @State private var printerToRemove: PrinterSession?
+    @State private var printerToRename: PrinterSession?
+    @State private var renameDraft = ""
 
     var body: some View {
         @Bindable var model = model
         List(selection: $model.selection) {
             Section(tr("Drucker")) {
-                if model.sessions.isEmpty {
+                if model.sessions.isEmpty && model.preferences.showDemoPrinter {
                     Button {
                         model.addDemoPrinter()
                     } label: {
@@ -61,6 +63,18 @@ struct SidebarView: View {
         } message: { session in
             Text(tr("„%@“ wird aus LabelWerk entfernt. Eine eingerichtete macOS-Warteschlange bleibt erhalten.", session.displayName))
         }
+        .alert(
+            tr("Drucker umbenennen"),
+            isPresented: Binding(get: { printerToRename != nil }, set: { if !$0 { printerToRename = nil } }),
+            presenting: printerToRename
+        ) { session in
+            TextField(tr("Name"), text: $renameDraft)
+            Button(tr("Umbenennen")) {
+                let name = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty { session.saved.name = name }
+            }
+            Button(tr("Abbrechen"), role: .cancel) {}
+        }
     }
 
     @ViewBuilder
@@ -76,6 +90,10 @@ struct SidebarView: View {
         Button(session.saved.isFavorite ? tr("Aus Favoriten entfernen") : tr("Zu Favoriten")) {
             session.saved.isFavorite.toggle()
         }
+        Button(tr("Umbenennen …")) {
+            renameDraft = session.displayName
+            printerToRename = session
+        }
         Divider()
         Button(tr("Entfernen …"), role: .destructive) { printerToRemove = session }
     }
@@ -84,6 +102,10 @@ struct SidebarView: View {
 /// Zeile eines Druckers in der Seitenleiste.
 struct PrinterSidebarRow: View {
     let session: PrinterSession
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -126,18 +148,18 @@ struct PrinterSidebarRow: View {
             } else if let first = session.alerts.first, first.severity >= .warning {
                 Image(systemName: first.systemImage)
                     .foregroundStyle(first.severity.color)
-                    .symbolEffect(.pulse, options: .repeating)
+                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
                     .transition(.scale.combined(with: .opacity))
             }
         }
         .padding(.vertical, 3)
-        .animation(Motion.spring, value: session.state)
-        .animation(Motion.spring, value: session.isBusy)
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: session.state)
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: session.isBusy)
     }
 
     private var subtitle: String {
         if let activity = session.activity { return activity }
-        if let alert = session.alerts.first, alert.severity >= .warning { return alert.title }
+        if let alert = session.alerts.first, alert.severity >= .warning { return tr(alert.title) }
         return "\(session.state.displayName) · \(session.saved.descriptor.displayString)"
     }
 }

@@ -312,16 +312,16 @@ enum DesignerCanvasMath {
 
 /// Druckaufträge aus dem ZPL-Designer für Drucker ohne ZPL (EPL/CPCL).
 enum DesignerGraphicJob: Sendable {
-    /// Gerasterte Etiketten (Reihenfolge wie im Dokument) und Kopien je Durchlauf.
+    /// Gerasterte Etiketten in Druckreihenfolge und Kopien des Auftrags (> 1 nur bei einem Bild).
     case ready(images: [GrayImage], copies: Int)
     /// Das Dokument enthält kein Etikett.
     case empty
-    /// Unterschiedliche `^PQ`-Mengen ergäben mehr Einzelbilder als sinnvoll übertragbar.
+    /// Die Mengen mehrerer Etiketten ergäben mehr Einzelbilder als sinnvoll übertragbar.
     case tooManyLabels(Int)
 }
 
 enum DesignerRaster {
-    /// Obergrenze für einzeln gerasterte Etiketten, wenn sich die `^PQ`-Mengen unterscheiden.
+    /// Obergrenze für einzeln gerasterte Etiketten, wenn mehrere Etiketten Mengen > 1 haben.
     static let maximumExpandedLabels = 2000
 
     /// Pixelgenaue Rasterung „wie gedruckt“. `^POI` (180°) und `^PMY` (Spiegeln) werden hier
@@ -346,9 +346,13 @@ enum DesignerRaster {
         let labels = document.labels.filter { $0.widthDots > 0 && $0.heightDots > 0 }
         guard !labels.isEmpty else { return .empty }
         let quantities = labels.map { $0.quantity > 1 ? $0.quantity : max(1, copies) }
-        if let first = quantities.first, quantities.allSatisfy({ $0 == first }) {
-            return .ready(images: labels.map { asPrinted($0).toGrayImage() }, copies: first)
+        // Ein Etikett bzw. jedes Etikett nur einmal: Die Menge geht als Kopien in den Auftrag.
+        if labels.count == 1 || quantities.allSatisfy({ $0 == 1 }) {
+            return .ready(images: labels.map { asPrinted($0).toGrayImage() }, copies: quantities[0])
         }
+        // Mehrere Etiketten: jedes in seiner Menge hintereinander (A A A B B B) wie `^PQ` beim
+        // ZPL-Druck. `PrinterSession.printImages` sortiert Kopien (A B A B A B), deshalb werden
+        // die Etiketten hier einzeln aufgereiht und als ein Durchlauf gesendet.
         let total = quantities.reduce(0, +)
         guard total <= maximumExpandedLabels else { return .tooManyLabels(total) }
         var images: [GrayImage] = []

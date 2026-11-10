@@ -174,7 +174,7 @@ struct DesignerZPLWorkspace: View {
             return false
         case .tooManyLabels(let count):
             model.toast(tr("Zu viele Etiketten für den Grafikdruck"),
-                        message: tr("Die ^PQ-Mengen ergeben %d einzeln gerasterte Etiketten (höchstens %d).",
+                        message: tr("Die Mengen (^PQ bzw. Kopien) ergeben %d einzeln gerasterte Etiketten (höchstens %d).",
                                     count, DesignerRaster.maximumExpandedLabels),
                         style: .warning)
             return false

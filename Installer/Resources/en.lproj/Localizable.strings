@@ -70,6 +70,8 @@
 "Erneut prüfen" = "Check Again";
 "Neu verbinden" = "Reconnect";
 "Aufträge abbrechen" = "Cancel Jobs";
+"Alle Aufträge abbrechen?" = "Cancel All Jobs?";
+"Abbrechen" = "Cancel";
 "Keine Meldungen" = "No alerts";
 "Druckkopf geschlossen, Medien eingelegt, keine Fehler." = "Printhead closed, media loaded, no errors.";
 "In dieser Sitzung" = "This Session";
@@ -246,7 +248,6 @@
 "R: Arbeitsspeicher – bis zum Neustart" = "R: RAM – until restart";
 "Speicherbedarf" = "Memory required";
 "Aufruf im Etikett" = "Recall in label";
-"Abbrechen" = "Cancel";
 "Speichern" = "Save";
 
 /* MARK: Features/Designer/DesignerModels.swift */
@@ -425,7 +426,7 @@
 "Kein Etikettenformat gefunden" = "No label format found";
 "Das Dokument enthält kein Format zwischen ^XA und ^XZ." = "The document contains no format between ^XA and ^XZ.";
 "Zu viele Etiketten für den Grafikdruck" = "Too many labels for graphic printing";
-"Die ^PQ-Mengen ergeben %d einzeln gerasterte Etiketten (höchstens %d)." = "The ^PQ quantities add up to %d individually rasterized labels (at most %d).";
+"Die Mengen (^PQ bzw. Kopien) ergeben %d einzeln gerasterte Etiketten (höchstens %d)." = "The quantities (^PQ or copies) add up to %d individually rasterized labels (at most %d).";
 "Etikett als PNG exportieren" = "Export Label as PNG";
 
 /* MARK: Features/Discovery/DiscoveryCards.swift */
@@ -434,6 +435,7 @@
 "Details" = "Details";
 "Nur Senden" = "Send Only";
 "Über diese Verbindung kann LabelWerk drucken, aber keinen Live-Status abfragen." = "Over this connection LabelWerk can print but cannot query live status.";
+"Nicht als Zebra-Drucker erkannt" = "Not recognized as a Zebra printer";
 "Unbekanntes Modell: %@" = "Unknown model: %@";
 "Modell wird beim Verbinden erkannt" = "Model is detected when connecting";
 "Modell unbekannt" = "Model unknown";
@@ -503,6 +505,8 @@
 "Suchen" = "Search";
 "Manuell" = "Manual";
 "Demo-Drucker" = "Demo Printer";
+"„%@“ wurde nicht als Zebra-Drucker erkannt" = "“%@” was not recognized as a Zebra printer";
+"Trotzdem hinzufügen" = "Add Anyway";
 "Suchen über" = "Search via";
 "Gefundene Drucker" = "Printers Found";
 "Modelle werden automatisch aus dem Katalog zugeordnet." = "Models are matched automatically from the catalog.";
@@ -565,6 +569,7 @@
 "Bereits in macOS eingerichtete Etikettendrucker" = "Label printers already set up in macOS";
 "Klassisches Bluetooth (SPP), z. B. mobile ZQ-Drucker" = "Classic Bluetooth (SPP), e.g. mobile ZQ printers";
 "Bluetooth Low Energy (Link-OS-Drucker)" = "Bluetooth Low Energy (Link-OS printers)";
+"Das Gerät hat sich bei der Suche nicht als Zebra-Drucker zu erkennen gegeben (keine SNMP-Antwort). LabelWerk fragt nach dem Hinzufügen sofort und danach regelmäßig den Status ab – ein Büro- oder Tintenstrahldrucker würde diese Abfragen als Seiten voller Steuerzeichen drucken. Nur hinzufügen, wenn es sich um einen Zebra-Drucker handelt." = "The device did not identify itself as a Zebra printer during discovery (no SNMP response). After it is added, LabelWerk queries its status immediately and then at regular intervals – an office or inkjet printer would print these queries as pages full of control characters. Only add it if it is a Zebra printer.";
 "Netzwerk" = "Network";
 "Link-OS" = "Link-OS";
 "SGD-Befehle" = "SGD commands";
@@ -645,6 +650,7 @@
 "Einstellungen synchronisieren: Druckeinstellungen aus LabelWerk als Standard der Warteschlange übernehmen" = "Sync settings: apply LabelWerk print settings as the queue’s defaults";
 "Einstellungen synchronisieren" = "Sync Settings";
 "Warteschlange entfernen …" = "Remove Queue…";
+"Die Warteschlange „%@“ existiert nicht mehr – den Drucker in LabelWerk neu einrichten." = "The queue “%@” no longer exists – set up the printer in LabelWerk again.";
 "Bluetooth-Drucker können in macOS nicht als Warteschlange eingerichtet werden – LabelWerk druckt direkt." = "Bluetooth printers cannot be set up as a queue in macOS – LabelWerk prints directly.";
 "Der Demo-Drucker ist nur in LabelWerk verfügbar." = "The demo printer is only available in LabelWerk.";
 "Warteschlange „%@“ wurde entfernt" = "Queue “%@” was removed";
@@ -667,7 +673,11 @@
 "CUPS-Filter und PPD-Dateien von LabelWerk werden entfernt. macOS fragt nach einem Administratorpasswort." = "LabelWerk’s CUPS filters and PPD files will be removed. macOS will ask for an administrator password.";
 "CUPS-Filter und PPD-Dateien von LabelWerk werden entfernt. Warteschlangen, die den Treiber verwenden, funktionieren danach nicht mehr – sie können gleich mit entfernt werden." = "LabelWerk’s CUPS filters and PPD files will be removed. Queues that use the driver will stop working – they can be removed at the same time.";
 "Warteschlange entfernen?" = "Remove Queue?";
+"„%@“ wird aus macOS entfernt. Der LabelWerk-Drucker „%@“ druckt über diese Warteschlange und kann danach auch in LabelWerk nicht mehr drucken, bis er neu hinzugefügt wird." = "“%@” will be removed from macOS. The LabelWerk printer “%@” prints via this queue and will no longer be able to print in LabelWerk either until it is added again.";
 "„%@“ wird aus macOS entfernt und steht in Programmen nicht mehr zur Verfügung. Der Drucker bleibt in LabelWerk erhalten." = "“%@” will be removed from macOS and will no longer be available in apps. The printer stays in LabelWerk.";
+"Ältere Treiberversion installieren?" = "Install Older Driver Version?";
+"Version %@ installieren" = "Install Version %@";
+"Installiert ist %@ – neuer als die Version %@ dieser App. Der neuere Treiber wird dabei ersetzt; Modelle und Verbesserungen, die erst mit %@ kamen, fehlen danach. Besser ist es, LabelWerk zu aktualisieren." = "%@ is installed – newer than version %@ included with this app. The newer driver will be replaced; models and improvements introduced in %@ will then be missing. Updating LabelWerk is the better option.";
 "Installiert %@" = "Installed %@";
 "Im App-Paket %@" = "In app bundle %@";
 "%d PPD-Dateien" = "%d PPD files";
@@ -678,6 +688,8 @@
 "Auf %@ aktualisieren" = "Update to %@";
 "Erneut installieren" = "Reinstall";
 "Repariert Rechte und Dateien des Treibers" = "Repairs the driver’s permissions and files";
+"Version %@ installieren …" = "Install Version %@…";
+"Ersetzt den neueren Treiber %@ durch die ältere Version %@ aus dieser App" = "Replaces the newer driver %@ with the older version %@ included with this app";
 "Entfernen …" = "Remove…";
 "Treiber entfernt" = "Driver removed";
 "Treiber ist einsatzbereit" = "Driver is ready to use";
@@ -838,7 +850,7 @@
 "Systemdatei" = "System file";
 "Datei" = "File";
 "Name mit Endung angeben, z. B. ARIAL.TTF." = "Enter the name with extension, e.g. ARIAL.TTF.";
-"Die Endung muss .TTF oder .OTF lauten." = "The extension must be .TTF or .OTF.";
+"Die Endung muss .TTF lauten – auch OpenType-Schriften speichert der Drucker als .TTF." = "The extension must be .TTF – the printer stores OpenType fonts as .TTF too.";
 "Der Name darf nicht leer sein." = "The name must not be empty.";
 "Höchstens 16 Zeichen vor der Endung." = "At most 16 characters before the extension.";
 "Nur A–Z, 0–9 und _ verwenden." = "Use only A–Z, 0–9 and _.";
@@ -922,6 +934,7 @@
 "Nicht im Akkubetrieb, Stromkabel gesichert – ein Ausfall kann den Drucker unbrauchbar machen." = "Not on battery, power cable secured – a power failure can render the printer unusable.";
 "Niemand sonst druckt; der Drucker wird während des Updates nicht bedient." = "Nobody else is printing; the printer is not operated during the update.";
 "Heruntergeladen von zebra.com für genau dieses Modell." = "Downloaded from zebra.com for exactly this model.";
+"Firmware kann nicht über eine macOS-Warteschlange übertragen werden – den Drucker per USB oder Netzwerk direkt hinzufügen." = "Firmware cannot be transferred via a macOS queue – add the printer directly via USB or network.";
 "Die Übertragung wurde abgebrochen." = "The transfer was canceled.";
 "Firmware-Update läuft" = "Firmware update in progress";
 
@@ -1016,6 +1029,7 @@
 "Verlauf leeren" = "Clear History";
 "Verlauf leeren?" = "Clear History?";
 "Leeren" = "Clear";
+"Alle Einträge von „%@“ und ihre gespeicherten Druckdaten werden gelöscht." = "All entries for “%@” and their saved print data will be deleted.";
 "Alle Einträge und gespeicherten Druckdaten werden gelöscht." = "All entries and stored print data will be deleted.";
 "Alle Druckaufträge und Gerätebefehle der letzten Zeit" = "All recent print jobs and device commands";
 "Gedruckte Etiketten" = "Printed labels";
@@ -1030,6 +1044,8 @@
 "Der ursprüngliche Drucker ist nicht mehr eingerichtet." = "The original printer is no longer set up.";
 "Drucker nicht gefunden" = "Printer not found";
 "Verlauf exportiert" = "History exported";
+"Details anzeigen" = "Show Details";
+"Details ausblenden" = "Hide Details";
 "Zeitpunkt" = "Time";
 "Datenmenge" = "Data size";
 "Erfolgreich" = "Successful";
@@ -1240,6 +1256,7 @@
 "ZPL plus XML-Druckaufträge (z. B. aus SAP/ERP-Systemen)." = "ZPL plus XML print jobs (e.g. from SAP/ERP systems).";
 "Dauerhaft speichern nicht möglich: ^JUS ist ein ZPL-Befehl, LabelWerk spricht den Drucker aber in %@ an. Ob die Werte einen Neustart überstehen, bitte danach prüfen." = "Saving permanently is not possible: ^JUS is a ZPL command, but LabelWerk addresses the printer in %@. Please check afterwards whether the values survive a restart.";
 "Dauerhaft speichern nicht möglich: Der Drucker erwartet „%@“ und würde den ZPL-Befehl ^JUS nicht verstehen. Ob die Werte einen Neustart überstehen, bitte danach prüfen." = "Saving permanently is not possible: The printer expects “%@” and would not understand the ZPL command ^JUS. Please check afterwards whether the values survive a restart.";
+"Nicht dauerhaft gespeichert, weil die Übertragung abgebrochen wurde: Die bereits gesendeten Werte gelten nur bis zum Ausschalten des Druckers." = "Not saved permanently because the transfer was interrupted: the values already sent only apply until the printer is switched off.";
 
 /* MARK: Features/Maintenance/MaintenanceRestorePane.swift */
 "Konfiguration wird gelesen …" = "Reading configuration…";
@@ -1479,6 +1496,9 @@
 "Sonderzeichen außerhalb von ASCII werden nicht von allen Druckern unterstützt." = "Special characters outside ASCII are not supported by all printers.";
 "Höchstens 17 Zeichen." = "At most 17 characters.";
 "Die Netzwerkeinstellungen konnten nicht gelesen werden." = "The network settings could not be read.";
+"Der DNS-Server kann hier nicht gelöscht werden – eine Adresse eingeben." = "The DNS server cannot be cleared here – enter an address.";
+"Hier lässt sich nur ein DNS-Server eintragen." = "Only one DNS server can be entered here.";
+"Der Hostname kann hier nicht gelöscht werden – einen Namen eingeben." = "The hostname cannot be cleared here – enter a name.";
 "Bitte Eingaben prüfen" = "Please check your input";
 "Rot markierte Felder enthalten ungültige Werte." = "Fields marked in red contain invalid values.";
 "Bluetooth-Einstellungen übernommen" = "Bluetooth settings applied";
@@ -1656,6 +1676,7 @@
 "Einstellungen jetzt an den Drucker übertragen (⌘↩)" = "Transfer the settings to the printer now (⌘↩)";
 "Alle Programme drucken auf „%@“ mit diesen Einstellungen. Eigene Etikettenformate im Druckdialog als Papiergröße wählen." = "All apps print to “%@” with these settings. Choose custom label formats as the paper size in the print dialog.";
 "Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen." = "All apps now print to “%@” with these settings.";
+"Im macOS-Druckdialog steht für %@ nur der nächstliegende Wert zur Auswahl." = "In the macOS print dialog, only the closest value is available for %@.";
 "macOS-Standard aktualisiert" = "macOS default updated";
 "macOS-Standard konnte nicht gesetzt werden" = "The macOS default could not be set";
 "Keine Werte gelesen" = "No values read";
@@ -2028,13 +2049,20 @@
 "Geprüft" = "Verified";
 "Abweichung" = "Mismatch";
 "Keine Rückmeldung (VOID?)" = "No response (VOID?)";
+"Verworfen" = "Discarded";
 "Keine Verbindung zum Drucker. Bitte Verbindung prüfen und erneut versuchen." = "No connection to the printer. Please check the connection and try again.";
 "Keine Antwort innerhalb von 6 Sekunden. Ist ein RFID-Kodierer eingebaut und aktiviert, und arbeitet der Drucker im ZPL-Modus?" = "No response within 6 seconds. Is an RFID encoder installed and enabled, and is the printer working in ZPL mode?";
 "Kein Tag erkannt. Liegt ein RFID-Etikett über der Antenne? Programmierposition und Sendeleistung prüfen oder kalibrieren." = "No tag detected. Is there an RFID label above the antenna? Check or calibrate the programming position and transmit power.";
 "Unerwartete Antwort des Druckers – Details siehe Rohantwort." = "Unexpected printer response – see the raw response for details.";
+"Tag %d ist noch nicht bestätigt: Der Drucker hat das Etikett begonnen und kodiert es ungeprüft zu Ende, sobald er weiterläuft." = "Tag %d is not confirmed yet: the printer has started the label and will finish encoding it without verification as soon as it resumes.";
 "Die Verbindung zum Drucker wurde unterbrochen." = "The connection to the printer was interrupted.";
 "Die Daten konnten nicht gesendet werden." = "The data could not be sent.";
+"Der Drucker kodiert die letzten Tags …" = "The printer is encoding the last tags…";
+"%@ – Tag %d wird kodiert und geprüft, sobald der Drucker weiterläuft." = "%@ – tag %d will be encoded and verified as soon as the printer resumes.";
+"Warte auf die Rückmeldung von Tag %d …" = "Waiting for the response from tag %d…";
+"%@ – die Kodierung geht weiter, sobald der Drucker wieder bereit ist." = "%@ – encoding continues as soon as the printer is ready again.";
 "%d von %d Tags erfolgreich" = "%d of %d tags successful";
+"%d von %d Tags ungeprüft kodiert, %d wartende im Drucker verworfen" = "%d of %d tags encoded without verification, %d waiting in the printer discarded";
 "%d von %d Tags an den Drucker gesendet" = "%d of %d tags sent to the printer";
 "RFID-Kodierung mit Prüfung (%d Tags)" = "RFID encoding with verification (%d tags)";
 "RFID-Kodierung (%d Tags)" = "RFID encoding (%d tags)";
@@ -2088,10 +2116,9 @@
 "Das Etikett wird nur kodiert und ohne Aufdruck ausgegeben." = "The label is only encoded and ejected without printing.";
 "Kodieren" = "Encode";
 "Protokoll schließen" = "Close Log";
-"Nach diesem Block anhalten" = "Stop After This Block";
 "Nach diesem Tag anhalten" = "Stop After This Tag";
-"Ohne Prüfung wird in Blöcken zu höchstens 25 Tags gesendet. Bereits gesendete Etiketten druckt der Drucker noch fertig." = "Without verification, tags are sent in blocks of at most 25. The printer still finishes labels that were already sent.";
-"Der Auftrag hält nach dem Tag an, der gerade kodiert wird." = "The job stops after the tag that is currently being encoded.";
+"Formate, die noch im Drucker warten, werden verworfen (~JA). Das Etikett, das gerade kodiert wird, läuft noch durch." = "Formats still waiting in the printer are discarded (~JA). The label currently being encoded still runs through.";
+"Der Auftrag hält nach dem Tag an, der gerade kodiert wird. Wartet dessen Format noch im angehaltenen Drucker, wird es verworfen." = "The job stops after the tag currently being encoded. If its format is still waiting in the paused printer, it is discarded.";
 "%d Tags kodieren" = "Encode %d Tags";
 "Tag kodieren" = "Encode Tag";
 "Kodieren (⌘↩)" = "Encode (⌘↩)";
@@ -2111,6 +2138,8 @@
 "Zur Kalibrierung" = "Go to Calibration";
 "%d erfolgreich" = "%d successful";
 "%d fehlerhaft" = "%d failed";
+"%d verworfen" = "%d discarded";
+"Beim Anhalten noch im Drucker wartend und dort verworfen – diese Tags wurden nicht kodiert." = "Still waiting in the printer when stopped and discarded there – these tags were not encoded.";
 "%d / %d" = "%d / %d";
 "Zurückgelesen" = "Read back";
 "Bitte eine Seriennummer aus Ziffern eingeben." = "Please enter a serial number consisting of digits.";
@@ -2125,6 +2154,7 @@
 "Status aktualisieren (⌘R)" = "Refresh Status (⌘R)";
 "Testetikett drucken (⇧⌘T)" = "Print Test Label (⇧⌘T)";
 "Doppelklicken zum Umbenennen" = "Double-click to rename";
+"Umbenennen" = "Rename";
 "Trennen" = "Disconnect";
 
 /* MARK: Features/Root/RootView.swift */
@@ -2133,8 +2163,10 @@
 /* MARK: Features/Root/SidebarView.swift */
 "Drucker entfernen?" = "Remove Printer?";
 "„%@“ wird aus LabelWerk entfernt. Eine eingerichtete macOS-Warteschlange bleibt erhalten." = "“%@” will be removed from LabelWerk. A macOS queue that has been set up is kept.";
+"Drucker umbenennen" = "Rename Printer";
 "Aus Favoriten entfernen" = "Remove from Favorites";
 "Zu Favoriten" = "Add to Favorites";
+"Umbenennen …" = "Rename…";
 
 /* MARK: Features/Settings/AppSettingsView.swift */
 "Allgemein" = "General";
@@ -2574,7 +2606,9 @@
 "Der LabelWerk-Treiber ist nicht installiert. Bitte zuerst unter „Treiber“ installieren." = "The LabelWerk driver is not installed. Please install it first under “Driver”.";
 "Für „%@“ wurde keine passende PPD-Datei gefunden." = "No matching PPD file was found for “%@”.";
 "Für diese Verbindung kann keine macOS-Warteschlange eingerichtet werden." = "A macOS queue cannot be set up for this connection.";
+"Mehrere Zebra-Drucker sind per USB angeschlossen, und dieser lässt sich keinem eindeutig zuordnen. Bitte nur den gewünschten Drucker anschließen und erneut versuchen." = "Several Zebra printers are connected via USB, and this one cannot be matched unambiguously. Please connect only the desired printer and try again.";
 "Ungültiger Warteschlangenname." = "Invalid queue name.";
+"Die Warteschlange hat diese Einstellungen nicht übernommen: %@" = "The queue did not accept these settings: %@";
 "LabelWerk möchte eine Druckerwarteschlange einrichten." = "LabelWerk wants to set up a printer queue.";
 
 /* MARK: Services/ImageImport.swift */

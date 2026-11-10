@@ -626,6 +626,12 @@ struct ToolsSettingsExplorer: View {
         let settings = await session.allSettings()
         let newRows = settings.map { ToolsSGDRow(name: $0.key, setting: $0.value) }
             .sorted { $0.name < $1.name }
+        // „Neu lesen“ fehlgeschlagen (die Fehlermeldung zeigt `PrinterSession` bereits an): Tabelle,
+        // Auswahl und Bereichsfilter des zuletzt gelesenen Stands behalten.
+        if newRows.isEmpty && !rows.isEmpty {
+            withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) { isLoading = false }
+            return
+        }
         withAnimation(Motion.animation(Motion.spring, reduceMotion: reduceMotion)) {
             rows = newRows
             isLoading = false

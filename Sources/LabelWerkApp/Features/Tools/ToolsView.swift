@@ -3,7 +3,7 @@ import SwiftUI
 import LabelWerkKit
 
 /// Werkzeuge eines Druckers – ersetzt „Open Printer Tools“ der Zebra Setup Utilities:
-/// alle Gerätebefehle als animierte Karten, Kalibrier-Assistent, Konfiguration (`^HH`),
+/// alle Gerätebefehle als animierte Karten, Kalibrier-Assistent, Konfiguration (`^HH`/`UQ`/SGD),
 /// Einstellungs-Explorer (SGD) und Testseite über den macOS-Treiberpfad.
 struct ToolsView: View {
     let session: PrinterSession
@@ -112,9 +112,13 @@ struct ToolsView: View {
     /// Modell bekannt und ohne SGD (ältere Nicht-Link-OS-Drucker).
     private var modelLacksSGD: Bool { session.model.map { !$0.supports(.sgd) } ?? false }
 
-    /// `^HH` ist ein ZPL-Befehl: nur mit ZPL oder bei Link-OS-Druckern (SGD), die ZPL parallel verstehen.
+    /// Wie `PrinterClient.configuration()`: `^HH` bei ZPL, `UQ` bei EPL, alle SGD-Einstellungen bei
+    /// CPCL – Letzteres nur, wenn das Modell SGD versteht (unbekanntes Modell: versuchen).
     private var configurationLanguageSupported: Bool {
-        session.saved.language == .zpl || session.model?.supports(.sgd) == true
+        switch session.saved.language {
+        case .zpl, .epl: return true
+        case .cpcl: return session.model?.supports(.sgd) ?? true
+        }
     }
 
     private var diagnosticsSection: some View {

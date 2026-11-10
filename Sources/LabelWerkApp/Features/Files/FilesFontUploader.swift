@@ -121,8 +121,14 @@ final class FilesFontUpload: Identifiable {
     let url: URL
     let data: Data
     let info: FilesFontInfo
-    var name: String
-    var drive: FilesDrive
+    /// Name im Drucker; eine Änderung macht ein früheres Übertragungsergebnis ungültig.
+    var name: String {
+        didSet { if name != oldValue { invalidateResult() } }
+    }
+    /// Ziellaufwerk; eine Änderung macht ein früheres Übertragungsergebnis ungültig.
+    var drive: FilesDrive {
+        didSet { if drive != oldValue { invalidateResult() } }
+    }
     var sampleText: String = tr("Etikettendruck mit LabelWerk – ÄÖÜ äöü ß € 0123456789")
     private(set) var phase: FilesUploadPhase = .ready
     private(set) var successCount = 0
@@ -132,7 +138,7 @@ final class FilesFontUpload: Identifiable {
         self.data = data
         self.info = info
         self.drive = drive
-        self.name = FilesNaming.fontName(for: url, isOpenType: url.pathExtension.lowercased() == "otf")
+        self.name = FilesNaming.fontName(for: url)
     }
 
     static func load(url: URL, defaultDrive: FilesDrive) async throws -> FilesFontUpload {
@@ -175,8 +181,11 @@ final class FilesFontUpload: Identifiable {
         }
     }
 
-    func resetPhase() {
-        phase = .ready
+    /// Verwirft ein früheres Ergebnis (Erfolg oder Fehler), z. B. nach geändertem Namen oder Ziel:
+    /// Hinweis „Gespeichert als …“, Probedruck und ZPL-Verweis zeigen sonst auf verschiedene Dateien.
+    func invalidateResult() {
+        if case .failed = phase { phase = .ready }
+        if case .done = phase { phase = .ready }
     }
 
     func printSample(session: PrinterSession) async {
@@ -374,8 +383,8 @@ struct FilesFontComposer: View {
         Binding(
             get: { upload.name },
             set: { newValue in
+                // Ein geänderter Name verwirft das frühere Ergebnis (siehe `FilesFontUpload.name`).
                 upload.name = FilesNaming.normalizedInput(newValue, keepDot: true)
-                if case .failed = upload.phase { upload.resetPhase() }
             }
         )
     }

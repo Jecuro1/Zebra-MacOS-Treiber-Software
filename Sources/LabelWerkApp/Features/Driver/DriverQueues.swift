@@ -196,13 +196,18 @@ enum DriverSetupOption: Equatable {
     /// Keine Warteschlange möglich (Bluetooth, BLE, Demo).
     case unavailable(String)
 
+    /// - Parameter existingQueues: Namen der vorhandenen Warteschlangen; `nil`, solange sie noch nicht gelesen sind.
     @MainActor
-    static func option(for session: PrinterSession, existingQueues: Set<String>) -> DriverSetupOption {
+    static func option(for session: PrinterSession, existingQueues: Set<String>?) -> DriverSetupOption {
         switch session.saved.descriptor {
         case .cupsQueue(let name):
+            // Eine entfernte Warteschlange lässt sich nicht verknüpfen – und der Drucker druckt so auch nicht mehr.
+            if let existingQueues, !existingQueues.contains(name) {
+                return .unavailable(tr("Die Warteschlange „%@“ existiert nicht mehr – den Drucker in LabelWerk neu einrichten.", name))
+            }
             return .link(name)
         case .tcp, .usb:
-            if let queue = session.saved.cupsQueueName, !existingQueues.contains(queue) {
+            if let queue = session.saved.cupsQueueName, let existingQueues, !existingQueues.contains(queue) {
                 return .reinstall(queue)
             }
             return .install

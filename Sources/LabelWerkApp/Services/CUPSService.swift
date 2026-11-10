@@ -21,7 +21,9 @@ enum CUPSService {
         case driverNotInstalled
         case noPPD(String)
         case noDeviceURI
+        case ambiguousUSBDevice
         case invalidQueueName
+        case optionsNotApplied([String])
 
         var errorDescription: String? {
             switch self {
@@ -31,8 +33,12 @@ enum CUPSService {
                 return tr("Für „%@“ wurde keine passende PPD-Datei gefunden.", model)
             case .noDeviceURI:
                 return tr("Für diese Verbindung kann keine macOS-Warteschlange eingerichtet werden.")
+            case .ambiguousUSBDevice:
+                return tr("Mehrere Zebra-Drucker sind per USB angeschlossen, und dieser lässt sich keinem eindeutig zuordnen. Bitte nur den gewünschten Drucker anschließen und erneut versuchen.")
             case .invalidQueueName:
                 return tr("Ungültiger Warteschlangenname.")
+            case .optionsNotApplied(let names):
+                return tr("Die Warteschlange hat diese Einstellungen nicht übernommen: %@", names.joined(separator: ", "))
             }
         }
     }
@@ -103,20 +109,42 @@ enum CUPSService {
     }
 
     /// Geräte-URI für eine LabelWerk-Verbindung.
-    static func deviceURI(for descriptor: ConnectionDescriptor) async -> String? {
+    ///
+    /// - Throws: `CUPSError.ambiguousUSBDevice`, wenn mehrere Zebra-USB-Drucker angeschlossen sind
+    ///   und keiner eindeutig zu Seriennummer bzw. Modell passt.
+    static func deviceURI(for descriptor: ConnectionDescriptor) async throws -> String? {
         switch descriptor {
         case .tcp(let host, let port):
             return "socket://\(host):\(port)"
         case .usb(let usb):
-            // Von CUPS gemeldete USB-URI bevorzugen (enthält Seriennummer).
+            // Von CUPS gemeldete USB-URI (z. B. `usb://Zebra%20Technologies/ZTC%20ZD421-203dpi%20ZPL?serial=…`).
             let uris = await zebraDeviceURIs().filter { $0.hasPrefix("usb://") }
-            if let serial = usb.serialNumber, let match = uris.first(where: { $0.contains(serial) }) {
-                return match
-            }
-            return uris.first
+            return try matchUSBDeviceURI(uris, serialNumber: usb.serialNumber, productName: usb.productName)
         case .cupsQueue, .bluetooth, .ble, .virtual:
             return nil
         }
+    }
+
+    /// Wählt die USB-URI dieses Druckers: über die Seriennummer, sonst über das Modell. Mit nur
+    /// einem angeschlossenen Zebra-Drucker gilt dessen URI.
+    static func matchUSBDeviceURI(_ uris: [String], serialNumber: String?, productName: String?) throws -> String? {
+        guard !uris.isEmpty else { return nil }
+        func decoded(_ uri: String) -> String { uri.removingPercentEncoding ?? uri }
+        func querySerial(_ uri: String) -> String? {
+            URLComponents(string: uri)?.queryItems?.first { $0.name.lowercased() == "serial" }?.value
+        }
+        if let serial = serialNumber?.trimmingCharacters(in: .whitespaces), !serial.isEmpty {
+            let exact = uris.filter { querySerial($0)?.caseInsensitiveCompare(serial) == .orderedSame }
+            if exact.count == 1 { return exact[0] }
+            let loose = uris.filter { decoded($0).range(of: serial, options: .caseInsensitive) != nil }
+            if loose.count == 1 { return loose[0] }
+        }
+        if uris.count == 1 { return uris[0] }
+        if let product = productName?.trimmingCharacters(in: .whitespaces), !product.isEmpty {
+            let matches = uris.filter { decoded($0).range(of: product, options: .caseInsensitive) != nil }
+            if matches.count == 1 { return matches[0] }
+        }
+        throw CUPSError.ambiguousUSBDevice
     }
 
     /// Erzeugt einen gültigen CUPS-Warteschlangennamen (keine Leer-, Schräg- oder #-Zeichen).
@@ -137,37 +165,146 @@ enum CUPSService {
     @discardableResult
     static func installQueue(for printer: SavedPrinter, queueName: String? = nil) async throws -> String {
         guard isDriverInstalled else { throw CUPSError.driverNotInstalled }
-        guard let uri = await deviceURI(for: printer.descriptor) else { throw CUPSError.noDeviceURI }
+        guard let uri = try await deviceURI(for: printer.descriptor) else { throw CUPSError.noDeviceURI }
         guard let ppd = ppdURL(modelID: printer.modelID, resolution: printer.resolution, language: printer.language) else {
             throw CUPSError.noPPD(printer.name)
         }
         let name = sanitizedQueueName(queueName ?? printer.name)
+        // `-R` wirkt sofort und nur auf vorhandene Warteschlangen: Veraltete Standards nur dann entfernen.
+        let exists = await queues().contains { $0.name == name }
+        let plan = defaultsPlan(settings: printer.settings, language: printer.language, removingStale: exists)
         var args = ["-p", name, "-E", "-v", uri, "-P", ppd.path,
                     "-D", printer.name, "-o", "printer-is-shared=false"]
         if !printer.location.isEmpty { args += ["-L", printer.location] }
         if let stock = ModelCatalog.shared.stock(id: printer.stockID) {
             args += ["-o", "PageSize=\(stock.ppdKeyword)"]
         }
-        args += ["-o", "\(CUPSOptionName.language)=\(printer.language.cupsValue)"]
-        for (key, value) in printer.settings.cupsOptions().sorted(by: { $0.key < $1.key }) {
-            args += ["-o", "\(key)=\(value)"]
-        }
+        args += plan.arguments
         try await runLpadmin(args)
+        // Die Warteschlange steht; abweichende Optionen lassen sich unter „Druckeinstellungen“ erneut übertragen.
+        let mismatched = await mismatchedOptions(queue: name, plan: plan)
+        if !mismatched.isEmpty {
+            NSLog("LabelWerk: Warteschlange %@ hat Optionen nicht übernommen: %@", name, mismatched.joined(separator: ", "))
+        }
         return name
     }
 
-    /// Überträgt Druckeinstellungen als Standardwerte der Warteschlange (wirkt für alle Programme).
-    static func setDefaults(queue: String, settings: PrintSettings, stock: LabelStock?, language: PrinterLanguage?) async throws {
-        var args = ["-p", queue]
-        for (key, value) in settings.cupsOptions().sorted(by: { $0.key < $1.key }) {
-            args += ["-o", "\(key)=\(value)"]
-        }
+    /// Überträgt Druckeinstellungen als Standardwerte der Warteschlange (wirkt für alle Programme)
+    /// und prüft sie anschließend mit `lpoptions`.
+    ///
+    /// - Returns: Titel der Einstellungen, deren Wert nicht in der Auswahl der PPD liegt. Sie gelten
+    ///   als Warteschlangen-Standard exakt; Druckdialoge bieten dafür nur den nächstliegenden Wert an.
+    /// - Throws: `CUPSError.optionsNotApplied`, wenn die Warteschlange Werte nicht übernommen hat.
+    @discardableResult
+    static func setDefaults(queue: String, settings: PrintSettings, stock: LabelStock?,
+                            language: PrinterLanguage?) async throws -> [String] {
+        let plan = defaultsPlan(settings: settings, language: language, removingStale: true)
+        var args = ["-p", queue] + plan.arguments
         if let stock { args += ["-o", "PageSize=\(stock.ppdKeyword)"] }
-        if let language { args += ["-o", "\(CUPSOptionName.language)=\(language.cupsValue)"] }
-        // Leere Start-/Endbefehle explizit entfernen.
-        if settings.startCommands.isEmpty { args += ["-R", CUPSOptionName.startCommands] }
-        if settings.endCommands.isEmpty { args += ["-R", CUPSOptionName.endCommands] }
         try await runLpadmin(args)
+        let mismatched = await mismatchedOptions(queue: queue, plan: plan)
+        guard mismatched.isEmpty else { throw CUPSError.optionsNotApplied(mismatched) }
+        return plan.approximated.map(optionTitle)
+    }
+
+    // MARK: Standardwerte abbilden
+
+    /// Auswahlwerte der ganzzahligen PPD-Optionen (Driver/ppd/README.md). `lpadmin -o name=wert`
+    /// übernimmt nur PPD-Schlüsselwörter mit einem Wert aus ihrer Auswahl – andere Werte verwirft es
+    /// stillschweigend.
+    static let ppdIntegerChoices: [String: [Int]] = [
+        CUPSOptionName.labelTop: Array(stride(from: -120, through: 120, by: 10)),
+        CUPSOptionName.tearOff: Array(stride(from: -120, through: 120, by: 10)),
+        CUPSOptionName.labelLeft: Array(stride(from: -200, through: 200, by: 10)),
+        CUPSOptionName.threshold: [64, 96, 128, 160, 192],
+        CUPSOptionName.cutEvery: [0, 1, 2, 5, 10, 25, 50, 100],
+    ]
+
+    /// Optionen ohne PPD-Eintrag (freie Base64url-Werte): nur als Warteschlangen-Standard möglich.
+    static let queueOnlyOptions: Set<String> = [CUPSOptionName.startCommands, CUPSOptionName.endCommands]
+
+    /// `lpadmin`-Argumente für die Treiber-Standardwerte und die danach erwarteten Werte.
+    struct DefaultsPlan: Equatable {
+        var arguments: [String] = []
+        /// Erwarteter Wert je Option (wie ihn `currentOptions` liefert).
+        var expected: [String: String] = [:]
+        /// Optionen, die als Warteschlangen-Standard (`name-default`) gesetzt werden.
+        var queueDefaults: Set<String> = []
+        /// Optionen, die nicht gesetzt sein dürfen (leere Start-/Endbefehle).
+        var cleared: Set<String> = []
+        /// Optionen außerhalb der PPD-Auswahl (Druckdialoge zeigen den nächstliegenden Wert).
+        var approximated: [String] = []
+    }
+
+    /// Bildet Einstellungen auf `lpadmin`-Argumente ab:
+    /// * PPD-Optionen mit einem Wert aus der PPD-Auswahl: `-o name=wert` (Standard in der PPD).
+    /// * Ganzzahlen außerhalb der Auswahl: nächstliegende Wahl in der PPD **und** exakter Wert als
+    ///   Warteschlangen-Standard `-o name-default=wert` – cupsd gibt ihn jedem Auftrag mit, der die
+    ///   Option nicht selbst setzt, sodass er in `argv[5]` des Filters ankommt.
+    /// * Start-/Endbefehle (keine PPD-Optionen): `-o name-default=…`, leer `-R name-default`.
+    ///
+    /// `removingStale` entfernt nicht mehr benötigte Warteschlangen-Standards (`-R` wirkt sofort und
+    /// schlägt bei einer noch nicht vorhandenen Warteschlange fehl).
+    static func defaultsPlan(settings: PrintSettings, language: PrinterLanguage?, removingStale: Bool) -> DefaultsPlan {
+        var plan = DefaultsPlan()
+        var options = settings.cupsOptions()
+        if let language { options[CUPSOptionName.language] = language.cupsValue }
+        for name in queueOnlyOptions.sorted() where options[name] == nil {
+            if removingStale { plan.arguments += ["-R", "\(name)-default"] }
+            plan.cleared.insert(name)
+        }
+        for (name, value) in options.sorted(by: { $0.key < $1.key }) {
+            plan.expected[name] = value
+            if queueOnlyOptions.contains(name) {
+                plan.arguments += ["-o", "\(name)-default=\(value)"]
+                plan.queueDefaults.insert(name)
+            } else if let choices = ppdIntegerChoices[name], let number = Int(value), !choices.contains(number) {
+                let nearest = choices.min { abs($0 - number) < abs($1 - number) } ?? number
+                plan.arguments += ["-o", "\(name)=\(nearest)", "-o", "\(name)-default=\(value)"]
+                plan.queueDefaults.insert(name)
+                plan.approximated.append(name)
+            } else {
+                plan.arguments += ["-o", "\(name)=\(value)"]
+                // Ein früher gesetzter exakter Wert würde die PPD-Wahl sonst überdecken.
+                if removingStale, ppdIntegerChoices[name] != nil { plan.arguments += ["-R", "\(name)-default"] }
+            }
+        }
+        return plan
+    }
+
+    /// Optionen, die laut `lpoptions` nicht den geplanten Wert haben. PPD-Optionen, die die PPD des
+    /// Modells nicht kennt (z. B. `lwCutEvery` ohne Schneider), werden nicht geprüft.
+    private static func mismatchedOptions(queue: String, plan: DefaultsPlan) async -> [String] {
+        let current = await currentOptions(queue: queue)
+        // `lpoptions` nicht verfügbar oder ohne Ausgabe: nicht prüfbar.
+        guard !current.isEmpty else { return [] }
+        var mismatched: [String] = []
+        for (name, value) in plan.expected.sorted(by: { $0.key < $1.key }) {
+            if let actual = current[name] {
+                if actual != value { mismatched.append(name) }
+            } else if plan.queueDefaults.contains(name) {
+                mismatched.append(name)
+            }
+        }
+        for name in plan.cleared.sorted() {
+            if let actual = current[name], !actual.isEmpty,
+               actual != "None", actual != CUPSOptionName.defaultValue {
+                mismatched.append(name)
+            }
+        }
+        return mismatched
+    }
+
+    /// Anzeigename einer Treiberoption (wie unter „Druckeinstellungen“).
+    static func optionTitle(_ name: String) -> String {
+        switch name {
+        case CUPSOptionName.labelTop: return tr("Oberer Versatz (^LT)")
+        case CUPSOptionName.labelLeft: return tr("Linker Versatz (^LS)")
+        case CUPSOptionName.tearOff: return tr("Abreißposition (~TA)")
+        case CUPSOptionName.threshold: return tr("Schwelle")
+        case CUPSOptionName.cutEvery: return tr("Schneiden nach je")
+        default: return name
+        }
     }
 
     static func removeQueue(_ name: String) async throws {

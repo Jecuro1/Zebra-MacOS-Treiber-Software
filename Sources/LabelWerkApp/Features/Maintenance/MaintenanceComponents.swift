@@ -94,6 +94,47 @@ extension View {
     }
 }
 
+// MARK: - Sichtbarkeit im Bildlaufbereich
+
+/// Meldet, ob die Ansicht im sichtbaren Bereich der umgebenden ScrollView liegt – für Dauer-Animationen,
+/// die nur laufen sollen, solange man sie sieht. macOS 15: `onScrollVisibilityChange`; macOS 14: eigener
+/// Rahmen im Koordinatenraum der ScrollView, verglichen mit deren sichtbarer Größe.
+private struct MaintScrollVisibilityModifier: ViewModifier {
+    @Binding var isVisible: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onScrollVisibilityChange(threshold: 0.1) { visible in
+                isVisible = visible
+            }
+        } else {
+            content.background {
+                GeometryReader { proxy in
+                    let visible = Self.isVisible(proxy)
+                    Color.clear
+                        .onAppear { isVisible = visible }
+                        .onChange(of: visible) { _, newValue in isVisible = newValue }
+                }
+            }
+        }
+    }
+
+    /// Ohne umgebende ScrollView gilt die Ansicht als sichtbar.
+    private static func isVisible(_ proxy: GeometryProxy) -> Bool {
+        guard let viewport = proxy.bounds(of: .scrollView)?.size else { return true }
+        return proxy.frame(in: .scrollView).intersects(CGRect(origin: .zero, size: viewport))
+    }
+}
+
+extension View {
+    /// Hält `isVisible` aktuell, solange die Ansicht (zu mindestens 10 %) im sichtbaren Bereich der
+    /// umgebenden ScrollView liegt.
+    func maintScrollVisibility(_ isVisible: Binding<Bool>) -> some View {
+        modifier(MaintScrollVisibilityModifier(isVisible: isVisible))
+    }
+}
+
 // MARK: - Hinweis
 
 struct MaintNote: View {

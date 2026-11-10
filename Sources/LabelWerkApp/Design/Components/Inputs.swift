@@ -1,4 +1,19 @@
+import AppKit
 import SwiftUI
+
+/// Zahlenfelder (`TextField(value:format:)`) übernehmen getippte Werte erst beim Beenden der
+/// Bearbeitung – ein Klick auf einen Knopf oder ein Tastenkürzel beendet sie nicht. Beendet eine
+/// laufende Bearbeitung im Schlüsselfenster und führt `action` erst im nächsten Durchlauf aus,
+/// wenn der Wert im Zustand angekommen ist.
+@MainActor
+func afterCommittingTextEditing(_ action: @escaping @MainActor () -> Void) {
+    if let window = NSApp.keyWindow, window.firstResponder is NSText {
+        window.makeFirstResponder(nil)
+        Task { @MainActor in action() }
+    } else {
+        action()
+    }
+}
 
 /// Wert, der entweder vom Drucker übernommen (`nil`) oder ausdrücklich gesetzt wird.
 /// Entspricht „Druckereinstellung verwenden“ im Windows-Treiber.

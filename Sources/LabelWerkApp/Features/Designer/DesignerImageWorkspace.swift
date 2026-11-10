@@ -83,11 +83,15 @@ struct DesignerImageWorkspace: View {
         .task(id: key) {
             if let key { await state.process(key) }
         }
-        .onChange(of: target.resolution) { _, newValue in
-            // PDFs in der neuen Auflösung neu rendern (wichtig für „Originalgröße“).
-            if let source = state.source, source.isPDF, source.renderedDPI != newValue.dpi {
-                load(source.url)
-            }
+        .onChange(of: DesignerPDFResolutionCheck(sourceID: state.source?.id, dpi: target.resolution.dpi),
+                  initial: true) { _, check in
+            // PDFs in der aktuellen Auflösung neu rendern (wichtig für „Originalgröße“). Auch beim
+            // Erscheinen prüfen: Die Datei bleibt im `DesignerStore`, während die Auflösung im
+            // ZPL-Modus oder in einem anderen Bereich geändert werden kann. Nach einem laufenden
+            // Ladevorgang prüft die neue Quelle erneut.
+            guard !state.isLoading, let source = state.source, source.isPDF,
+                  source.renderedDPI != check.dpi else { return }
+            load(source.url)
         }
     }
 
@@ -439,6 +443,12 @@ struct DesignerImageWorkspace: View {
             }
         }
     }
+}
+
+/// Auslöser für das Neu-Rendern eines PDFs: geladene Quelle und aktuelle Druckerauflösung.
+private struct DesignerPDFResolutionCheck: Equatable {
+    let sourceID: UUID?
+    let dpi: Int
 }
 
 // MARK: - Vorher/Nachher

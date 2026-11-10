@@ -30,6 +30,29 @@ enum CommandCatalog {
         OptionSpec("negative", "Negativ drucken"),
         OptionSpec("mirror", "Spiegeln"),
         OptionSpec("rotate180", "Um 180° gedreht drucken (^POI)"),
+        OptionSpec("no-layout", "Bild unverändert übernehmen: nicht drehen, nicht einpassen, Etikett so groß wie das Bild"),
+        OptionSpec("media-type", value: "directThermal|thermalTransfer", "Druckverfahren (^MT), Standard: Druckereinstellung"),
+        OptionSpec("tracking", value: "gap|blackMark|continuous|auto", "Medienerkennung (^MN), Standard: Druckereinstellung"),
+        OptionSpec("print-mode", value: "modus",
+                   "tearOff, peelOff, cutter, delayedCut, rewind, applicator, kiosk (^MM), Standard: Druckereinstellung"),
+        OptionSpec("label-top", value: "-120…120", "Vertikaler Versatz in Punkten (^LT), Standard: Druckereinstellung"),
+        OptionSpec("label-left", value: "-9999…9999", "Horizontaler Versatz in Punkten (^LS), Standard: Druckereinstellung"),
+        OptionSpec("tear-off", value: "-120…120", "Abreißposition in Punkten (~TA), Standard: Druckereinstellung"),
+        OptionSpec("backfeed", value: "after|before|normal|off", "Rückzugsfolge (~JS), Standard: Druckereinstellung"),
+        OptionSpec("cut-every", value: "0…9999", "Nach jeweils N Etiketten schneiden (^PQ), Standard: 0 = nur am Auftragsende"),
+        OptionSpec("calibrate", "Vor dem Auftrag kalibrieren (~JC)"),
+        OptionSpec("save-settings", "Einstellungen dauerhaft im Drucker speichern (^JUS)"),
+        OptionSpec("skip-blank", "Leere Etiketten nicht drucken"),
+        OptionSpec("start-commands", value: "befehle", "Rohbefehle vor dem ersten Etikett (ZPL, EPL)"),
+        OptionSpec("end-commands", value: "befehle", "Rohbefehle nach dem letzten Etikett (ZPL, EPL)"),
+    ]
+
+    /// Zusätzliche Optionen von `encode` (bei `print` bestimmen Drucker und `PrinterClient` diese Werte).
+    static let encodeOptions: [OptionSpec] = [
+        OptionSpec("output", short: "o", value: "datei", "Zieldatei (Standard: Standardausgabe)"),
+        OptionSpec("max-width", value: "punkte",
+                   "Druckbreite; breitere Etiketten werden nach der Rasterung rechts abgeschnitten (Standard: Druckbreite von --model, sonst unbegrenzt)"),
+        OptionSpec("no-collate", "Bei mehreren Bildern jedes Etikett mit allen Kopien einzeln senden statt die Folge zu wiederholen"),
     ]
 
     static let commands: [CommandSpec] = [
@@ -78,12 +101,16 @@ enum CommandCatalog {
             examples: ["lwctl -p tcp://192.168.1.20 print versand.png --stock w4h6in --dither atkinson",
                        "lwctl -p virtual://demo print a.png b.png --copies 2 --fit cover"]),
         CommandSpec(
-            name: "encode", usage: "encode <bild> [-o datei] [optionen]",
-            summary: "Druckauftrag aus einem Bild erzeugen, ohne zu drucken",
-            details: "Wie „print“, schreibt den Auftrag aber in eine Datei (bzw. auf die Standardausgabe).",
-            options: imageOptions + [OptionSpec("output", short: "o", value: "datei", "Zieldatei (Standard: Standardausgabe)")],
-            needsPrinter: false, minimumArguments: 1, maximumArguments: 1,
-            examples: ["lwctl encode logo.png -o logo.zpl --stock w2h1in", "lwctl --language epl encode logo.png > logo.epl"]),
+            name: "encode", usage: "encode <bild…> [-o datei] [optionen]",
+            summary: "Druckauftrag aus Bildern erzeugen, ohne zu drucken",
+            details: """
+            Wie „print“, schreibt den Auftrag aber in eine Datei (bzw. auf die Standardausgabe). Jedes
+            Bild wird ein Etikett; das Byteformat ist identisch mit dem des CUPS-Filters.
+            """,
+            options: imageOptions + encodeOptions,
+            needsPrinter: false, minimumArguments: 1, maximumArguments: nil,
+            examples: ["lwctl encode logo.png -o logo.zpl --stock w2h1in", "lwctl --language epl encode logo.png > logo.epl",
+                       "lwctl encode a.png b.png --no-layout --copies 2 --no-collate --cut-every 2 -o auftrag.zpl"]),
         CommandSpec(
             name: "render", usage: "render <zpl-datei|-> -o out.png [--dpmm 8]",
             summary: "ZPL in ein PNG-Vorschaubild umwandeln",

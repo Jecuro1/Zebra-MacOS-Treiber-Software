@@ -8,6 +8,7 @@ struct HistoryView: View {
     let printerID: UUID?
 
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var search = ""
     @State private var kindFilter: JobRecord.Kind?
     @State private var printerFilter: UUID?
@@ -20,6 +21,20 @@ struct HistoryView: View {
     }
 
     private var effectivePrinter: UUID? { printerID ?? printerFilter }
+
+    private var reduceMotion: Bool { systemReduceMotion || model.preferences.reduceMotion }
+
+    /// Name des gefilterten Druckers (für die Rückfrage beim Leeren).
+    private var effectivePrinterName: String? {
+        guard let id = effectivePrinter else { return nil }
+        return model.session(for: id)?.displayName ?? model.history.first { $0.printerID == id }?.printerName
+    }
+
+    /// Gibt es im aktuellen Druckerumfang überhaupt Einträge zum Leeren?
+    private var hasClearableHistory: Bool {
+        guard let id = effectivePrinter else { return !model.history.isEmpty }
+        return model.history.contains { $0.printerID == id }
+    }
 
     private var filtered: [JobRecord] {
         model.history.filter { job in
@@ -66,7 +81,11 @@ struct HistoryView: View {
                                         ForEach(group.jobs) { job in
                                             JobRow(job: job, isSelected: selectedJob == job.id,
                                                    reprint: { reprint(job) },
-                                                   select: { withAnimation(Motion.snappy) { selectedJob = selectedJob == job.id ? nil : job.id } })
+                                                   select: {
+                                                       withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) {
+                                                           selectedJob = selectedJob == job.id ? nil : job.id
+                                                       }
+                                                   })
                                                 .transition(.opacity.combined(with: .move(edge: .top)))
                                         }
                                     }
@@ -80,7 +99,7 @@ struct HistoryView: View {
                                 }
                             }
                         }
-                        .animation(Motion.spring, value: filtered.map(\.id))
+                        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: filtered.map(\.id))
                     }
                 }
                 .padding(Theme.Metrics.paddingLarge)
@@ -104,14 +123,19 @@ struct HistoryView: View {
                 } label: {
                     Label(tr("Verlauf leeren"), systemImage: "trash")
                 }
-                .disabled(model.history.isEmpty)
+                .disabled(!hasClearableHistory)
             }
         }
         .confirmationDialog(tr("Verlauf leeren?"), isPresented: $confirmClear) {
-            Button(tr("Leeren"), role: .destructive) { model.clearHistory(printerID: printerID) }
+            // Mit Druckerfilter nur dessen Einträge löschen – nicht den Verlauf aller Drucker.
+            Button(tr("Leeren"), role: .destructive) { model.clearHistory(printerID: effectivePrinter) }
             Button(tr("Abbrechen"), role: .cancel) {}
         } message: {
-            Text(tr("Alle Einträge und gespeicherten Druckdaten werden gelöscht."))
+            if let name = effectivePrinterName {
+                Text(tr("Alle Einträge von „%@“ und ihre gespeicherten Druckdaten werden gelöscht.", name))
+            } else {
+                Text(tr("Alle Einträge und gespeicherten Druckdaten werden gelöscht."))
+            }
         }
     }
 
@@ -169,7 +193,7 @@ struct HistoryView: View {
                 .frame(maxWidth: 240)
             }
 
-            Toggle(isOn: $onlyFailures.animation(Motion.spring)) {
+            Toggle(isOn: $onlyFailures.animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion))) {
                 Label(tr("Nur Fehler"), systemImage: "exclamationmark.triangle")
             }
             .toggleStyle(.button)
@@ -231,7 +255,11 @@ private struct JobRow: View {
     let reprint: () -> Void
     let select: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
     @State private var hovering = false
+
+    private var toggleTitle: String { isSelected ? tr("Details ausblenden") : tr("Details anzeigen") }
 
     var body: some View {
         GlassCard(padding: 12, cornerRadius: 14, tint: job.success ? nil : Theme.error) {
@@ -256,7 +284,7 @@ private struct JobRow: View {
                     }
                     Image(systemName: job.success ? "checkmark.circle.fill" : "xmark.octagon.fill")
                         .foregroundStyle(job.success ? Theme.ready : Theme.error)
-                    if job.payload != nil {
+                    if job.isReprintable {
                         Button(action: reprint) {
                             Image(systemName: "arrow.clockwise.circle.fill")
                                 .font(.system(size: 18))
@@ -267,10 +295,18 @@ private struct JobRow: View {
                         .opacity(hovering || isSelected ? 1 : 0.35)
                         .help(tr("Erneut drucken"))
                     }
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isSelected ? 180 : 0))
+                    // Eigener Knopf: Auf- und Zuklappen auch per Tastatur und VoiceOver.
+                    Button(action: select) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isSelected ? 180 : 0))
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(toggleTitle)
+                    .accessibilityLabel(toggleTitle)
                 }
                 if isSelected {
                     HStack(alignment: .top, spacing: 16) {
@@ -291,7 +327,7 @@ private struct JobRow: View {
                             if let message = job.message, !message.isEmpty {
                                 KeyValueRow(tr("Meldung"), message)
                             }
-                            if job.payload != nil {
+                            if job.isReprintable {
                                 Button(action: reprint) {
                                     Label(tr("Erneut drucken"), systemImage: "printer")
                                 }
@@ -306,10 +342,12 @@ private struct JobRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
+        .accessibilityAction(named: toggleTitle, select)
         .onHover { hovering = $0 }
-        .animation(Motion.spring, value: isSelected)
+        .animation(Motion.animation(Motion.spring, reduceMotion: systemReduceMotion || appReduceMotion), value: isSelected)
         .contextMenu {
-            if job.payload != nil {
+            Button(toggleTitle, action: select)
+            if job.isReprintable {
                 Button(tr("Erneut drucken"), action: reprint)
             }
             Button(tr("Titel kopieren")) {

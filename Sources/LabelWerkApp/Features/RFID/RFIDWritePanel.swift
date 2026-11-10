@@ -354,20 +354,24 @@ struct RFIDWritePanel: View {
                         .transition(.opacity)
                 }
 
+                if workbench.isWriting, let notice = workbench.writeNotice {
+                    RFIDInlineMessage(text: notice, systemImage: "pause.circle.fill", tint: Theme.warning)
+                        .transition(.opacity)
+                }
+
                 if workbench.isWriting {
                     let blockwise = workbench.writeRun?.verify == false
                     Button {
                         workbench.cancelWrite()
                     } label: {
-                        Label(blockwise ? tr("Nach diesem Block anhalten") : tr("Nach diesem Tag anhalten"),
-                              systemImage: "stop.fill")
+                        Label(tr("Nach diesem Tag anhalten"), systemImage: "stop.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.labelWerkSecondary)
                     .controlSize(.large)
                     .help(blockwise
-                          ? tr("Ohne Prüfung wird in Blöcken zu höchstens 25 Tags gesendet. Bereits gesendete Etiketten druckt der Drucker noch fertig.")
-                          : tr("Der Auftrag hält nach dem Tag an, der gerade kodiert wird."))
+                          ? tr("Formate, die noch im Drucker warten, werden verworfen (~JA). Das Etikett, das gerade kodiert wird, läuft noch durch.")
+                          : tr("Der Auftrag hält nach dem Tag an, der gerade kodiert wird. Wartet dessen Format noch im angehaltenen Drucker, wird es verworfen."))
                 } else {
                     Button {
                         workbench.startWrite(session: session)
@@ -384,6 +388,7 @@ struct RFIDWritePanel: View {
                 }
             }
             .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: workbench.writeRun?.isRunning)
+            .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: workbench.writeNotice)
         }
         .overlay {
             CelebrationBurst(trigger: workbench.celebration, colors: [Theme.ready, Theme.teal, Theme.violet])
@@ -543,6 +548,17 @@ private struct RFIDWriteProgressView: View {
                             Image(systemName: "xmark.octagon.fill")
                                 .foregroundStyle(run.failureCount > 0 ? Theme.error : Color.secondary)
                                 .symbolEffect(.bounce, value: reduceMotion ? 0 : run.failureCount)
+                        }
+                        if run.discardedTotal > 0 {
+                            Label {
+                                Text(tr("%d verworfen", run.discardedTotal))
+                                    .contentTransition(.numericText())
+                            } icon: {
+                                Image(systemName: RFIDWriteState.discarded.systemImage)
+                                    .foregroundStyle(RFIDWriteState.discarded.tint)
+                            }
+                            .help(tr("Beim Anhalten noch im Drucker wartend und dort verworfen – diese Tags wurden nicht kodiert."))
+                            .transition(.opacity)
                         }
                         Spacer()
                         Text(tr("%d / %d", run.completed, run.total))

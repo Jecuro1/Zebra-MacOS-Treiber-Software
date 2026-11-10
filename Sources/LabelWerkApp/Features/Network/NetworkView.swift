@@ -3,15 +3,18 @@ import LabelWerkKit
 
 /// Netzwerkeinstellungen des Druckers: IPv4/DHCP, WLAN, Bluetooth – mit Live-Prüfung,
 /// Änderungsübersicht und sicherem Übernehmen. Ersetzt „Configure Printer Connectivity“.
+@MainActor
 struct NetworkView: View {
     let session: PrinterSession
+    /// Je Drucker geteilt: Eingaben, Neustart-Karte und Wiederverbindung überstehen einen Bereichswechsel.
+    let editor: NetConfigEditor
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @State private var editor = NetConfigEditor()
 
     init(session: PrinterSession) {
         self.session = session
+        self.editor = NetConfigEditor.shared(for: session)
     }
 
     private var reduceMotion: Bool { systemReduceMotion || model.preferences.reduceMotion }
@@ -53,10 +56,14 @@ struct NetworkView: View {
             .animation(reduceMotion ? nil : Motion.spring, value: editor.outcome)
         }
         .task {
+            // Während der Bereich geschlossen war, wieder verbunden (z. B. über die Statusüberwachung):
+            // Das beendet das Warten auf den Neustart und lädt die Werte neu.
+            if editor.isAwaitingRestart && session.connectionState.isConnected {
+                editor.connectionRestored(session: session, reduceMotion: reduceMotion, wantsBluetooth: hasBluetooth)
+                return
+            }
+            guard editor.loadsOnAppear else { return }
             await editor.load(session: session, reduceMotion: reduceMotion, wantsBluetooth: hasBluetooth)
-        }
-        .onDisappear {
-            editor.cancelBackgroundWork()
         }
     }
 
@@ -683,7 +690,7 @@ private struct NetConfigRestartCard: View {
                             .disabled(session.connectionState == .connecting)
                         }
                         Button(tr("Schließen")) {
-                            editor.dismissOutcome(reduceMotion: reduceMotion)
+                            editor.dismissOutcome(session: session, reduceMotion: reduceMotion)
                         }
                         .buttonStyle(.labelWerkPlain)
                     }

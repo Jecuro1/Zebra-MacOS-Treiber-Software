@@ -195,6 +195,11 @@ private struct FirmwareFileCard: View {
                     }
                 }
 
+                // Gleich zu Beginn sagen, dass diese Verbindung keine Firmware überträgt – nicht erst nach Prüfung & Checkliste.
+                if !FirmwareUpdateController.supportsTransfer(on: session) {
+                    TransferNote(FirmwareUpdateController.unsupportedConnectionMessage, style: .warning)
+                }
+
                 if let error = controller.analysisError {
                     TransferNote(error, style: .error)
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -484,12 +489,14 @@ private struct FirmwareSafetyCard: View {
     }
 
     private var isConnected: Bool { session.connectionState.isConnected }
+    private var supportsTransfer: Bool { FirmwareUpdateController.supportsTransfer(on: session) }
 
     private var canStart: Bool {
-        isConnected && controller.checklistComplete && !blocking && !session.isBusy
+        supportsTransfer && isConnected && controller.checklistComplete && !blocking && !session.isBusy
     }
 
     private var hint: (text: String, style: TransferNote.Style) {
+        if !supportsTransfer { return (FirmwareUpdateController.unsupportedConnectionMessage, .error) }
         if !isConnected { return (tr("Der Drucker ist nicht verbunden."), .error) }
         if blocking { return (tr("Die Prüfsumme stimmt nicht – Übertragung gesperrt."), .error) }
         if session.isBusy { return (tr("Der Drucker ist gerade beschäftigt."), .warning) }

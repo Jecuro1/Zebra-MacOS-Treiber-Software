@@ -40,11 +40,14 @@ enum TerminalInputMode: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// Leitet den Modus aus dem Inhalt ab (für Verlauf und Bausteine).
+    /// Leitet den Modus aus dem Inhalt ab (für Verlauf und Bausteine). Der Verlauf speichert keinen
+    /// Modus – SGD-Kurzformen („device.languages“, „name = wert“, „getvar …“, „do …“) gelten
+    /// deshalb als SGD, sonst würden sie im ZPL-Modus als wirkungsloser Rohtext gesendet.
     static func infer(from text: String, fallback: TerminalInputMode) -> TerminalInputMode {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("!") || trimmed.hasPrefix("{") { return .sgd }
         if trimmed.hasPrefix("^") || trimmed.hasPrefix("~") { return .zpl }
+        if TerminalComposer.prepare(trimmed, mode: .sgd).wasExpanded { return .sgd }
         return fallback
     }
 }

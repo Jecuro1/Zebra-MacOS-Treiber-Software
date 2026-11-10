@@ -652,15 +652,19 @@ final class MaintRestoreController {
             if ok {
                 items[index].state = .written
             } else {
+                // `setvar` sendet ohne Antwort und scheitert nur an der Übertragung (nachdem der Client
+                // bereits neu verbunden hat): Die Verbindung ist weg bzw. gestört. Den Rest überspringen,
+                // statt für jeden Wert erneut auf den Verbindungsaufbau zu warten und Fehler zu melden.
                 items[index].state = .failed(target.lastError ?? tr("Unbekannter Fehler"))
-                if !target.connectionState.isConnected { aborted = true }
+                aborted = true
             }
         }
         currentItem = nil
 
-        // 2. Kontrolle: Werte erneut lesen und vergleichen.
+        // 2. Kontrolle: Werte erneut lesen und vergleichen (nicht nach einem Verbindungsfehler – die
+        //    gesendeten Werte bleiben dann „nicht gegengelesen“, siehe „Erneut vergleichen“).
         var after: [String: SGDSetting] = [:]
-        if items.contains(where: { $0.state == .written }) && target.connectionState.isConnected {
+        if items.contains(where: { $0.state == .written }) && !aborted && target.connectionState.isConnected {
             isVerifying = true
             try? await Task.sleep(for: .milliseconds(400))
             after = await target.allSettings()
@@ -679,7 +683,11 @@ final class MaintRestoreController {
         let deviceLanguage = deviceLanguageAfterApply(after)
         var savedPermanently: Bool?
         var saveSkipped: MaintSaveSkip?
-        if saveToPrinter && sentCount > 0 && target.connectionState.isConnected {
+        if saveToPrinter && sentCount > 0 && (cancelRequested || aborted) {
+            // Nach einem Abbruch nicht dauerhaft machen: ^JUS würde den halb übertragenen Stand (und alle
+            // anderen vorläufigen Einstellungen des Druckers) festschreiben.
+            saveSkipped = .interrupted
+        } else if saveToPrinter && sentCount > 0 && target.connectionState.isConnected {
             let output = target.saved.language
             if let skip = MaintSaveSkip.evaluate(deviceLanguage: deviceLanguage, output: output, model: target.model) {
                 saveSkipped = skip
@@ -972,8 +980,14 @@ final class MaintCareController {
         }
     }
 
+    /// Das Testmuster ist ZPL und wird unverändert gesendet: nur für Modelle, die ZPL verstehen
+    /// (unbekanntes Modell: zulassen).
+    static func canPrintTestPattern(_ session: PrinterSession) -> Bool {
+        session.model?.supports(PrinterLanguage.zpl) ?? true
+    }
+
     func printTestPattern(session: PrinterSession) async {
-        guard !isPrintingTest else { return }
+        guard !isPrintingTest, Self.canPrintTestPattern(session) else { return }
         isPrintingTest = true
         defer { isPrintingTest = false }
         let layout = Self.testLayout(for: session)

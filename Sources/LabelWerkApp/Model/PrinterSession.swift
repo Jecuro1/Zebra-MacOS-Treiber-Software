@@ -44,7 +44,13 @@ final class PrinterSession: Identifiable {
     @ObservationIgnored private var monitorTask: Task<Void, Never>?
     @ObservationIgnored private var previousAlertKinds: Set<AlertKind> = []
     @ObservationIgnored private var consecutiveFailures = 0
+    /// Automatische Wiederverbindungsversuche seit der letzten erfolgreichen Verbindung.
+    @ObservationIgnored private var reconnectAttempts = 0
+    /// Laufender Verbindungsaufbau; weitere `connect()`-Aufrufe warten auf ihn statt einen zweiten zu starten.
     @ObservationIgnored private var connectTask: Task<Void, Never>?
+    /// Zählt Verbindungsaufbauten und Trennungen. Ein Aufbau, der beim Abschluss nicht mehr der
+    /// aktuelle ist (inzwischen getrennt oder mit neuer Adresse/Sprache neu verbunden), wird verworfen.
+    @ObservationIgnored private var connectGeneration = 0
 
     init(saved: SavedPrinter, app: AppModel) {
         self.id = saved.id
@@ -88,6 +94,8 @@ final class PrinterSession: Identifiable {
 
     var alerts: [PrinterAlert] { status?.alerts ?? [] }
     var isBusy: Bool { activity != nil }
+    /// Der Drucker ist pausiert – auch wenn ein Fehler (z. B. Druckkopf offen) als Zustand Vorrang hat.
+    var isPaused: Bool { status?.hasAlert(.paused) == true || status?.hostStatus?.paused == true }
 
     var availableSections: [PrinterSection] {
         PrinterSection.available(for: model, descriptor: saved.descriptor,
@@ -95,40 +103,83 @@ final class PrinterSession: Identifiable {
     }
 
     /// Zugriff auf den simulierten Drucker (nur Demo-Verbindung), z. B. um Fehler zu simulieren.
-    var virtualPrinter: VirtualPrinter? { client?.connection as? VirtualPrinter }
+    /// Auch ohne aktive Verbindung verfügbar: Je Kennung gibt es prozessweit genau einen.
+    var virtualPrinter: VirtualPrinter? {
+        if case .virtual(let id) = saved.descriptor { return VirtualPrinter.shared(id: id) }
+        return nil
+    }
 
     // MARK: - Verbindung
 
     func connect() async {
-        if connectionState == .connected || connectionState == .connecting { return }
-        withAnimation(.smooth) { connectionState = .connecting }
+        if connectionState == .connected { return }
+        // Läuft bereits ein Verbindungsaufbau, auf dessen Ergebnis warten.
+        if let pending = connectTask {
+            await pending.value
+            return
+        }
+        connectGeneration &+= 1
+        let generation = connectGeneration
+        animate(.smooth) { connectionState = .connecting }
+        let attempt = Task<Void, Never> { [weak self] in
+            await self?.establishConnection(generation: generation)
+        }
+        connectTask = attempt
+        await attempt.value
+        if connectGeneration == generation { connectTask = nil }
+    }
+
+    private func establishConnection(generation: Int) async {
+        // Nach wiederholten Statusfehlern ist die alte Verbindung noch offen: zuerst schließen
+        // (USB-Geräte erlauben oft nur einen Zugriff).
+        if let stale = client {
+            client = nil
+            await stale.disconnect()
+            guard generation == connectGeneration else { return }
+        }
         do {
             let connection = try ConnectionFactory.make(saved.descriptor)
             let client = PrinterClient(connection: connection, language: saved.language)
             try await client.connect()
+            // Inzwischen getrennt oder neu verbunden: Diese Verbindung wird nicht mehr gebraucht.
+            guard generation == connectGeneration else {
+                await client.disconnect()
+                return
+            }
             self.client = client
             consecutiveFailures = 0
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { connectionState = .connected }
+            reconnectAttempts = 0
+            animate(.spring(response: 0.5, dampingFraction: 0.8)) { connectionState = .connected }
             lastError = nil
             await refreshIdentity()
             await refreshStatus()
+            guard generation == connectGeneration else { return }
             startMonitoring()
         } catch {
+            guard generation == connectGeneration else { return }
             client = nil
             let message = Self.describe(error)
-            withAnimation(.smooth) { connectionState = .failed(message) }
+            animate(.smooth) { connectionState = .failed(message) }
             lastError = message
+            // Die Überwachung verbindet im Hintergrund erneut – auch wenn der Drucker beim Start
+            // noch ausgeschaltet oder nicht erreichbar war.
+            if monitorTask == nil { startMonitoring() }
         }
     }
 
     func disconnect() async {
+        // Laufende Verbindungsaufbauten verwerfen: Ihr Ergebnis darf diese Trennung nicht überschreiben.
+        connectGeneration &+= 1
+        connectTask = nil
         stopMonitoring()
-        if let client { await client.disconnect() }
+        reconnectAttempts = 0
+        let previous = client
         client = nil
-        withAnimation(.smooth) {
+        animate(.smooth) {
             connectionState = .disconnected
             status = nil
         }
+        await previous?.disconnect()
     }
 
     func reconnect() async {
@@ -149,9 +200,15 @@ final class PrinterSession: Identifiable {
                 if self.connectionState == .connected {
                     await self.refreshStatus()
                 } else if case .failed = self.connectionState {
-                    // Automatischer Wiederverbindungsversuch mit wachsendem Abstand.
+                    // Automatischer Wiederverbindungsversuch mit wachsendem Abstand: nach 5, 10, 20 …
+                    // Abfragen, höchstens etwa einmal pro Minute.
                     self.consecutiveFailures += 1
-                    if self.consecutiveFailures % 5 == 0 { await self.connect() }
+                    let limit = max(5, Int(60 / max(1, interval)))
+                    if self.consecutiveFailures >= min(5 << min(self.reconnectAttempts, 4), limit) {
+                        self.consecutiveFailures = 0
+                        self.reconnectAttempts += 1
+                        await self.connect()
+                    }
                 }
             }
         }
@@ -178,13 +235,16 @@ final class PrinterSession: Identifiable {
         guard let client, supportsStatus else { return }
         do {
             let snapshot = try await client.status()
+            // Inzwischen getrennt oder neu verbunden: veraltete Antwort verwerfen.
+            guard client === self.client else { return }
             consecutiveFailures = 0
             apply(snapshot)
         } catch {
+            guard client === self.client else { return }
             consecutiveFailures += 1
             if consecutiveFailures >= 3 {
                 let message = Self.describe(error)
-                withAnimation(.smooth) {
+                animate(.smooth) {
                     connectionState = .failed(message)
                     status = .offline
                 }
@@ -196,8 +256,8 @@ final class PrinterSession: Identifiable {
 
     func refreshIdentity() async {
         guard let client, supportsStatus else { return }
-        if let identity = try? await client.identify() {
-            withAnimation(.smooth) { self.identity = identity }
+        if let identity = try? await client.identify(), client === self.client {
+            animate(.smooth) { self.identity = identity }
             // Modell & Auflösung automatisch übernehmen, falls noch unbekannt.
             if saved.modelID == nil, let matched = identity.matchedModelID {
                 saved.modelID = matched
@@ -213,7 +273,7 @@ final class PrinterSession: Identifiable {
         let newKinds = Set(snapshot.alerts.map(\.kind))
         let appeared = snapshot.alerts.filter { !previousAlertKinds.contains($0.kind) }
         previousAlertKinds = newKinds
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+        animate(.spring(response: 0.45, dampingFraction: 0.85)) {
             status = snapshot
             lastUpdated = snapshot.timestamp
             statusHistory.append(StatusSample(date: snapshot.timestamp, state: snapshot.state,
@@ -227,7 +287,7 @@ final class PrinterSession: Identifiable {
         let relevant = newAlerts.filter { $0.severity >= .warning }
         guard !relevant.isEmpty, let app else { return }
         for alert in relevant {
-            app.toast("\(displayName): \(alert.title)", message: alert.recovery,
+            app.toast(tr("%@: %@", displayName, tr(alert.title)), message: tr(alert.recovery),
                       style: alert.severity == .error ? .error : .warning)
             if app.preferences.notificationsEnabled {
                 NotificationService.shared.notify(printerName: displayName, alert: alert, printerID: id)
@@ -253,9 +313,9 @@ final class PrinterSession: Identifiable {
             }
             return nil
         }
-        withAnimation(.smooth) { activity = activityText }
+        animate(.smooth) { activity = activityText }
         defer {
-            withAnimation(.smooth) {
+            animate(.smooth) {
                 activity = nil
                 progress = nil
             }
@@ -290,15 +350,16 @@ final class PrinterSession: Identifiable {
 
     @discardableResult
     func perform(_ action: PrinterAction) async -> Bool {
-        let ok = await run(action.displayName) { client in
+        let title = tr(action.displayName)
+        let ok = await run(title) { client in
             try await client.perform(action, resolution: resolution,
                                      widthDots: labelWidthDots, heightDots: labelHeightDots)
         } != nil
-        recordJob(action == .printTestLabel ? .testLabel : .action, title: action.displayName,
+        recordJob(action == .printTestLabel ? .testLabel : .action, title: title,
                   labels: action == .printTestLabel ? 1 : 0, bytes: 0, success: ok,
                   message: ok ? nil : lastError)
         if ok {
-            app?.toast(action.displayName, message: tr("Befehl wurde gesendet."), style: .success)
+            app?.toast(title, message: tr("Befehl wurde gesendet."), style: .success)
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(700))
                 await self?.refreshStatus()
@@ -354,19 +415,22 @@ final class PrinterSession: Identifiable {
         return ok
     }
 
+    /// Sendet Rohdaten (z. B. Gerätebefehle). Die Daten werden nur mit `storePayload` für
+    /// „Erneut drucken“ gespeichert – Befehle wie ein Neustart dürfen nicht erneut auslösbar sein.
     @discardableResult
-    func sendRaw(_ text: String, title: String = tr("Rohdaten")) async -> Bool {
+    func sendRaw(_ text: String, title: String = tr("Rohdaten"), storePayload: Bool = false) async -> Bool {
         let data = Data(text.utf8)
         let ok = await run(tr("Daten werden gesendet …")) { client in try await client.send(data) } != nil
         recordJob(.raw, title: title, labels: 0, bytes: data.count, success: ok, message: ok ? nil : lastError,
-                  payload: data)
+                  payload: storePayload ? data : nil)
         return ok
     }
 
     /// Sendet gespeicherte Druckdaten aus dem Verlauf erneut.
     @discardableResult
     func reprint(_ job: JobRecord) async -> Bool {
-        guard let payload = job.payload else {
+        // Nach einem Neustart liegen die Druckdaten in einer eigenen Datei (siehe `PersistenceStore`).
+        guard job.isReprintable, let payload = PersistenceStore.payload(for: job) else {
             app?.toast(tr("Erneut drucken nicht möglich"), message: tr("Für diesen Auftrag wurden keine Druckdaten gespeichert."), style: .warning)
             return false
         }
@@ -461,7 +525,8 @@ final class PrinterSession: Identifiable {
         let ok = await run(tr("Firmware wird übertragen …")) { client in
             try await client.sendFirmware(data, chunkSize: 16_384) { value in
                 Task { @MainActor [weak self] in
-                    withAnimation(.linear(duration: 0.2)) { self?.progress = value }
+                    guard let self else { return }
+                    self.animate(.linear(duration: 0.2)) { self.progress = value }
                 }
             }
         } != nil
@@ -492,6 +557,11 @@ final class PrinterSession: Identifiable {
     }
 
     // MARK: - Hilfen
+
+    /// Animiert eine Zustandsänderung – ohne Animation, wenn Bewegung reduziert werden soll.
+    private func animate(_ animation: Animation, _ changes: () -> Void) {
+        withAnimation(Motion.animation(animation, reduceMotion: app?.reducesMotion ?? false), changes)
+    }
 
     /// Lesbare Fehlermeldung (LocalizedError bevorzugt).
     static func describe(_ error: Error) -> String {

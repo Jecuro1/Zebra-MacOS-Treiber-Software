@@ -217,11 +217,17 @@ final class LineNumberRulerView: NSRulerView {
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: container)
         let characterRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
         let text = textView.string as NSString
-        // Zeilennummer des ersten sichtbaren Zeichens bestimmen.
+        // Zeilennummer des ersten sichtbaren Zeichens bestimmen – mit denselben Zeilengrenzen wie
+        // die Zeichenschleife (`lineRange`: LF, CR, CRLF …). Ein Zählen von "\n"-Characters schlüge
+        // bei CRLF fehl, weil "\r\n" in Swift ein einziges Character ist.
         var lineNumber = 1
-        if characterRange.location > 0 {
-            let prefix = text.substring(to: min(characterRange.location, text.length))
-            lineNumber = prefix.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        let firstVisible = min(characterRange.location, text.length)
+        var scan = 0
+        while scan < firstVisible {
+            let next = NSMaxRange(text.lineRange(for: NSRange(location: scan, length: 0)))
+            guard next > scan, next <= firstVisible else { break }
+            lineNumber += 1
+            scan = next
         }
         var index = characterRange.location
         let end = NSMaxRange(characterRange)

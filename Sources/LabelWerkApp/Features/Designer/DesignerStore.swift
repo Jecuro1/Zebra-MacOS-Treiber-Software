@@ -84,12 +84,14 @@ final class DesignerStore {
         if append {
             model.designerDocument = DesignerZPLFormatter.append(format: replacement.zpl, to: model.designerDocument)
             showNotice(tr("Angehängt: %@", replacement.title), systemImage: replacement.systemImage)
+            // Das Dokument enthält weiterhin die Änderungen des Benutzers – kein neuer
+            // unveränderter Stand, sonst ersetzt die nächste Vorlage es ohne Rückfrage.
         } else {
             model.designerDocument = replacement.zpl
             documentTitle = replacement.title
             showNotice(replacement.notice, systemImage: replacement.systemImage)
+            lastGenerated = model.designerDocument
         }
-        lastGenerated = model.designerDocument
     }
 
     /// Zeigt einen Hinweis für gut zwei Sekunden in der Fußzeile des Editors.

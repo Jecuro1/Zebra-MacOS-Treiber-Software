@@ -44,6 +44,17 @@ enum NetConfigIPv4 {
         return format(value)
     }
 
+    /// Einträge einer Adressliste: `ip.dns.servers` meldet mehrere Server durch Leerzeichen
+    /// (manche Firmware: Kommas) getrennt.
+    static func listEntries(_ text: String) -> [String] {
+        text.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init)
+    }
+
+    /// Normalisiert jeden Eintrag einer Adressliste und trennt sie mit Leerzeichen.
+    static func normalizedList(_ text: String) -> String {
+        listEntries(text).map(normalized).joined(separator: " ")
+    }
+
     static let commonMasks: [(prefix: Int, mask: String)] = [
         (24, "255.255.255.0"), (23, "255.255.254.0"), (22, "255.255.252.0"),
         (16, "255.255.0.0"), (8, "255.0.0.0"), (25, "255.255.255.128"), (28, "255.255.255.240"),
@@ -195,7 +206,7 @@ struct NetConfigDraft: Equatable {
         ipAddress = NetConfigIPv4.normalized(settings.ipAddress)
         subnetMask = NetConfigIPv4.normalized(settings.subnetMask)
         gateway = NetConfigIPv4.normalized(settings.gateway)
-        dnsServer = settings.dnsServer.map(NetConfigIPv4.normalized) ?? ""
+        dnsServer = settings.dnsServer.map(NetConfigIPv4.normalizedList) ?? ""
         hostname = settings.hostname ?? ""
         wlanEnabled = settings.wlanEnabled ?? false
         wlanSSID = settings.wlanSSID ?? ""
@@ -206,7 +217,29 @@ struct NetConfigDraft: Equatable {
 
     private static func clean(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    /// DNS-Server geändert? Leerraum und Schreibweise (führende Nullen, Trennzeichen) zählen nicht.
+    func dnsChanged(from initial: NetConfigDraft) -> Bool {
+        NetConfigIPv4.normalizedList(dnsServer) != NetConfigIPv4.normalizedList(initial.dnsServer)
+    }
+
+    /// Hostname geändert? Leerraum am Rand zählt nicht.
+    func hostnameChanged(from initial: NetConfigDraft) -> Bool {
+        Self.clean(hostname) != Self.clean(initial.hostname)
+    }
+
+    /// Das tatsächlich gesendete WLAN-Passwort: nur bei eingeschaltetem WLAN und einem Sicherheitsmodus
+    /// mit Passwort. Sonst ist das Feld ausgeblendet und ungeprüft – ein dort stehen gebliebener Rest
+    /// darf weder gesendet werden noch einen Neustart auslösen.
+    var passphraseToSend: String? {
+        wlanEnabled && wlanSecurity.needsPassphrase && !wlanPassphrase.isEmpty ? wlanPassphrase : nil
+    }
+
     /// Überträgt nur die gegenüber `initial` geänderten Felder auf `base` (unberührte Werte bleiben exakt erhalten).
+    ///
+    /// DNS-Server und Hostname werden nur bei einer Änderung übergeben (sonst `nil` = nicht schreiben):
+    /// Unveränderte Werte schreibt die Bibliothek ohnehin nicht, prüft sie aber – und vom Drucker gelesene
+    /// Werte (z. B. mehrere DNS-Server) bestehen diese Prüfung nicht immer. Leeren ist nicht möglich
+    /// (die Bibliothek überspringt leere Werte); `NetConfigEditor.issue` lässt es deshalb nicht zu.
     func applying(to base: NetworkSettings, initial: NetConfigDraft) -> NetworkSettings {
         var settings = base
         if useDHCP != initial.useDHCP { settings.useDHCP = useDHCP }
@@ -218,30 +251,28 @@ struct NetConfigDraft: Equatable {
                 settings.gateway = value.isEmpty ? "0.0.0.0" : NetConfigIPv4.normalized(value)
             }
         }
-        if dnsServer != initial.dnsServer {
-            let value = Self.clean(dnsServer)
-            settings.dnsServer = value.isEmpty ? nil : NetConfigIPv4.normalized(value)
-        }
-        if hostname != initial.hostname {
-            let value = Self.clean(hostname)
-            settings.hostname = value.isEmpty ? nil : value
-        }
+        settings.dnsServer = dnsChanged(from: initial) ? NetConfigIPv4.normalizedList(dnsServer) : nil
+        settings.hostname = hostnameChanged(from: initial) ? Self.clean(hostname) : nil
         if wlanEnabled != initial.wlanEnabled { settings.wlanEnabled = wlanEnabled }
         if wlanSSID != initial.wlanSSID { settings.wlanSSID = wlanSSID }
         if wlanSecurity != initial.wlanSecurity { settings.wlanSecurity = wlanSecurity.rawValue }
-        settings.wlanPassphrase = wlanPassphrase.isEmpty ? nil : wlanPassphrase
+        settings.wlanPassphrase = passphraseToSend
         return settings
     }
 
-    /// Ändert sich etwas, das per `applyNetworkSettings` übertragen werden muss?
+    /// Ändert sich etwas, das per `applyNetworkSettings` übertragen werden muss (und einen Neustart auslöst)?
     func networkDiffers(from initial: NetConfigDraft) -> Bool {
         var a = self, b = initial
         a.bluetoothName = ""; a.bluetoothDiscoverable = false
         b.bluetoothName = ""; b.bluetoothDiscoverable = false
+        // Das Passwort zählt nur, wenn es auch gesendet wird (siehe `passphraseToSend`).
+        a.wlanPassphrase = ""; b.wlanPassphrase = ""
+        if !dnsChanged(from: initial) { a.dnsServer = b.dnsServer }
+        if !hostnameChanged(from: initial) { a.hostname = b.hostname }
         if a.useDHCP && b.useDHCP {
             a.ipAddress = b.ipAddress; a.subnetMask = b.subnetMask; a.gateway = b.gateway
         }
-        return a != b
+        return a != b || passphraseToSend != nil
     }
 
     func bluetoothDiffers(from initial: NetConfigDraft) -> Bool {
@@ -294,12 +325,16 @@ extension NetConfigDraft {
             add("mask", tr("Subnetzmaske"), shown(initial.subnetMask), shown(subnetMask), "square.grid.3x3.square")
             add("gateway", tr("Gateway"), shown(initial.gateway), shown(gateway), "arrow.triangle.turn.up.right.diamond")
         }
-        add("dns", tr("DNS-Server"), shown(initial.dnsServer), shown(dnsServer), "server.rack")
-        add("hostname", tr("Hostname"), shown(initial.hostname), shown(hostname), "character.cursor.ibeam")
+        if dnsChanged(from: initial) {
+            add("dns", tr("DNS-Server"), shown(initial.dnsServer), shown(dnsServer), "server.rack")
+        }
+        if hostnameChanged(from: initial) {
+            add("hostname", tr("Hostname"), shown(initial.hostname), shown(hostname), "character.cursor.ibeam")
+        }
         add("wlan", tr("WLAN"), onOff(initial.wlanEnabled), onOff(wlanEnabled), "wifi")
         add("ssid", tr("WLAN-Name (SSID)"), shown(initial.wlanSSID), shown(wlanSSID), "wifi.router")
         add("security", tr("WLAN-Sicherheit"), initial.wlanSecurity.title, wlanSecurity.title, "lock.shield")
-        if !wlanPassphrase.isEmpty {
+        if passphraseToSend != nil {
             list.append(NetConfigChange(id: "passphrase", title: tr("WLAN-Passwort"), oldValue: "••••••",
                                         newValue: tr("neu gesetzt"), systemImage: "key.fill", requiresRestart: true))
         }
@@ -366,17 +401,19 @@ enum NetConfigValidator {
         return .valid
     }
 
+    /// `ip.dns.servers` ist eine Liste: Jeder Eintrag muss eine IPv4-Adresse sein.
     static func dnsServer(_ text: String) -> NetConfigIssue {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty { return .none }
-        return NetConfigIPv4.parse(trimmed) == nil ? .error(tr("Keine gültige IPv4-Adresse.")) : .valid
+        let entries = NetConfigIPv4.listEntries(text)
+        if entries.isEmpty { return .none }
+        return entries.allSatisfy({ NetConfigIPv4.parse($0) != nil }) ? .valid : .error(tr("Keine gültige IPv4-Adresse."))
     }
 
     static func hostname(_ text: String) -> NetConfigIssue {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty { return .none }
         if trimmed.count > 63 { return .error(tr("Höchstens 63 Zeichen.")) }
-        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        // Wie die Bibliothek (`PrinterClient.applyNetworkSettings`): kein Unterstrich.
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
         guard trimmed.allSatisfy({ allowed.contains($0) }) else {
             return .error(tr("Nur Buchstaben, Ziffern und Bindestrich (keine Umlaute, Leer- oder Sonderzeichen)."))
         }
@@ -439,6 +476,9 @@ struct NetConfigOutcome: Equatable {
     var reconnectFailed = false
 }
 
+/// Bearbeitet die Netzwerkeinstellungen eines Druckers. Eine Instanz je Drucker, damit Eingaben,
+/// Neustart-Karte (mit der neuen Adresse) und Wiederverbindung erhalten bleiben bzw. weiterlaufen,
+/// auch wenn der Bereich gewechselt wird.
 @Observable
 @MainActor
 final class NetConfigEditor {
@@ -463,11 +503,34 @@ final class NetConfigEditor {
         "interface.network.active.protocol", "wlan.signal_strength", "wlan.essid",
     ]
 
-    init() {}
+    private static var registry: [UUID: NetConfigEditor] = [:]
+
+    static func shared(for session: PrinterSession) -> NetConfigEditor {
+        if let existing = registry[session.id] { return existing }
+        let editor = NetConfigEditor()
+        registry[session.id] = editor
+        return editor
+    }
+
+    private init() {}
+
+    /// Wartezeit nach dem Übernehmen, bis der Drucker nach dem Neustart wieder erreichbar sein sollte.
+    static func restartDelay(for session: PrinterSession) -> Double { session.isVirtual ? 2 : 25 }
 
     var changes: [NetConfigChange] { draft.changes(from: initial) }
-    var hasChanges: Bool { draft != initial || !draft.wlanPassphrase.isEmpty }
-    var needsRestart: Bool { draft.networkDiffers(from: initial) || !draft.wlanPassphrase.isEmpty }
+    var hasChanges: Bool { draft.networkDiffers(from: initial) || draft.bluetoothDiffers(from: initial) }
+    var needsRestart: Bool { draft.networkDiffers(from: initial) }
+
+    /// Ein Neustart wurde ausgelöst, die Verbindung ist aber noch nicht wiederhergestellt.
+    var isAwaitingRestart: Bool { outcome.map { $0.restartExpected && !$0.reconnected } ?? false }
+
+    /// Beim (erneuten) Öffnen des Bereichs neu lesen – außer während eines Ladevorgangs, bei
+    /// ausstehenden Eingaben (sie bleiben einfach stehen) und solange ein Neustart läuft: Dann lädt die
+    /// Wiederverbindung die Werte selbst, und ein Leseversuch würde mitten im Neustart verbinden.
+    var loadsOnAppear: Bool {
+        if loadPhase == .loading || isAwaitingRestart { return false }
+        return !(loadPhase == .loaded && hasChanges)
+    }
 
     var activeIP: String? { nonEmpty(active["interface.network.active.ip_addr"]) }
     var activeMAC: String? { nonEmpty(active["interface.network.active.mac_addr"]) }
@@ -559,11 +622,16 @@ final class NetConfigEditor {
         case .gateway:
             return draft.useDHCP ? .none : NetConfigValidator.gateway(draft.gateway, ip: draft.ipAddress, mask: draft.subnetMask)
         case .dnsServer:
-            return NetConfigValidator.dnsServer(draft.dnsServer)
+            return dnsServerIssue
         case .hostname:
-            return NetConfigValidator.hostname(draft.hostname)
+            return hostnameIssue
         case .ssid:
-            return hasWLAN ? NetConfigValidator.ssid(draft.wlanSSID, enabled: draft.wlanEnabled) : .none
+            guard hasWLAN else { return .none }
+            // Eine geänderte SSID wird auch bei ausgeschaltetem WLAN übertragen – zu lang lehnt sie die Bibliothek ab.
+            if !draft.wlanEnabled && draft.wlanSSID != initial.wlanSSID && draft.wlanSSID.utf8.count > 32 {
+                return .error(tr("Höchstens 32 Byte."))
+            }
+            return NetConfigValidator.ssid(draft.wlanSSID, enabled: draft.wlanEnabled)
         case .passphrase:
             let securityChanged = draft.wlanSecurity != initial.wlanSecurity
             let required = securityChanged || draft.wlanSSID != initial.wlanSSID || (draft.wlanEnabled && !initial.wlanEnabled)
@@ -573,6 +641,28 @@ final class NetConfigEditor {
             guard hasBluetooth, originalBluetooth != nil, draft.bluetoothName != initial.bluetoothName else { return .none }
             return NetConfigValidator.bluetoothName(draft.bluetoothName)
         }
+    }
+
+    // Geprüft wird, was übertragen würde: Unveränderte, vom Drucker gelesene Werte werden nicht gesendet
+    // (siehe `NetConfigDraft.applying`) und sperren das Übernehmen daher nie.
+
+    private var dnsServerIssue: NetConfigIssue {
+        let issue = NetConfigValidator.dnsServer(draft.dnsServer)
+        guard draft.dnsChanged(from: initial) else { return issue.isError ? .none : issue }
+        let entries = NetConfigIPv4.listEntries(draft.dnsServer)
+        // Die Bibliothek schreibt keine leeren Werte – Löschen würde nur scheinbar gelingen.
+        if entries.isEmpty { return .error(tr("Der DNS-Server kann hier nicht gelöscht werden – eine Adresse eingeben.")) }
+        if entries.count > 1 && !issue.isError { return .error(tr("Hier lässt sich nur ein DNS-Server eintragen.")) }
+        return issue
+    }
+
+    private var hostnameIssue: NetConfigIssue {
+        let issue = NetConfigValidator.hostname(draft.hostname)
+        guard draft.hostnameChanged(from: initial) else { return issue.isError ? .none : issue }
+        if draft.hostname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .error(tr("Der Hostname kann hier nicht gelöscht werden – einen Namen eingeben."))
+        }
+        return issue
     }
 
     func invalidFields(hasBluetooth: Bool, hasWLAN: Bool) -> [NetConfigField] {
@@ -601,30 +691,46 @@ final class NetConfigEditor {
         // gelesen werden – sonst würden spätere Eingaben als „übertragen“ markiert, ohne gesendet zu sein.
         let submitted = draft
         let baseline = initial
-        let restart = submitted.networkDiffers(from: baseline) || !submitted.wlanPassphrase.isEmpty
+        let restart = submitted.networkDiffers(from: baseline)
         withAnimation(reduceMotion ? nil : Motion.spring) { isApplying = true }
         defer { withAnimation(reduceMotion ? nil : Motion.spring) { isApplying = false } }
 
-        var ok = true
+        // Übernommene Werte werden der neue Ausgangszustand (das Passwort wird nie gespeichert);
+        // nicht gesetzte Bluetooth-Werte bleiben als ausstehende Änderung stehen.
+        var accepted = submitted
+        accepted.wlanPassphrase = ""
+        var bluetoothOK = true
         if hasBluetooth, originalBluetooth != nil {
             if submitted.bluetoothName != baseline.bluetoothName {
                 let result = await session.setvar("bluetooth.friendly_name", submitted.bluetoothName)
-                ok = ok && result
+                if !result { accepted.bluetoothName = baseline.bluetoothName }
+                bluetoothOK = bluetoothOK && result
             }
             if submitted.bluetoothDiscoverable != baseline.bluetoothDiscoverable {
                 let result = await session.setvar("bluetooth.discoverable", submitted.bluetoothDiscoverable ? "on" : "off")
-                ok = ok && result
+                if !result { accepted.bluetoothDiscoverable = baseline.bluetoothDiscoverable }
+                bluetoothOK = bluetoothOK && result
             }
         }
 
         let target = submitted.applying(to: original, initial: baseline)
         if restart {
-            let result = await session.applyNetworkSettings(target)
-            ok = ok && result
-        } else if ok {
+            // Geplanter Neustart: Statusabfragen anhalten – sonst meldet die Überwachung den Drucker nach
+            // wenigen Fehlversuchen als ausgefallen (Hinweis, Mitteilung, Warnton).
+            session.stopMonitoring()
+            let applied = await session.applyNetworkSettings(target)
+            guard applied else {
+                session.startMonitoring()
+                return
+            }
+            // Die Verbindung endet mit dem Neustart: sauber trennen (wie beim Firmware-Update). Neu
+            // aufgebaut wird sie von der Wiederverbindung, beim Umstellen der Adresse oder beim Schließen der Karte.
+            await session.disconnect()
+        } else if bluetoothOK {
             model.toast(tr("Bluetooth-Einstellungen übernommen"), style: .success)
+        } else {
+            return
         }
-        guard ok else { return }
 
         var suggestedHost: String?
         var port: Int?
@@ -640,21 +746,14 @@ final class NetConfigEditor {
         withAnimation(reduceMotion ? nil : Motion.bouncy) {
             outcome = NetConfigOutcome(appliedAt: Date(), restartExpected: restart, suggestedHost: suggestedHost,
                                        port: port, switchedToDHCP: switchedToDHCP)
-            // Übernommene Werte sind der neue Ausgangszustand; das Passwort wird nie gespeichert.
-            var accepted = submitted
-            accepted.wlanPassphrase = ""
             initial = accepted
-            if draft == submitted {
-                draft = accepted
-            } else if draft.wlanPassphrase == submitted.wlanPassphrase {
-                // Neuere Eingaben bleiben als ausstehende Änderungen erhalten; das bereits
-                // gesendete Passwort aber nicht noch einmal anbieten.
-                draft.wlanPassphrase = ""
-            }
+            // Neuere Eingaben (und nicht gesetzte Bluetooth-Werte) bleiben als ausstehende Änderungen
+            // erhalten; das bereits gesendete Passwort aber nicht noch einmal anbieten.
+            if draft.wlanPassphrase == submitted.wlanPassphrase { draft.wlanPassphrase = "" }
             self.original = target
             if hasBluetooth, originalBluetooth != nil {
-                originalBluetooth = NetConfigBluetooth(friendlyName: submitted.bluetoothName,
-                                                       discoverable: submitted.bluetoothDiscoverable)
+                originalBluetooth = NetConfigBluetooth(friendlyName: accepted.bluetoothName,
+                                                       discoverable: accepted.bluetoothDiscoverable)
             }
         }
         // Bei DHCP zuerst die bisherige Adresse versuchen – oft bleibt die Zuweisung (Reservierung) gleich.
@@ -667,18 +766,24 @@ final class NetConfigEditor {
     func adoptSuggestedHost(session: PrinterSession, reduceMotion: Bool, wantsBluetooth: Bool) {
         guard var current = outcome, let host = current.suggestedHost else { return }
         let port = current.port ?? 9100
+        // Die neue Adresse verbindet sofort neu (`PrinterSession.saved`). Danach nur die restliche
+        // Neustartzeit abwarten und diese Verbindung nicht noch einmal abbauen.
         session.saved.descriptor = .tcp(host: host, port: port)
         current.hostUpdated = true
         withAnimation(reduceMotion ? nil : Motion.spring) { outcome = current }
-        scheduleReconnect(session: session, reduceMotion: reduceMotion, wantsBluetooth: wantsBluetooth)
+        let remaining = max(0, Self.restartDelay(for: session) - Date().timeIntervalSince(current.appliedAt))
+        scheduleReconnect(session: session, reduceMotion: reduceMotion, wantsBluetooth: wantsBluetooth,
+                          initialDelay: remaining, forceFresh: false)
     }
 
-    /// Wartet den Neustart ab und verbindet sich dann erneut (mehrere Versuche).
-    func scheduleReconnect(session: PrinterSession, reduceMotion: Bool, wantsBluetooth: Bool, initialDelay: Double? = nil) {
+    /// Wartet den Neustart ab und verbindet sich dann erneut (mehrere Versuche). Mit `forceFresh` baut der
+    /// erste Versuch die Verbindung in jedem Fall neu auf, sonst wird eine bestehende übernommen.
+    func scheduleReconnect(session: PrinterSession, reduceMotion: Bool, wantsBluetooth: Bool,
+                           initialDelay: Double? = nil, forceFresh: Bool = true) {
         reconnectTask?.cancel()
         reconnectGeneration += 1
         let generation = reconnectGeneration
-        let delay = initialDelay ?? (session.isVirtual ? 2 : 25)
+        let delay = initialDelay ?? Self.restartDelay(for: session)
         updateOutcome(reduceMotion: reduceMotion) { outcome in
             outcome.reconnecting = true
             outcome.reconnectFailed = false
@@ -701,8 +806,15 @@ final class NetConfigEditor {
             try? await Task.sleep(for: .seconds(delay))
             for attempt in 0..<6 {
                 guard !Task.isCancelled, let self else { return }
-                // Erster Versuch immer mit frischer Verbindung: Die alte endete mit dem Neustart.
-                if attempt == 0 || !session.connectionState.isConnected { await session.reconnect() }
+                if attempt == 0 && forceFresh {
+                    // Erster Versuch mit frischer Verbindung: Die alte endete mit dem Neustart.
+                    await session.reconnect()
+                } else if session.connectionState == .connecting {
+                    // Laufenden Verbindungsaufbau (z. B. nach dem Umstellen der Adresse) abwarten statt abbrechen.
+                    await session.connect()
+                } else if !session.connectionState.isConnected {
+                    await session.reconnect()
+                }
                 guard !Task.isCancelled else { return }
                 if session.connectionState.isConnected {
                     succeeded = true
@@ -744,14 +856,15 @@ final class NetConfigEditor {
         scheduleReconnect(session: session, reduceMotion: reduceMotion, wantsBluetooth: wantsBluetooth, initialDelay: 0)
     }
 
-    func dismissOutcome(reduceMotion: Bool) {
+    func dismissOutcome(session: PrinterSession, reduceMotion: Bool) {
+        let awaitingRestart = isAwaitingRestart
         reconnectTask?.cancel()
         reconnectTask = nil
         withAnimation(reduceMotion ? nil : Motion.spring) { outcome = nil }
-    }
-
-    func cancelBackgroundWork() {
-        reconnectTask?.cancel()
-        reconnectTask = nil
+        // Nach dem Übernehmen wurde getrennt. Ohne die eigene Wiederverbindung jetzt verbinden – scheitert
+        // das (Drucker startet noch oder hat eine neue Adresse), versucht es die Überwachung im Hintergrund weiter.
+        if awaitingRestart && session.connectionState == .disconnected {
+            Task { await session.connect() }
+        }
     }
 }

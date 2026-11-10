@@ -24,9 +24,15 @@ import LabelWerkKit
 //   ^HR            RFID-Kalibrierung; liefert eine Ergebnistabelle (start … end) an den Host
 //
 // Beispiele:
-//   EPC lesen (96 Bit):  ^XA ^RFR,H,1,2,1^FN2^FS^HV2,4,PCW:^FS ^RFR,H,2,12,1^FN1^FS^HV1,24,EPC:^FS ^XZ
-//   TID lesen (64 Bit):  ^XA ^RFR,H,0,8,2^FN1^FS^HV1,16,TID:^FS ^XZ
+//   EPC lesen (96 Bit):  ^XA ^RFR,H,1,2,1^FN2^FS^HV2,4,PCW-1:^FS ^RFR,H,2,12,1^FN1^FS^HV1,24,EPC-1:^FS ^XZ
+//   TID lesen (64 Bit):  ^XA ^RFR,H,0,8,2^FN1^FS^HV1,16,TID-2:^FS ^XZ
 //   EPC schreiben:       ^XA ^RS8 ^RFW,H,2,12,1^FD3074257BF7194E4000001A85^FS ^XZ
+//   … mit Prüfung:       zusätzlich ^RFR,H,2,12,1^FN1^FS^HV1,24,EPC#7:^FS (Kopf je Tag eindeutig)
+//
+// Jede ^HV-Antwort trägt einen Kopf mit laufender Nummer („EPC-12:“ beim Lesen, „EPC#7:“ beim
+// Kodieren mit Prüfung). Antworten, die erst nach Ablauf der Wartezeit eintreffen (Drucker angehalten,
+// Papier leer, VOID-Wiederholungen), lassen sich so ihrem Auftrag zuordnen, statt als Antwort des
+// nächsten zu gelten.
 
 // MARK: - Speicherbänke
 
@@ -95,7 +101,8 @@ enum RFIDMemoryBank: Int, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// Kopf, den `^HV` der Antwort voranstellt (bewusst ohne gemeinsame Teilzeichenfolgen).
+    /// Grundform des Kopfs, den `^HV` der Antwort voranstellt (bewusst ohne gemeinsame
+    /// Teilzeichenfolgen); gesendet wird er mit Auftragsnummer (``RFIDCommand/header(_:request:)``).
     var responseHeader: String {
         switch self {
         case .reserved: return "RSV:"
@@ -154,18 +161,43 @@ enum RFIDCommand {
             + "^FN\(field)^FS^HV\(field),\(hexLength),\(header)^FS"
     }
 
+    /// Kopf einer Leseantwort mit Auftragsnummer: aus „EPC:“ wird „EPC-12:“. Eine verspätete Antwort
+    /// eines früheren Lesevorgangs gilt so nie als Ergebnis des aktuellen.
+    static func header(_ base: String, request: Int) -> String {
+        let stem = base.hasSuffix(":") ? String(base.dropLast()) : base
+        return "\(stem)-\(request):"
+    }
+
+    /// Präfix der Prüfantwort beim Kodieren, siehe ``verifyHeader(number:)``.
+    static let verifyHeaderPrefix = "EPC#"
+
+    /// Kopf der ^HV-Prüfantwort beim Kodieren (`EPC#7:`) – je Tag eindeutig, damit sich eine verspätete
+    /// Antwort ihrem Tag zuordnen lässt statt dem nächsten.
+    static func verifyHeader(number: Int) -> String {
+        "\(verifyHeaderPrefix)\(number):"
+    }
+
     /// Vollständiges Leseformat. Für die EPC-Bank wird zusätzlich das PC-Wort gelesen, um die
-    /// vom Tag gemeldete EPC-Länge anzuzeigen.
-    static func readFormat(bank: RFIDMemoryBank, byteCount: Int, includePCWord: Bool) -> String {
+    /// vom Tag gemeldete EPC-Länge anzuzeigen. `request` nummeriert die Antwortköpfe
+    /// (``header(_:request:)``).
+    static func readFormat(bank: RFIDMemoryBank, byteCount: Int, includePCWord: Bool, request: Int) -> String {
         var lines = ["^XA"]
         if bank == .epc && includePCWord {
-            lines.append(readField(bank: .epc, startWord: 1, byteCount: 2, field: 2, header: pcHeader))
+            lines.append(readField(bank: .epc, startWord: 1, byteCount: 2, field: 2,
+                                   header: header(pcHeader, request: request)))
         }
         lines.append(readField(bank: bank, startWord: bank.startWord, byteCount: byteCount, field: 1,
-                               header: bank.responseHeader))
+                               header: header(bank.responseHeader, request: request)))
         lines.append("^XZ")
         return lines.joined(separator: "\n") + "\n"
     }
+}
+
+/// Eine Prüfantwort beim Kodieren: laufende Nummer aus dem Kopf und zurückgelesener EPC
+/// (`nil` = Kopf ohne Daten).
+struct RFIDVerification: Equatable {
+    let number: Int
+    let hex: String?
 }
 
 // MARK: - Antworten
@@ -209,8 +241,49 @@ enum RFIDResponseParser {
     static func hexValue(in text: String, header: String, expectedDigits: Int) -> String? {
         guard expectedDigits > 0,
               let range = text.range(of: header, options: [.caseInsensitive]) else { return nil }
+        return leadingHex(text[range.upperBound...], expectedDigits: expectedDigits)
+    }
+
+    /// Alle Prüfantworten (`EPC#<nr>:<hex>`, siehe ``RFIDCommand/verifyHeader(number:)``) in der
+    /// Reihenfolge des Eintreffens.
+    ///
+    /// Die Daten einer Antwort enden spätestens am nächsten Kopf bzw. nach `expectedDigits` Ziffern.
+    /// Mehrere Antworten zu derselben Nummer (Wiederholung nach VOID) bleiben erhalten – die letzte
+    /// ist die aktuelle.
+    static func verifications(in text: String, expectedDigits: Int) -> [RFIDVerification] {
+        var heads: [(number: Int, start: String.Index, dataStart: String.Index)] = []
+        var cursor = text.startIndex
+        while cursor < text.endIndex,
+              let found = text.range(of: RFIDCommand.verifyHeaderPrefix, options: [.caseInsensitive],
+                                     range: cursor..<text.endIndex) {
+            var index = found.upperBound
+            var digits = ""
+            while index < text.endIndex, text[index].isASCII, text[index].isNumber {
+                digits.append(text[index])
+                index = text.index(after: index)
+            }
+            if !digits.isEmpty, index < text.endIndex, text[index] == ":", let number = Int(digits) {
+                let dataStart = text.index(after: index)
+                heads.append((number, found.lowerBound, dataStart))
+                cursor = dataStart
+            } else {
+                cursor = found.upperBound
+            }
+        }
+        return heads.indices.map { position in
+            let head = heads[position]
+            let end = position + 1 < heads.count ? heads[position + 1].start : text.endIndex
+            return RFIDVerification(number: head.number,
+                                    hex: leadingHex(text[head.dataStart..<end], expectedDigits: expectedDigits))
+        }
+    }
+
+    /// Hex-Ziffern am Anfang von `text` (führender Leerraum wird übersprungen), höchstens
+    /// `expectedDigits`, in Großbuchstaben; `nil`, wenn keine folgen.
+    private static func leadingHex(_ text: Substring, expectedDigits: Int) -> String? {
+        guard expectedDigits > 0 else { return nil }
         var digits = ""
-        for character in text[range.upperBound...] {
+        for character in text {
             if digits.count >= expectedDigits { break }
             if RFIDHex.isHexDigit(character) {
                 digits.append(character)
@@ -1133,9 +1206,10 @@ enum RFIDEncoder {
         return commands
     }
 
-    /// Vollständiges Kodierformat für einen Tag.
+    /// Vollständiges Kodierformat für einen Tag. `reply` nummeriert den Kopf der Prüfantwort
+    /// (``RFIDCommand/verifyHeader(number:)``, Standard: `number`).
     static func encodeFormat(epc: String, number: Int, options: RFIDWriteOptions,
-                             geometry: RFIDLabelGeometry) -> String {
+                             geometry: RFIDLabelGeometry, reply: Int? = nil) -> String {
         let byteCount = epc.count / 2
         var out = "^XA\n" + RFIDCommand.tagTypeGen2 + "\n"
         if options.retries > 0 {
@@ -1148,7 +1222,7 @@ enum RFIDEncoder {
         out += RFIDCommand.rf(operation: "W", startWord: 2, byteCount: byteCount, bank: .epc) + "^FD" + epc + "^FS\n"
         if options.verify {
             out += RFIDCommand.readField(bank: .epc, startWord: 2, byteCount: byteCount, field: 1,
-                                         header: RFIDMemoryBank.epc.responseHeader) + "\n"
+                                         header: RFIDCommand.verifyHeader(number: reply ?? number)) + "\n"
         }
         if options.print.enabled {
             out += ZPL.render(printCommands(epc: epc, number: number, options: options.print, geometry: geometry))

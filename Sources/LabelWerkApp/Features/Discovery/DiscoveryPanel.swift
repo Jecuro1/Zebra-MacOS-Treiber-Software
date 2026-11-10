@@ -54,6 +54,8 @@ struct DiscoveryPanel: View {
     @State private var controller = DiscoveryController()
     @State private var highlightedID: String?
     @State private var highlightToken = 0
+    /// Nicht als Zebra erkanntes Netzwerkgerät, das erst nach Rückfrage hinzugefügt wird.
+    @State private var pendingUnidentified: DiscoveredPrinter?
 
     init(style: DiscoveryPanelStyle,
          initialTab: DiscoveryPanelTab = .search,
@@ -108,6 +110,17 @@ struct DiscoveryPanel: View {
             }
         }
         .onDisappear { controller.stop() }
+        .confirmationDialog(
+            tr("„%@“ wurde nicht als Zebra-Drucker erkannt", pendingUnidentified?.name ?? ""),
+            isPresented: Binding(get: { pendingUnidentified != nil }, set: { if !$0 { pendingUnidentified = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingUnidentified
+        ) { printer in
+            Button(tr("Trotzdem hinzufügen")) { add(printer, confirmed: true) }
+            Button(tr("Abbrechen"), role: .cancel) {}
+        } message: { _ in
+            Text(DiscoveryMatcher.unidentifiedWarning)
+        }
     }
 
     @ViewBuilder
@@ -478,13 +491,19 @@ struct DiscoveryPanel: View {
         )
     }
 
-    private func add(_ printer: DiscoveredPrinter) {
+    private func add(_ printer: DiscoveredPrinter, confirmed: Bool = false) {
         // `AppModel.addPrinter(from:)` vergleicht exakt; hier zählt dasselbe Gerät (keine Dubletten).
         if let existing = existingSession(for: printer) {
             if style == .page {
                 model.toast(tr("Bereits eingerichtet"), message: existing.displayName, style: .info)
             }
             highlight(printer.id, proxy: scrollProxy)
+            return
+        }
+        // Hinzufügen verbindet sofort und fragt den Status ab (`~HI`, `~HS` …). Ein nicht als Zebra
+        // erkanntes Gerät könnte ein Bürodrucker sein, der das als Seiten ausdruckt – erst nachfragen.
+        if !confirmed && DiscoveryMatcher.isUnidentified(printer) {
+            pendingUnidentified = printer
             return
         }
         let previousSelection = model.selection

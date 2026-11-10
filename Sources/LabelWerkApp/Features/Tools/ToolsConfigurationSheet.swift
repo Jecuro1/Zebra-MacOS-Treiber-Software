@@ -9,8 +9,8 @@ private struct ConfigurationRow: Identifiable, Hashable {
     let value: String
 }
 
-/// Druckerkonfiguration (`^HH`) als durchsuchbare Liste mit Kopieren und Textexport –
-/// der Inhalt des Konfigurationsetiketts, ohne Etiketten zu verbrauchen.
+/// Druckerkonfiguration (`^HH` bei ZPL, `UQ` bei EPL, SGD bei CPCL) als durchsuchbare Liste mit
+/// Kopieren und Textexport – der Inhalt des Konfigurationsetiketts, ohne Etiketten zu verbrauchen.
 struct ToolsConfigurationSheet: View {
     let session: PrinterSession
 
@@ -204,6 +204,12 @@ struct ToolsConfigurationSheet: View {
         let entries = await session.configuration()
         let newRows = entries.enumerated().map { offset, entry in
             ConfigurationRow(id: offset, name: entry.name, value: entry.value)
+        }
+        // „Neu lesen“ fehlgeschlagen (die Fehlermeldung zeigt `PrinterSession` bereits an):
+        // den zuletzt gelesenen Stand samt Uhrzeit behalten statt ihn zu verwerfen.
+        if newRows.isEmpty && !rows.isEmpty {
+            withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) { isLoading = false }
+            return
         }
         revealed = false
         withAnimation(Motion.animation(Motion.spring, reduceMotion: reduceMotion)) {

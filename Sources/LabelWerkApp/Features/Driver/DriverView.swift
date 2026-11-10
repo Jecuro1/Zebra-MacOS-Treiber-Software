@@ -15,6 +15,8 @@ struct DriverView: View {
     @State private var busyQueues: Set<String> = []
     @State private var busyPrinters: Set<UUID> = []
     @State private var queueToRemove: DriverQueueItem?
+    @State private var pendingDowngrade: DriverDowngrade?
+    @State private var queueLoadGeneration = 0
     @State private var confirmUninstall = false
     @State private var flowActive = false
     @State private var flowToken = 0
@@ -125,7 +127,26 @@ struct DriverView: View {
             Button(tr("Entfernen"), role: .destructive) { removeQueue(item) }
             Button(tr("Abbrechen"), role: .cancel) {}
         } message: { item in
-            Text(tr("„%@“ wird aus macOS entfernt und steht in Programmen nicht mehr zur Verfügung. Der Drucker bleibt in LabelWerk erhalten.", item.info.name))
+            if let session = model.sessions.first(where: { $0.saved.descriptor == .cupsQueue(name: item.info.name) }) {
+                Text(tr("„%@“ wird aus macOS entfernt. Der LabelWerk-Drucker „%@“ druckt über diese Warteschlange und kann danach auch in LabelWerk nicht mehr drucken, bis er neu hinzugefügt wird.",
+                        item.info.name, session.displayName))
+            } else {
+                Text(tr("„%@“ wird aus macOS entfernt und steht in Programmen nicht mehr zur Verfügung. Der Drucker bleibt in LabelWerk erhalten.", item.info.name))
+            }
+        }
+        .confirmationDialog(
+            tr("Ältere Treiberversion installieren?"),
+            isPresented: Binding(get: { pendingDowngrade != nil }, set: { if !$0 { pendingDowngrade = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingDowngrade
+        ) { downgrade in
+            Button(tr("Version %@ installieren", downgrade.bundled), role: .destructive) {
+                Task { await installer.install(allowDowngrade: true) }
+            }
+            Button(tr("Abbrechen"), role: .cancel) {}
+        } message: { downgrade in
+            Text(tr("Installiert ist %@ – neuer als die Version %@ dieser App. Der neuere Treiber wird dabei ersetzt; Modelle und Verbesserungen, die erst mit %@ kamen, fehlen danach. Besser ist es, LabelWerk zu aktualisieren.",
+                    downgrade.installed, downgrade.bundled, downgrade.installed))
         }
     }
 
@@ -232,7 +253,7 @@ struct DriverView: View {
                 .buttonStyle(.labelWerkPrimary)
                 .controlSize(.large)
                 .disabled(!installer.hasPayload || installer.isBusy)
-            case .current, .newerInstalled:
+            case .current:
                 Button {
                     Task { await installer.install() }
                 } label: {
@@ -241,6 +262,16 @@ struct DriverView: View {
                 .buttonStyle(.labelWerkSecondary)
                 .disabled(!installer.hasPayload || installer.isBusy)
                 .help(tr("Repariert Rechte und Dateien des Treibers"))
+            case .newerInstalled(let installed, let bundled):
+                // Erneut installieren hieße hier: auf die ältere Version dieser App zurückgehen.
+                Button {
+                    pendingDowngrade = DriverDowngrade(installed: installed, bundled: bundled)
+                } label: {
+                    Label(tr("Version %@ installieren …", bundled), systemImage: "arrow.uturn.backward.circle")
+                }
+                .buttonStyle(.labelWerkSecondary)
+                .disabled(!installer.hasPayload || installer.isBusy)
+                .help(tr("Ersetzt den neueren Treiber %@ durch die ältere Version %@ aus dieser App", installed, bundled))
             }
             if installer.isInstalled {
                 Button {
@@ -525,7 +556,7 @@ struct DriverView: View {
     }
 
     private var setupSection: some View {
-        let existing = Set(queues.map(\.info.name))
+        let existing: Set<String>? = queuesLoaded ? Set(queues.map(\.info.name)) : nil
         return GlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(tr("LabelWerk-Drucker ohne Warteschlange"),
@@ -697,6 +728,10 @@ struct DriverView: View {
     }
 
     private func loadQueues() async {
+        // Mehrere Ladevorgänge können sich überholen (z. B. nach zwei kurz aufeinander folgenden
+        // Aktionen): Nur der zuletzt gestartete übernimmt sein Ergebnis und beendet die Ladeanzeige.
+        queueLoadGeneration += 1
+        let generation = queueLoadGeneration
         isLoadingQueues = true
         async let stateMap = DriverQueueStatusReader.states()
         // Warteschlangen nur einmal lesen (`lpstat`/`lpoptions`) und daraus die LabelWerk-Kennzeichnung ableiten.
@@ -710,6 +745,7 @@ struct DriverView: View {
                 if lhs.info.isDefault != rhs.info.isDefault { return lhs.info.isDefault }
                 return lhs.info.name.localizedStandardCompare(rhs.info.name) == .orderedAscending
             }
+        guard generation == queueLoadGeneration else { return }
         withAnimation(Motion.animation(Motion.spring, reduceMotion: reduceMotion)) {
             queues = items
             queuesLoaded = true
@@ -828,12 +864,16 @@ struct DriverView: View {
 
     private func setUpQueue(for session: PrinterSession) {
         let saved = session.saved
-        let existing = Set(queues.map(\.info.name))
-        // Gleichnamige Warteschlange eines anderen Druckers nicht überschreiben.
+        let names = queues.map(\.info.name)
+        // CUPS unterscheidet bei Warteschlangennamen nicht zwischen Groß- und Kleinschreibung
+        // („Lager“ = „lager“): `lpadmin -p` würde sonst die Warteschlange eines anderen Druckers umschreiben.
+        let taken = Set(names.map { $0.lowercased() })
         var queueName = CUPSService.sanitizedQueueName(saved.name)
-        if existing.contains(queueName) && saved.cupsQueueName != queueName {
+        // Eine vorhandene Warteschlange nur weiterverwenden, wenn sie genau die eigene ist.
+        let isOwnQueue = saved.cupsQueueName == queueName && names.contains(queueName)
+        if taken.contains(queueName.lowercased()) && !isOwnQueue {
             var index = 2
-            while existing.contains("\(queueName)_\(index)") { index += 1 }
+            while taken.contains("\(queueName)_\(index)".lowercased()) { index += 1 }
             queueName = "\(queueName)_\(index)"
         }
         let requestedName = queueName
@@ -885,6 +925,12 @@ struct DriverView: View {
             NSWorkspace.shared.open(url)
         }
     }
+}
+
+/// Rückfrage vor dem Installieren der älteren Treiberversion aus dem App-Paket.
+private struct DriverDowngrade: Equatable {
+    let installed: String
+    let bundled: String
 }
 
 /// Werte einer Warteschlange für „Alle synchronisieren“.

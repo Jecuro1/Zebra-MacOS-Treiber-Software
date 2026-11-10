@@ -180,8 +180,8 @@ enum Commands {
         let job = try ImageJob(context: context, identity: nil)
         let images = try job.loadImages(context.arguments.arguments)
         let encoder = JobEncoder(language: context.language, resolution: job.resolution, settings: job.settings,
-                                 stock: job.stock, maxPrintWidthDots: job.model?.printWidthDots(job.resolution))
-        let data = try encoder.encode(images: images, copies: job.copies, collate: true)
+                                 stock: job.stock, maxPrintWidthDots: job.maxPrintWidthDots)
+        let data = try encoder.encode(images: images, copies: job.copies, collate: !context.arguments.has("no-collate"))
         if let output = context.arguments.value("output"), output != "-" {
             try Files.write(data, to: output)
             Console.err("\(output): \(data.count) Byte \(context.language.displayName), \(images.count) Etikett(en) "
@@ -325,6 +325,10 @@ struct ImageJob {
     let fit: ImageLayout.FitMode
     let rotation: ImageLayout.Rotation
     let copies: Int
+    /// `--no-layout`: Bilder unverändert übernehmen (keine Drehung, kein Einpassen).
+    let keepsImageSize: Bool
+    /// Druckbreite in Punkten (`--max-width`, sonst die des Modells); `nil` = unbegrenzt.
+    let maxPrintWidthDots: Int?
 
     init(context: Context, identity: PrinterIdentity?) throws {
         let arguments = context.arguments
@@ -347,6 +351,19 @@ struct ImageJob {
         settings.negative = arguments.has("negative")
         settings.mirror = arguments.has("mirror")
         settings.rotate180 = arguments.has("rotate180")
+        settings.mediaType = try Self.choice(arguments, "media-type") { (value: MediaType) in value.cupsValue }
+        settings.tracking = try Self.choice(arguments, "tracking") { (value: MediaTracking) in value.cupsValue }
+        settings.printMode = try Self.choice(arguments, "print-mode") { (value: PrintMode) in value.cupsValue }
+        settings.labelTop = try arguments.int("label-top", in: -120...120)
+        settings.labelLeft = try arguments.int("label-left", in: -9999...9999)
+        settings.tearOffAdjust = try arguments.int("tear-off", in: -120...120)
+        settings.backfeed = try Self.choice(arguments, "backfeed") { (value: BackfeedMode) in value.cupsValue }
+        settings.cutEvery = try arguments.int("cut-every", in: 0...9999) ?? 0
+        settings.calibrateBeforeJob = arguments.has("calibrate")
+        settings.saveToPrinter = arguments.has("save-settings")
+        settings.skipBlankLabels = arguments.has("skip-blank")
+        settings.startCommands = arguments.value("start-commands") ?? ""
+        settings.endCommands = arguments.value("end-commands") ?? ""
         self.settings = settings
 
         if let id = arguments.value("model") {
@@ -391,6 +408,34 @@ struct ImageJob {
             rotation = .fixed(.r0)
         }
         copies = try arguments.int("copies", in: 1...99_999) ?? 1
+        keepsImageSize = arguments.has("no-layout")
+        if keepsImageSize, arguments.value("fit") != nil || arguments.value("rotate") != nil {
+            throw CLIError.usage("„--no-layout“ übernimmt die Bilder unverändert und schließt „--fit“ und „--rotate“ aus.")
+        }
+        if let width = try arguments.int("max-width", in: 1...100_000) {
+            maxPrintWidthDots = width
+        } else {
+            maxPrintWidthDots = model?.printWidthDots(resolution)
+        }
+    }
+
+    /// Liest einen Aufzählungswert: Name wie in der Hilfe (`thermalTransfer`), CUPS-Wert
+    /// (`ThermalTransfer`) oder Bezeichner (`afterPrinting`) – ohne Beachtung von Groß-/Kleinschreibung,
+    /// Binde- und Unterstrichen.
+    static func choice<Value: CaseIterable & RawRepresentable>(
+        _ arguments: ParsedArguments, _ name: String, cupsValue: (Value) -> String
+    ) throws -> Value? where Value.RawValue == String {
+        guard let raw = arguments.value(name) else { return nil }
+        func normalized(_ text: String) -> String {
+            text.trimmingCharacters(in: .whitespaces).lowercased()
+                .replacingOccurrences(of: "-", with: "").replacingOccurrences(of: "_", with: "")
+        }
+        let key = normalized(raw)
+        if let match = Value.allCases.first(where: { normalized($0.rawValue) == key || normalized(cupsValue($0)) == key }) {
+            return match
+        }
+        let allowed = Value.allCases.map { cupsValue($0) }.joined(separator: ", ")
+        throw CLIError.usage("Unbekannter Wert „\(raw)“ für „--\(name)“ (erlaubt: \(allowed)).")
     }
 
     static func dither(_ raw: String) -> DitherAlgorithm? {
@@ -405,12 +450,14 @@ struct ImageJob {
         }
     }
 
-    /// Lädt, dreht und passt alle Bilder ein.
+    /// Lädt, dreht und passt alle Bilder ein (mit `--no-layout`: lädt sie unverändert; zu breite
+    /// Bilder schneidet dann erst der `JobEncoder` nach der Rasterung ab – wie der CUPS-Filter).
     func loadImages(_ paths: [String]) throws -> [GrayImage] {
         try paths.map { path in
             let image = try Files.image(path)
+            if keepsImageSize { return image }
             return ImageLayout.layout(image, for: stock, resolution: resolution, mode: fit, rotation: rotation,
-                                      maxPrintWidthDots: model?.printWidthDots(resolution))
+                                      maxPrintWidthDots: maxPrintWidthDots)
         }
     }
 }
