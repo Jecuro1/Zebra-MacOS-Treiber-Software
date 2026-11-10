@@ -51,12 +51,11 @@ public enum MediaType: String, Codable, CaseIterable, Sendable, Identifiable {
 
     public var cupsValue: String { self == .directThermal ? "DirectThermal" : "ThermalTransfer" }
 
+    /// Umkehrung von ``cupsValue`` – wie der C-Filter ohne Beachtung der Groß-/Kleinschreibung
+    /// (ASCII) und ohne Leerraum am Rand.
     public init?(cupsValue: String) {
-        switch cupsValue {
-        case "DirectThermal": self = .directThermal
-        case "ThermalTransfer": self = .thermalTransfer
-        default: return nil
-        }
+        guard let match = CUPSValueMatching.first(of: MediaType.self, cupsValue, \.cupsValue) else { return nil }
+        self = match
     }
 
     /// Deutsche Bezeichnung wie im Windows-Treiber („Druckmodus“).
@@ -103,15 +102,11 @@ public enum MediaTracking: String, Codable, CaseIterable, Sendable, Identifiable
         }
     }
 
+    /// Umkehrung von ``cupsValue`` – wie der C-Filter ohne Beachtung der Groß-/Kleinschreibung
+    /// (ASCII) und ohne Leerraum am Rand.
     public init?(cupsValue: String) {
-        switch cupsValue {
-        case "Gap": self = .gap
-        case "BlackMark": self = .blackMark
-        case "Continuous": self = .continuous
-        case "Auto": self = .autoDetect
-        case "Notch": self = .notch
-        default: return nil
-        }
+        guard let match = CUPSValueMatching.first(of: MediaTracking.self, cupsValue, \.cupsValue) else { return nil }
+        self = match
     }
 
     /// Deutsche Bezeichnung wie im Windows-Treiber („Medientyp“).
@@ -268,8 +263,9 @@ public enum PrintMode: String, Codable, CaseIterable, Sendable, Identifiable {
         }
     }
 
+    /// Umkehrung von ``cupsValue`` (ASCII ohne Groß-/Kleinschreibung, Leerraum am Rand egal).
     public init?(cupsValue: String) {
-        guard let match = PrintMode.allCases.first(where: { $0.cupsValue == cupsValue }) else { return nil }
+        guard let match = CUPSValueMatching.first(of: PrintMode.self, cupsValue, \.cupsValue) else { return nil }
         self = match
     }
 
@@ -331,8 +327,9 @@ public enum DitherAlgorithm: String, Codable, CaseIterable, Sendable, Identifiab
         }
     }
 
+    /// Umkehrung von ``cupsValue`` (ASCII ohne Groß-/Kleinschreibung, Leerraum am Rand egal).
     public init?(cupsValue: String) {
-        guard let match = DitherAlgorithm.allCases.first(where: { $0.cupsValue == cupsValue }) else { return nil }
+        guard let match = CUPSValueMatching.first(of: DitherAlgorithm.self, cupsValue, \.cupsValue) else { return nil }
         self = match
     }
 
@@ -420,8 +417,9 @@ public enum BackfeedMode: String, Codable, CaseIterable, Sendable, Identifiable 
         }
     }
 
+    /// Umkehrung von ``cupsValue`` (ASCII ohne Groß-/Kleinschreibung, Leerraum am Rand egal).
     public init?(cupsValue: String) {
-        guard let match = BackfeedMode.allCases.first(where: { $0.cupsValue == cupsValue }) else { return nil }
+        guard let match = CUPSValueMatching.first(of: BackfeedMode.self, cupsValue, \.cupsValue) else { return nil }
         self = match
     }
 
@@ -456,10 +454,16 @@ public enum PrintRotation: Int, Codable, CaseIterable, Sendable, Identifiable {
     /// Wert der CUPS-Option `lwRotation`.
     public var cupsValue: String { String(rawValue) }
 
+    /// Genau `0`, `90`, `180` oder `270` (Leerraum am Rand egal) – wie der C-Filter; `+90`, `090`
+    /// oder `Default` gelten nicht.
     public init?(cupsValue: String) {
-        guard let degrees = Int(cupsValue.trimmingCharacters(in: .whitespaces)),
-              let match = PrintRotation(rawValue: degrees) else { return nil }
-        self = match
+        switch CUPSValueMatching.trimmed(cupsValue) {
+        case "0": self = .r0
+        case "90": self = .r90
+        case "180": self = .r180
+        case "270": self = .r270
+        default: return nil
+        }
     }
 
     /// `true` bei 90° und 270° (Hoch- und Querformat tauschen).
@@ -498,8 +502,9 @@ public enum RTCUpdate: String, Codable, CaseIterable, Sendable, Identifiable {
         }
     }
 
+    /// Umkehrung von ``cupsValue`` (ASCII ohne Groß-/Kleinschreibung, Leerraum am Rand egal).
     public init?(cupsValue: String) {
-        guard let match = RTCUpdate.allCases.first(where: { $0.cupsValue == cupsValue }) else { return nil }
+        guard let match = CUPSValueMatching.first(of: RTCUpdate.self, cupsValue, \.cupsValue) else { return nil }
         self = match
     }
 
@@ -559,8 +564,9 @@ public enum MediaFeedAction: String, Codable, CaseIterable, Sendable, Identifiab
         }
     }
 
+    /// Umkehrung von ``cupsValue`` (ASCII ohne Groß-/Kleinschreibung, Leerraum am Rand egal).
     public init?(cupsValue: String) {
-        guard let match = MediaFeedAction.allCases.first(where: { $0.cupsValue == cupsValue }) else { return nil }
+        guard let match = CUPSValueMatching.first(of: MediaFeedAction.self, cupsValue, \.cupsValue) else { return nil }
         self = match
     }
 
@@ -749,4 +755,42 @@ public enum PrinterFeature: String, Codable, CaseIterable, Sendable {
     case linerless
     /// Batteriebetrieb.
     case battery
+}
+
+// MARK: - CUPS-Werte lesen
+
+/// Vergleich von CUPS-Optionswerten wie im C-Filter (`lw_str_ieq`, `lw_is_space`) und in der
+/// Python-Referenz: Leerraum ` \t\r\n\v\f` am Rand zählt nicht, Groß-/Kleinschreibung nur für
+/// ASCII-Buchstaben.
+enum CUPSValueMatching {
+    /// Leerraum wie `lw_is_space` im C-Filter.
+    static let space = CharacterSet(charactersIn: " \t\r\n\u{0B}\u{0C}")
+
+    static func trimmed(_ value: String) -> String {
+        value.trimmingCharacters(in: space)
+    }
+
+    /// Nur `A`…`Z` → `a`…`z` (wie `ascii_lower` im C-Filter).
+    static func asciiLowercased(_ value: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in value.unicodeScalars {
+            if scalar.value >= 0x41, scalar.value <= 0x5A, let lower = Unicode.Scalar(scalar.value + 0x20) {
+                scalars.append(lower)
+            } else {
+                scalars.append(scalar)
+            }
+        }
+        return String(scalars)
+    }
+
+    /// `true`, wenn `value` (ohne Leerraum am Rand) ASCII-unabhängig von der Schreibweise `expected` ist.
+    static func equals(_ value: String, _ expected: String) -> Bool {
+        asciiLowercased(trimmed(value)) == asciiLowercased(expected)
+    }
+
+    /// Erster Fall, dessen CUPS-Wert zu `value` passt.
+    static func first<T: CaseIterable>(of type: T.Type, _ value: String, _ cupsValue: (T) -> String) -> T? {
+        let key = asciiLowercased(trimmed(value))
+        return T.allCases.first { asciiLowercased(cupsValue($0)) == key }
+    }
 }

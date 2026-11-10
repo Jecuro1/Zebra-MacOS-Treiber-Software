@@ -293,8 +293,8 @@ struct JobEncoderDriverOptionsTests {
             powerUpAction: .noMotion, headCloseAction: .shortCalibration)
         let data = try Self.encoder(settings, time: 0, step: 1).encode(pages: [Self.pageA], copies: 1)
         Self.expectText(data, """
-        ^XA^FX,~^XZ
         #JA
+        ^XA^FX,~^XZ
         #SD08
         #TA-10
         #JSA

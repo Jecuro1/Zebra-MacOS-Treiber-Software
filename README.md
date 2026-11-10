@@ -21,14 +21,16 @@ druckt. Dazu kommen ein Kommandozeilenwerkzeug (`lwctl`) und ein virtueller Demo
 |---|---|---|
 | Drucken aus jeder App | ✔ Treiber | ✔ CUPS-Treiber (`rastertolabelwerk`), Universal Binary, 116 PPDs (69 Modelle × Auflösungen plus generische ZPL-, EPL- und CPCL-PPDs), automatische Treiberzuordnung per USB-Gerätekennung |
 | Druckersprachen | ZPL, EPL | **ZPL II, EPL2 und CPCL** (Mobildrucker) |
-| Schwärzung, Geschwindigkeit, Medientyp, Erkennung, Druckmodus, Rückzug | ✔ | ✔ inkl. „Druckerwert verwenden“, Live-Vorschau, „Dauerhaft speichern“ (`^JUS`) und Übernahme als macOS-Standard der Warteschlange |
-| Position (oben/links), Abreißkante | ✔ | ✔ mit animierter Etiketten-Skizze |
-| Spiegeln, Negativ, 180° | ✔ | ✔ mit 3D-Vorschau |
+| Dialog „Druckeinstellungen für ZD421 …“ | ✔ | ✔ **gleich aufgebaut, gleiche Begriffe:** Seitenleiste mit Seite einrichten, Druckoptionen, Bedienermodus, Grafik Optionen, Kundenspezifische Befehle, Wartung, Einheiten, Hilfe und Über; „Testseite drucken“; Stift-Menü je Wert (Treiberwert oder Druckerwert, dazu „Vom Drucker lesen“); „Druckvorschau“ mit Drucker und zwei Etiketten; OK, Abbrechen, Übernehmen, Hilfe. Gespeicherte Werte gelten auch als Standard der macOS-Warteschlange; im macOS-Druckdialog stehen dieselben Gruppen unter „Druckerfunktionen“ ([Gegenüberstellung](docs/INSTALLATION.md#druckeinstellungen-wie-unter-windows)) |
+| Seite einrichten | Vorlage, Breite/Höhe, Medientyp, Drehung, Markierung Versatz, Spiegeln, Invers, Bei letztem Element stoppen | ✔ alle Werte, inkl. „Etiketten mit Seitenkerben“, Drehung 0°/90°/180°/270° und Stoppversatz |
+| Druckoptionen | Geschwindigkeit (mm/s), Temperatur, Druckmodus, Versatz oben/links, Rückzug, Pausieren, Steuerzeichen, RTC aktualisieren, Aufträge vor dem Drucken abbrechen | ✔ alle mit denselben Werten (51 mm/s … Modellmaximum, Temperatur 1–30, Verzögerung 1000 ms); dazu Druckersprache, Kalibrieren vor dem Auftrag, Einstellungen im Drucker speichern (`^JUS`) |
+| Bedienermodus | Abreißen, Spendemodus, Abschneider, Verzögerter Abschneider, Aufwickeln, Linerless (5 Modi), Applikator; Versatz; Schneiden alle N Etiketten | ✔ alle Modi des Modells (+ Kiosk; Linerless per SGD `media.printmode`), Abreißversatz, Abschneider mit „Schneiden alle N Etiketten“ |
+| Wartung, Einheiten | Auf Standardeinstellungen zurücksetzen, Alle Einstellungen des Druckers verwenden, Medien kalibrieren, Echtzeituhr (RTC) synchronisieren; Millimeter/Zoll/Punkte | ✔ alles, dazu Werte vom Drucker lesen, an den Drucker senden, dauerhaft speichern, Aktion beim Einschalten/Schließen des Druckkopfs (`^MF`), Einstellungsprofile importieren/exportieren |
 | Rasterung | 3 Verfahren | **6 Verfahren** (Schwellenwert, Bayer, Halbton, Floyd–Steinberg, Atkinson, Stucki) mit Live-Vorschau |
 | Grafikkompression | – | **Z64 (Deflate), ACS, Hex** – bis zu 90 % kleinere Aufträge |
 | Kopien | Bild wird n-mal gesendet | **`^PQ`**: Bild einmal senden, Drucker vervielfältigt |
 | Etikettenformate | Stocks | 40+ Formate (inkl. DHL/DPD/GLS), eigene Formate, „vom Drucker übernehmen“ |
-| Eigene Befehle vor/nach dem Auftrag | ✔ | ✔ mit Syntaxhervorhebung |
+| Kundenspezifische Befehle | ✔ | ✔ am Auftragsbeginn/-ende **und** je Etikett, mit Syntaxhervorhebung und Bausteinen |
 | Werkzeuge: Kalibrieren, Konfigurationsetikett, Reset, Werkseinstellungen … | ✔ | ✔ + Kalibrier-Assistent, Halten-zum-Bestätigen, Testseite über den kompletten macOS-Druckweg |
 | Status | Statusfenster | **Live-Übersicht** mit animiertem Drucker, Meldungen mit Lösungsschritten, Kennzahlen, Verlauf, Menüleiste, Mitteilungen |
 | Kommunikation mit dem Drucker | Terminal | **Terminal** für ZPL, SGD und JSON mit Hervorhebung, Autovervollständigung, ZPL-Referenz (rund 200 Befehle), Hex-Ansicht, Dateiversand und Export |
@@ -54,8 +56,10 @@ Netzwerkschnittstelle):
 
 * **Übersicht** – animierter Drucker, Live-Status, Meldungen mit Lösungsschritten, Kennzahlen,
   Schnellaktionen, Identität, letzte Aufträge
-* **Druckeinstellungen** – alle Treiberoptionen mit Live-Vorschau; an den Drucker senden, dauerhaft
-  speichern oder als macOS-Standard der Warteschlange übernehmen
+* **Druckeinstellungen** – der Dialog „Druckeinstellungen für …“ wie im Windows-Treiber ZDesigner
+  (gleiche Bereiche, Begriffe und Werte, Stift-Menü je Wert, Druckvorschau, OK/Abbrechen/
+  Übernehmen/Hilfe); gespeicherte Werte gelten für LabelWerk und als Standard der
+  macOS-Warteschlange, außerdem an den Drucker senden oder dauerhaft speichern
 * **Etiketten** – eingelegtes Format, Katalog und eigene Formate, Maße vom Drucker übernehmen
 * **Werkzeuge** – Gerätebefehle, Kalibrier-Assistent, Konfiguration lesen und exportieren
   (`^HH`), SGD-Explorer, Testseite über macOS

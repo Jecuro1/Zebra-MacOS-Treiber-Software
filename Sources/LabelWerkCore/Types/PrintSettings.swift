@@ -322,44 +322,60 @@ extension PrintSettings {
     }
 
     /// Liest Einstellungen aus CUPS-Optionen. Unbekannte oder ungültige Werte werden ignoriert.
+    ///
+    /// Gelesen wird wie im C-Filter und in der Python-Referenz (ARCHITECTURE.md §9): Leerraum am
+    /// Rand zählt nicht, Aufzählungswerte und Wahrheitswerte ohne Beachtung der Groß-/Kleinschreibung,
+    /// Ganzzahlen optional mit `Custom.`-Präfix (PPD-Eigenwerte) und Vorzeichen, nur Ziffern.
     public init(cupsOptions o: [String: String]) {
         self.init()
+        /// Wert ohne Leerraum am Rand; leer → nicht gesetzt.
+        func text(_ key: String) -> String? {
+            guard let raw = o[key] else { return nil }
+            let value = CUPSValueMatching.trimmed(raw)
+            return value.isEmpty ? nil : value
+        }
         func int(_ key: String) -> Int? {
-            guard let v = o[key], v != CUPSOptionName.defaultValue else { return nil }
-            return Int(v.trimmingCharacters(in: .whitespaces))
+            guard var v = text(key), !CUPSValueMatching.equals(v, CUPSOptionName.defaultValue) else { return nil }
+            if CUPSValueMatching.asciiLowercased(String(v.prefix(7))) == "custom." { v = String(v.dropFirst(7)) }
+            // Wie lw_parse_int: optionales Vorzeichen, dann nur ASCII-Ziffern – genau das nimmt Int() an.
+            return Int(v)
         }
         func bool(_ key: String) -> Bool {
-            guard let v = o[key]?.lowercased() else { return false }
-            return ["true", "yes", "on", "1"].contains(v)
+            guard let v = text(key) else { return false }
+            return ["true", "yes", "on", "1"].contains(CUPSValueMatching.asciiLowercased(v))
+        }
+        func commands(_ key: String) -> String {
+            guard let v = text(key), !["default", "none"].contains(CUPSValueMatching.asciiLowercased(v)) else { return "" }
+            return CUPSCommandEncoding.decode(v) ?? ""
         }
         darkness = int(CUPSOptionName.darkness)
         speed = int(CUPSOptionName.speed)
-        mediaType = o[CUPSOptionName.mediaType].flatMap(MediaType.init(cupsValue:))
-        tracking = o[CUPSOptionName.tracking].flatMap(MediaTracking.init(cupsValue:))
-        printMode = o[CUPSOptionName.printMode].flatMap(PrintMode.init(cupsValue:))
+        mediaType = text(CUPSOptionName.mediaType).flatMap(MediaType.init(cupsValue:))
+        tracking = text(CUPSOptionName.tracking).flatMap(MediaTracking.init(cupsValue:))
+        printMode = text(CUPSOptionName.printMode).flatMap(PrintMode.init(cupsValue:))
         labelTop = int(CUPSOptionName.labelTop)
         labelLeft = int(CUPSOptionName.labelLeft)
         tearOffAdjust = int(CUPSOptionName.tearOff)
-        backfeed = o[CUPSOptionName.backfeed].flatMap(BackfeedMode.init(cupsValue:))
+        backfeed = text(CUPSOptionName.backfeed).flatMap(BackfeedMode.init(cupsValue:))
         mirror = bool(CUPSOptionName.mirror)
         negative = bool(CUPSOptionName.negative)
         rotate180 = bool(CUPSOptionName.rotate180)
-        dither = o[CUPSOptionName.dither].flatMap(DitherAlgorithm.init(cupsValue:)) ?? .threshold
+        dither = text(CUPSOptionName.dither).flatMap(DitherAlgorithm.init(cupsValue:)) ?? .threshold
         threshold = int(CUPSOptionName.threshold) ?? 128
-        compression = o[CUPSOptionName.compression].flatMap(GraphicCompression.init(cupsValue:)) ?? .z64
+        compression = text(CUPSOptionName.compression).flatMap(GraphicCompression.init(cupsValue:)) ?? .z64
         cutEvery = int(CUPSOptionName.cutEvery) ?? 0
         calibrateBeforeJob = bool(CUPSOptionName.calibrate)
         saveToPrinter = bool(CUPSOptionName.saveSettings)
         skipBlankLabels = bool(CUPSOptionName.skipBlank)
-        startCommands = o[CUPSOptionName.startCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
-        endCommands = o[CUPSOptionName.endCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
-        rotation = o[CUPSOptionName.rotation].flatMap(PrintRotation.init(cupsValue:)) ?? .r0
+        startCommands = commands(CUPSOptionName.startCommands)
+        endCommands = commands(CUPSOptionName.endCommands)
+        rotation = text(CUPSOptionName.rotation).flatMap(PrintRotation.init(cupsValue:)) ?? .r0
         markOffset = int(CUPSOptionName.markOffset)
         stopAtLastElement = bool(CUPSOptionName.stopAtLast)
         stopOffset = int(CUPSOptionName.stopOffset) ?? 0
         pauseEvery = int(CUPSOptionName.pauseEvery) ?? 0
-        if o[CUPSOptionName.controlChars]?.trimmingCharacters(in: .whitespaces).lowercased()
-            == CUPSOptionName.controlCharsPrinter.lowercased() {
+        if let chars = text(CUPSOptionName.controlChars),
+           CUPSValueMatching.equals(chars, CUPSOptionName.controlCharsPrinter) {
             // Dezimaler ASCII-Code 33…126; fehlend oder ungültig → Standardzeichen.
             func character(_ key: String, _ fallback: UInt8) -> UInt8 {
                 guard let value = int(key), let byte = UInt8(exactly: value),
@@ -370,13 +386,13 @@ extension PrintSettings {
                                                   controlPrefix: character(CUPSOptionName.controlPrefix, 0x7E),
                                                   delimiter: character(CUPSOptionName.delimiter, 0x2C))
         }
-        rtcUpdate = o[CUPSOptionName.rtc].flatMap(RTCUpdate.init(cupsValue:))
+        rtcUpdate = text(CUPSOptionName.rtc).flatMap(RTCUpdate.init(cupsValue:))
         cancelJobsBeforePrint = bool(CUPSOptionName.cancelBefore)
         cancelDelayMs = int(CUPSOptionName.cancelDelay) ?? 1000
-        labelStartCommands = o[CUPSOptionName.labelStartCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
-        labelEndCommands = o[CUPSOptionName.labelEndCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
-        powerUpAction = o[CUPSOptionName.powerUpAction].flatMap(MediaFeedAction.init(cupsValue:))
-        headCloseAction = o[CUPSOptionName.headCloseAction].flatMap(MediaFeedAction.init(cupsValue:))
+        labelStartCommands = commands(CUPSOptionName.labelStartCommands)
+        labelEndCommands = commands(CUPSOptionName.labelEndCommands)
+        powerUpAction = text(CUPSOptionName.powerUpAction).flatMap(MediaFeedAction.init(cupsValue:))
+        headCloseAction = text(CUPSOptionName.headCloseAction).flatMap(MediaFeedAction.init(cupsValue:))
         self = clamped()
     }
 }

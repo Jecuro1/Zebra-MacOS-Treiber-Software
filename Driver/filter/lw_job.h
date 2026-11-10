@@ -118,9 +118,9 @@ typedef struct lw_job {
 /** Initialisiert den Auftrag. Liefert false bei ungültiger Konfiguration. */
 bool lw_job_init(lw_job *job, const lw_job_config *config, lw_sink *out, const lw_job_hooks *hooks);
 
-/** Schreibt den Auftragskopf (ZPL: Startbefehle, ~JA, ~SD, ~TA, ~JS, ~JC, SGD media.printmode,
- *  ^MF, ^ST; EPL: Startbefehle, ~JA). Nach ~JA wird die Ausgabe geleert und hooks.wait_ms
- *  aufgerufen. */
+/** Schreibt den Auftragskopf (ZPL: ~JA, Startbefehle, ~SD, ~TA, ~JS, ~JC, SGD media.printmode,
+ *  ^MF, ^ST; EPL: ~JA, Startbefehle). ~JA steht zuerst, weil es die Daten vor sich im
+ *  Eingangspuffer löscht. Nach ~JA wird die Ausgabe geleert und hooks.wait_ms aufgerufen. */
 bool lw_job_begin(lw_job *job);
 
 /**

@@ -78,12 +78,12 @@ PPD-Auswahl liegen (auch als `Custom.37`) und werden auf gültige Bereiche begre
 | `lwRotation` | `0` `90` `180` `270` | Drehung im Uhrzeigersinn: 90/270 dreht die Bitmap vor dem Abschneiden (alle Sprachen), 180 wie `lwRotate180`; `0` überlässt `lwRotate180` die Wahl |
 | `lwMarkOffset` | `Default`, −80…283 Punkte | `^MNM,n` – nur mit `BlackMark` und nur ZPL |
 | `lwStopAtLast` / `lwStopOffset` | `True`/`False` / 0…32000 Punkte | nur `Continuous`: Seitenhöhe = letzte schwarze Zeile + 1 + Versatz (mindestens 1; darüber hinaus weiße Zeilen) |
-| `lwPauseEvery` | 0…9999 | `^PQn,p,0,N` (Vorrang vor `lwCutEvery`), nur ZPL |
+| `lwPauseEvery` | 0…9999 | `^PQn,p,0,N` (Vorrang vor `lwCutEvery`), nur ZPL; zählt wie `lwCutEvery` je Seite und Kopiengruppe (bei sortierten Aufträgen mit mehreren Seiten ohne Wirkung) |
 | `lwControlChars` | `Standard` `Printer` | `Printer` („Intern“): `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` (ASCII 33…126, ungültig/fehlend → `^`/`~`/`,`) ersetzen die Zeichen in allen selbst erzeugten ZPL-Befehlen – nicht in Grafikdaten, SGD-Zeile und Rohbefehlen; auch `commandtolabelwerk` (`~WC`, `~JC`) |
 | `lwRTC` | `Default` `JobStart` `EveryLabel` `EveryMinute` | `^XA^STmm,dd,yyyy,hh,mm,ss,M^XZ` (Ortszeit) im Kopf, bei `EveryLabel` vor jedem weiteren Etikett, bei `EveryMinute` vor einem Etikett, sobald ≥ 60 s vergangen sind; nur ZPL |
 | `lwCancelBefore` / `lwCancelDelay` | `True`/`False` / 0…10000 ms (Standard 1000) | `~JA` am Auftragsanfang vor den Startbefehlen (ZPL; EPL wörtlich; `~JA` löscht die Daten vor sich im Eingangspuffer), danach Ausgabe leeren und warten |
 | `lwLabelStartCmd` `lwLabelEndCmd` | Base64url wie `lwStartCmd` | Rohbefehle je Etikett: ZPL nach `^XA` bzw. vor `^XZ`, EPL nach `N` bzw. vor `P` (CPCL: keine) |
-| `lwPowerUpAction` `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` | `^XA^MFa,b^XZ` im Kopf – nur wenn beide gesetzt, nur ZPL |
+| `lwPowerUpAction` `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` | `^XA^MFa,b^XZ` im Kopf – nur wenn beide gesetzt, nur ZPL; die Aktion beim Einschalten wirkt erst beim nächsten Einschalten (mit `lwSaveSettings=True`) |
 
 Reihenfolge des ZPL-Auftragskopfs: `~JA`, Startbefehle, `~SD`, `~TA`, `~JS`, `~JC`, SGD
 `media.printmode` (Linerless), `^MF`, `^ST`. Je Etikett: (`^ST`), `^XA`, Etikettenanfang, `^MM`,

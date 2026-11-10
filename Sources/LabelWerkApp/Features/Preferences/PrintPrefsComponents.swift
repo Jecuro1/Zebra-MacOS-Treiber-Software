@@ -200,31 +200,41 @@ struct PrintPrefsPencilMenu: View {
                 ProgressRing(progress: nil, size: 12, lineWidth: 1.8)
                     .transition(.scale.combined(with: .opacity))
             }
+            // Jede Menü-Aktion beendet zuerst eine laufende Eingabe im Textfeld der Zeile – sonst
+            // überschriebe der getippte Wert beim späteren Fokusverlust die Wahl aus dem Menü.
             Menu {
                 Toggle(isOn: Binding(get: { !usesPrinter }, set: { on in
                     guard on else { return }
-                    context.change { setting.useDriverValue(&$0, printer: editor.printerValues, session: context.session) }
+                    afterCommittingTextEditing {
+                        context.change { setting.useDriverValue(&$0, printer: editor.printerValues, session: context.session) }
+                    }
                 })) {
                     Label(tr("Treiberwert verwenden"), systemImage: "pencil")
                 }
                 Toggle(isOn: Binding(get: { usesPrinter }, set: { on in
                     guard on else { return }
-                    context.change { setting.usePrinterValue(&$0) }
+                    afterCommittingTextEditing {
+                        context.change { setting.usePrinterValue(&$0) }
+                    }
                 })) {
                     Label(tr("Druckerwert verwenden"), systemImage: "printer")
                 }
                 .disabled(!setting.supportsPrinterValue)
                 Divider()
                 Button {
-                    Task { await editor.read(setting, session: context.session) }
+                    afterCommittingTextEditing {
+                        Task { await editor.read(setting, session: context.session) }
+                    }
                 } label: {
                     Label(tr("Vom Drucker lesen"), systemImage: "arrow.down.circle")
                 }
                 .disabled(!setting.isReadable || !context.session.supportsStatus || editor.readingSetting != nil)
                 if !setting.supportsPrinterValue && setting.hasDriverDefault {
                     Button {
-                        context.change { setting.resetToDefault(&$0) }
-                        editor.pulse([setting])
+                        afterCommittingTextEditing {
+                            context.change { setting.resetToDefault(&$0) }
+                            editor.pulse([setting])
+                        }
                     } label: {
                         Label(tr("Standardwert wiederherstellen"), systemImage: "arrow.counterclockwise")
                     }

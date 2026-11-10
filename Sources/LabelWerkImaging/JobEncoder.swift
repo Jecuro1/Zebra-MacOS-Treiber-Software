@@ -30,9 +30,10 @@ import LabelWerkCore
 /// `lwctl encode --fixed-time … --time-step …` setzen eine feste Zeit – wie `LW_FIXED_TIME` und
 /// `LW_TIME_STEP_SECONDS` beim C-Filter.
 ///
-/// „Aufträge vor dem Drucken abbrechen“: Der Encoder schreibt nur die `~JA`-Zeile; warten muss
-/// der Aufrufer (``cancelPrefixLength()`` liefert die Stelle, `PrinterClient.printImages` wartet
-/// dort `cancelDelayMs`).
+/// „Aufträge vor dem Drucken abbrechen“: Der Encoder schreibt nur die `~JA`-Zeile – ganz am
+/// Anfang, vor den Startbefehlen, weil `~JA` die Daten vor sich im Eingangspuffer löscht; warten
+/// muss der Aufrufer (``cancelPrefixLength()`` liefert die Stelle, `PrinterClient.printImages`
+/// bzw. `PrinterClient.sendJob` wartet dort `cancelDelayMs`).
 ///
 /// Alle Einstellungen werden vor der Verwendung mit `PrintSettings.clamped()` auf gültige
 /// Bereiche begrenzt.

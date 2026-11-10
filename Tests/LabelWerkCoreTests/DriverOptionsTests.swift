@@ -14,7 +14,7 @@ struct DriverOptionsTests {
         #expect(MediaTracking.notch.zplCode == "W")
         #expect(MediaTracking.notch.cupsValue == "Notch")
         #expect(MediaTracking(cupsValue: "Notch") == .notch)
-        #expect(MediaTracking(cupsValue: "notch") == nil, "CUPS-Werte sind groß-/kleinschreibungsgenau")
+        #expect(MediaTracking(cupsValue: "notch") == .notch, "wie der C-Filter ohne Groß-/Kleinschreibung")
         #expect(MediaTracking.continuous.displayName == "Endlosmaterial")
         #expect(MediaTracking.gap.displayName == "Einzeletiketten")
         #expect(MediaTracking.blackMark.displayName == "Etiketten mit schwarzen Markierungen")
@@ -94,6 +94,7 @@ struct DriverOptionsTests {
             == ["0° – Hochformat", "90° – Querformat", "180° – Hochformat", "270° – Querformat"])
         #expect(PrintRotation(cupsValue: " 270 ") == .r270)
         #expect(PrintRotation(cupsValue: "45") == nil)
+        #expect(PrintRotation(cupsValue: "+90") == nil && PrintRotation(cupsValue: "090") == nil, "nur exakte Werte wie im Filter")
         #expect(PrintRotation(cupsValue: "Default") == nil)
         #expect(PrintRotation.r90.isQuarterTurn && PrintRotation.r270.isQuarterTurn)
         #expect(!PrintRotation.r0.isQuarterTurn && !PrintRotation.r180.isQuarterTurn)
@@ -287,6 +288,43 @@ struct DriverOptionsTests {
         #expect(PrintSettings(cupsOptions: ["lwRotation": "90", "lwRotate180": "True"]).effectiveRotation == .r90)
         #expect(PrintSettings(cupsOptions: ["lwRotation": "0", "lwRotate180": "True"]).effectiveRotation == .r180)
         #expect(PrintSettings(cupsOptions: ["lwMarkOffset": "Default"]).markOffset == nil)
+    }
+
+    @Test("CUPS-Optionen lesen wie C-Filter und Python-Referenz: Leerraum, Schreibweise, Custom.-Präfix")
+    func cupsParsingMatchesFilter() {
+        // Aufzählungen ohne Beachtung der Groß-/Kleinschreibung (ASCII), Leerraum am Rand egal.
+        let s = PrintSettings(cupsOptions: [
+            "lwRTC": "everylabel", "lwPowerUpAction": "feed", "lwHeadCloseAction": " SHORTCAL\t",
+            "lwMediaTracking": "notch", "lwPrintMode": "linerlesscut", "lwMediaType": "directthermal",
+            "lwBackfeed": "BEFORE", "lwDither": "floydsteinberg", "lwCompression": " hex ",
+            "lwRotation": " 90\n", "lwMarkOffset": "Custom.12", "lwStopAtLast": " True", "lwCancelBefore": "on ",
+            "lwMirror": "\tYES", "lwDarkness": " +12 ", "lwSpeed": "custom.4", "lwControlChars": " PRINTER ",
+            "lwFormatPrefix": " 36 ", "lwStartCmd": " \(CUPSCommandEncoding.encode("~JR")) ",
+        ])
+        #expect(s.rtcUpdate == .everyLabel)
+        #expect(s.powerUpAction == .feed && s.headCloseAction == .shortCalibration)
+        #expect(s.tracking == .notch && s.printMode == .linerlessCut && s.mediaType == .directThermal)
+        #expect(s.backfeed == .beforePrinting && s.dither == .floydSteinberg && s.compression == .hex)
+        #expect(s.rotation == .r90)
+        #expect(s.markOffset == 12 && s.darkness == 12 && s.speed == 4)
+        #expect(s.stopAtLastElement && s.cancelJobsBeforePrint && s.mirror)
+        #expect(s.controlCharacters == ControlCharacters(formatPrefix: 0x24, controlPrefix: 0x7E, delimiter: 0x2C))
+        #expect(s.startCommands == "~JR")
+
+        // Ungültig wie im Filter: Drehung nur exakt, Zahlen nur mit Ziffern, Unicode-Schreibweisen nicht.
+        let invalid = PrintSettings(cupsOptions: [
+            "lwRotation": "+90", "lwMarkOffset": "12 mm", "lwDarkness": "1.5", "lwSpeed": "Custom.",
+            "lwRTC": "Every Label", "lwPrintMode": "Lınerlesscut", "lwStartCmd": "Default", "lwEndCmd": " none ",
+            "lwStopAtLast": "ja",
+        ])
+        #expect(invalid.rotation == .r0 && PrintSettings(cupsOptions: ["lwRotation": "090"]).rotation == .r0)
+        #expect(invalid.markOffset == nil && invalid.darkness == nil && invalid.speed == nil)
+        #expect(invalid.rtcUpdate == nil && invalid.printMode == nil)
+        #expect(invalid.startCommands.isEmpty && invalid.endCommands.isEmpty)
+        #expect(!invalid.stopAtLastElement)
+        #expect(PrintSettings(cupsOptions: ["lwMarkOffset": "default", "lwThreshold": "DEFAULT"]).markOffset == nil)
+        #expect(PrintSettings(cupsOptions: ["lwThreshold": " Default "]).threshold == 128)
+        #expect(PrintSettings(cupsOptions: ["lwPauseEvery": "  "]).pauseEvery == 0, "leer = nicht gesetzt")
     }
 
     @Test("Optionsnamen: vollständig, eindeutig, Nicht-PPD-Optionen")

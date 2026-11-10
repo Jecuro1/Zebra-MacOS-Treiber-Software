@@ -3,7 +3,8 @@
 Diese Anleitung beschreibt die Installation des Pakets `LabelWerk-<Version>.pkg`, das Installieren
 von Netzwerkdruckern wie mit einem Windows-Treiberinstallationsprogramm, das Einrichten von
 Zebra-Druckern (in der App, mit `lwctl` oder in den macOS-Systemeinstellungen), das Drucken aus
-beliebigen Programmen, das Entfernen und die Fehlersuche.
+beliebigen Programmen, die Druckeinstellungen im Vergleich zum Windows-Treiber ZDesigner, das
+Entfernen und die Fehlersuche.
 
 ## Voraussetzungen
 
@@ -199,8 +200,9 @@ Warteschlangen es schon gibt (CUPS unterscheidet bei Namen keine Groß-/Kleinsch
   Drucker zuvor mit dem Assistenten der App eingerichtet wurde. So erscheint derselbe Drucker nie
   zweimal im Druckdialog; ein erneuter Lauf derselben Liste ist ungefährlich.
 * Beim Aktualisieren bleiben die Einstellungen der Warteschlange erhalten: alle Standardwerte, die
-  in LabelWerk oder unter **„Optionen & Zubehör“** gewählt wurden (Schwärzung, Geschwindigkeit,
-  Etikettenformat, Medientyp, Druckmodus, Versatz …), Standort, Beschreibung und Freigabe. Neu
+  in LabelWerk (**Druckeinstellungen** › „OK“/„Übernehmen“) oder mit `lpadmin -o` gewählt wurden
+  (Temperatur, Geschwindigkeit, Etikettenformat, Medientyp, Bedienermodus, Versatz …), Standort,
+  Beschreibung und Freigabe. Neu
   gesetzt werden nur die Werte dieses Aufrufs (`--stock`, `--language`, `--location`, `--name`) und
   die Auflösung der gewählten PPD. Die veraltete Option `lwRotate180=True` älterer PPDs wird dabei
   (wie beim Update per Installationspaket) als `lwRotation=180` übernommen.
@@ -253,8 +255,11 @@ Ohne LabelWerk-App, nur mit dem installierten Treiber:
    und **Standort** nach Wunsch.
 4. **Verwenden:** „Software auswählen …“ und den Treiber **„Zebra <Modell> (<dpi> dpi) -
    LabelWerk“** wählen, z. B. „Zebra ZD421t (203 dpi) - LabelWerk“ (Suchbegriff „LabelWerk“).
-5. **„Hinzufügen“**. Sprache, Medientyp und Druckmodus lassen sich danach unter **„Optionen &
-   Zubehör“** ändern; **„Dienstprogramm öffnen“** startet LabelWerk.
+5. **„Hinzufügen“**. Alle Treiberoptionen (Medientyp, Bedienermodus, Temperatur …) stehen danach
+   im Druckdialog jedes Programms unter **„Druckerfunktionen“**; als Standard der Warteschlange
+   legt sie LabelWerk fest (siehe
+   [Druckeinstellungen wie unter Windows](#druckeinstellungen-wie-unter-windows)). Unter
+   **„Optionen & Zubehör“** startet **„Dienstprogramm öffnen“** LabelWerk.
 
 Per Bonjour gefundene Zebra-Drucker (Reiter „Standard“) funktionieren ebenso, sofern unter
 „Verwenden“ der LabelWerk-Treiber gewählt wird – nicht „AirPrint“ oder „Generischer
@@ -280,8 +285,10 @@ PostScript-Drucker“.
    beim Drucker **„Einrichten“** wählen. LabelWerk legt eine macOS-Warteschlange mit der passenden
    PPD-Datei und den Druckeinstellungen des Druckers an. Danach erscheint der Drucker in jedem
    Druckdialog.
-4. Änderungen an den Druckeinstellungen in LabelWerk überträgt **„Einstellungen synchronisieren“**
-   als Standard in die Warteschlange.
+4. Änderungen in den **Druckeinstellungen** (⌘2) überträgt LabelWerk mit **„OK“** bzw.
+   **„Übernehmen“** automatisch als Standard in die Warteschlange; **„Einstellungen
+   synchronisieren“** unter „Treiber & Warteschlangen“ wiederholt das von Hand. Welche Einstellung
+   wo zu finden ist, zeigt [Druckeinstellungen wie unter Windows](#druckeinstellungen-wie-unter-windows).
 
 Ohne Warteschlange druckt und steuert LabelWerk den Drucker direkt (Testetiketten, Designer,
 Werkzeuge, Terminal, Dateien, Netzwerk, Sicherung & Wartung, RFID, Firmware) – die Warteschlange
@@ -301,8 +308,11 @@ Bluetooth).
    **„HP Jetdirect – Socket“** (Port 9100), dann unter „Verwenden“ → „Software auswählen …“ das
    passende Modell „Zebra … - LabelWerk“ wählen – Schritt für Schritt unter
    [Netzwerkdrucker (LAN) installieren](#alternative-macos-systemeinstellungen).
-4. Die Druckeroptionen (Druckersprache, Medientyp, Druckmodus …) lassen sich nachträglich unter
-   **„Optionen & Zubehör“** ändern; **„Dienstprogramm öffnen“** startet LabelWerk.
+4. Die Treiberoptionen (Druckersprache, Medientyp, Bedienermodus …) wählt man je Auftrag im
+   Druckdialog unter **„Druckerfunktionen“**; die Standardwerte der Warteschlange setzt LabelWerk
+   (**Druckeinstellungen** › „OK“/„Übernehmen“) oder `lpadmin -o` (siehe
+   [Im Terminal](#im-terminal)). Unter **„Optionen & Zubehör“** startet **„Dienstprogramm öffnen“**
+   LabelWerk.
 
 ### Im Terminal
 
@@ -326,8 +336,10 @@ macOS unterstützt PPD-Treiber weiterhin vollständig.
 * **Papiergröße = Etikett:** Im Druckdialog als Papiergröße das eingelegte Etikettenformat wählen
   (z. B. „4 × 6 Zoll“ oder „100 × 150 mm“).
 * **Skalierung 100 %** statt „An Seite anpassen“ – nur so werden Barcodes maßhaltig und scannbar.
-* Weitere Einstellungen stehen im Druckdialog unter **„Druckerfunktionen“** und gelten nur für
-  diesen Auftrag. Im Terminal:
+* Weitere Einstellungen stehen im Druckdialog unter **„Druckerfunktionen“** – gegliedert wie im
+  Windows-Treiber in „Seite einrichten“, „Druckoptionen“, „Bedienermodus“, „Grafik Optionen“ und
+  „Erweitert“ (siehe [Druckeinstellungen wie unter Windows](#druckeinstellungen-wie-unter-windows))
+  – und gelten nur für diesen Auftrag. Im Terminal:
 
 ```bash
 lp -d Versand -o lwDarkness=25 etikett.pdf                    # PDF über den Treiber
@@ -340,11 +352,11 @@ Die wichtigsten Optionen (vollständig in ARCHITECTURE.md §9):
 | Option | Werte | Wirkung |
 |---|---|---|
 | `lwLanguage` | `ZPL`, `EPL`, `CPCL` | Druckersprache |
-| `lwDarkness` | `Default`, `0` … `30` | Schwärzung (`~SD`) |
-| `lwSpeed` | `Default`, `1` … `14` | Geschwindigkeit in Zoll/s (`^PR`) |
-| `lwMediaType` | `Default`, `DirectThermal`, `ThermalTransfer` | Druckverfahren (`^MT`) |
-| `lwMediaTracking` | `Default`, `Gap`, `BlackMark`, `Continuous`, `Auto` | Etikettenerkennung (`^MN`) |
-| `lwPrintMode` | `Default`, `TearOff`, `PeelOff`, `Cutter`, … | Verhalten nach dem Druck (`^MM`) |
+| `lwDarkness` | `Default`, `0` … `30` | Temperatur bzw. Schwärzung (`~SD`) |
+| `lwSpeed` | `Default`, `1` … `14` | Geschwindigkeit in Zoll/s (`^PR`; 2 Zoll/s = 51 mm/s) |
+| `lwMediaType` | `Default`, `DirectThermal`, `ThermalTransfer` | Druckmodus: Thermo-Direkt oder Thermotransfer (`^MT`) |
+| `lwMediaTracking` | `Default`, `Gap`, `BlackMark`, `Continuous`, `Notch`, `Auto` | Medientyp bzw. Etikettenerkennung (`^MN`) |
+| `lwPrintMode` | `Default`, `TearOff`, `PeelOff`, `Cutter`, … | Bedienermodus, Verhalten nach dem Druck (`^MM`) |
 | `lwLabelTop`, `lwLabelLeft`, `lwTearOff` | Punkte | Position und Abreißkante (`^LT`, `^LS`, `~TA`) |
 | `lwDither` | `Threshold`, `Ordered`, `Halftone`, `FloydSteinberg`, `Atkinson`, `Stucki` | Rasterverfahren |
 | `lwCompression` | `Z64`, `ACS`, `Hex` | Grafikkompression |
@@ -352,6 +364,152 @@ Die wichtigsten Optionen (vollständig in ARCHITECTURE.md §9):
 | `lwRotation` | `0`, `90`, `180`, `270` | Drehung im Uhrzeigersinn (ersetzt das veraltete `lwRotate180`) |
 
 `Default` bedeutet: Der Drucker behält seinen eigenen Wert.
+
+## Druckeinstellungen wie unter Windows
+
+Unter Windows stellt man Zebra-Drucker im Dialog **„Druckeinstellungen für ZD421 …“** des
+ZDesigner-Treibers ein. LabelWerk bietet dieselben Einstellungen mit denselben Begriffen und
+Werten an zwei Stellen:
+
+* **In der App:** Drucker wählen › **Druckeinstellungen** (⌘2). Der Bereich ist aufgebaut wie der
+  Windows-Dialog: links die Seitenleiste mit „Seite einrichten“, „Druckoptionen“, „Bedienermodus“,
+  „Grafik Optionen“, „Kundenspezifische Befehle“, „Wartung“, „Einheiten“ und „Hilfe und Über“,
+  darunter **„Testseite drucken“**; in der Mitte die Einstellungen, rechts die
+  **„Druckvorschau“**; unten **„OK“**, **„Abbrechen“**, **„Übernehmen“** und **„Hilfe“**.
+  „OK“ (⌘↩) und „Übernehmen“ (⌘S) speichern die Werte als Treiber-Standard des Druckers: Sie
+  gelten für alle Aufträge aus LabelWerk und – wenn eine macOS-Warteschlange eingerichtet ist –
+  automatisch als deren Standard, also für jedes Programm. „Abbrechen“ verwirft nicht
+  gespeicherte Änderungen.
+* **Im macOS-Druckdialog** jedes Programms: **„Druckerfunktionen“**, Auswahl „Funktionssätze“ mit
+  „Seite einrichten“, „Druckoptionen“, „Bedienermodus“, „Grafik Optionen“ und „Erweitert“. Was
+  hier gewählt wird, gilt nur für diesen Auftrag; vorbelegt sind die Standardwerte der
+  Warteschlange. Häufige Kombinationen lassen sich unter „Voreinstellungen“ sichern.
+
+**Stift-Menü.** Wie unter Windows hat jede Einstellung ein Stift-Menü mit **„Treiberwert
+verwenden“** (der Treiber sendet den Wert mit jedem Auftrag) und **„Druckerwert verwenden“** (der
+Treiber sendet nichts, der Drucker behält seine eigene Einstellung; angezeigt als „Druckerwert“,
+nach dem Lesen mit dem Wert des Druckers). Zusätzlich gibt es **„Vom Drucker lesen“** für Werte,
+die der Drucker meldet, und bei reinen Treiberwerten (Drehung, Spiegeln, Rasterung …)
+**„Standardwert wiederherstellen“**. Im macOS-Druckdialog entspricht „Druckerwert verwenden“ der
+Wahl **„Druckereinstellung“**, in CUPS dem Wert `Default` bzw. einer weggelassenen Option.
+
+**Druckvorschau.** Ein Drucker mit zwei Etiketten „123“ zeigt sofort, was die Einstellungen
+bewirken: Seitenverhältnis von Breite und Höhe, Medientyp (Lücke, schwarze Markierung, Seitenkerbe
+oder Endlosmaterial), Drehung, Spiegeln, Invers und Bedienermodus. In schmalen Fenstern steht die
+Vorschau über den Einstellungen; mit „Bewegung reduzieren“ entfallen die Animationen.
+
+### Gegenüberstellung aller Optionen
+
+Spalten: Bereich und Option im Windows-Dialog · Bereich › Gruppe › Einstellung in den
+Druckeinstellungen der App · Funktionssatz › Option im macOS-Druckdialog („Druckerfunktionen“) ·
+CUPS-Option für `lp -o` bzw. `lpadmin -o` mit dem gesendeten Befehl (vollständig in
+[ARCHITECTURE.md §9](../ARCHITECTURE.md#9-cups-optionen-ppd--filter--app)). Längen zeigt die App
+in der gewählten Einheit, CUPS erwartet Druckerpunkte (bei 203 dpi 8 Punkte je mm). „–“: an
+dieser Stelle nicht vorhanden.
+
+**Seite einrichten**
+
+| Windows (ZDesigner) | LabelWerk-App | macOS-Druckdialog | CUPS-Option |
+|---|---|---|---|
+| Vorlage › Vorlagen: „Benutzerdefiniert“ und gespeicherte Vorlagen | Seite einrichten › Vorlage › Vorlagen: „Benutzerdefiniert“, „Eigene Formate“ und die Etikettenformate, die auf den Drucker passen | „Papierformat“ (oben im Druckdialog): alle passenden Etikettenformate | `media` bzw. `PageSize` (z. B. `w288h432`) |
+| Breite / Höhe (mm) | Vorlage › Breite, Höhe – eine Eingabe stellt die Vorlage auf „Benutzerdefiniert“ | „Papierformat“ › „Eigene Papierformate verwalten …“ | `media=Custom.100x150mm` |
+| Medientyp: Endlosmaterial, Einzeletiketten, Etiketten mit schwarzen Markierungen, Etiketten mit Seitenkerben | Medientyp (gleiche Werte, dazu „Automatisch erkennen“) | Seite einrichten › Medientyp | `lwMediaTracking`: `Continuous`, `Gap`, `BlackMark`, `Notch`, `Auto` (`^MN`) |
+| Drehung: 0° - Hochformat, 90° - Querformat, 180° - Hochformat, 270° - Querformat | Drehung | Seite einrichten › Drehung | `lwRotation`: `0`, `90`, `180`, `270` |
+| Markierung Versatz (mm, nur bei schwarzen Markierungen) | Markierung Versatz – nur bei „Etiketten mit schwarzen Markierungen“ aktiv | Seite einrichten › Markierung Versatz (−10 … 35 mm) | `lwMarkOffset`: −80 … 283 Punkte (`^MNM,n`, nur ZPL) |
+| Spiegeln | Spiegeln | Seite einrichten › Spiegeln | `lwMirror=True` (`^PMY`) |
+| Invers | Invers | Seite einrichten › Invers | `lwNegative=True` |
+| Bei letztem Element stoppen, Stoppversatz (mm, nur Endlosmaterial) | Bei letztem Element stoppen, Stoppversatz – nur bei „Endlosmaterial“ aktiv | Seite einrichten › Bei letztem Element stoppen, Stoppversatz (0 … 10 mm) | `lwStopAtLast=True`, `lwStopOffset`: 0 … 32000 Punkte |
+
+**Druckoptionen**
+
+| Windows (ZDesigner) | LabelWerk-App | macOS-Druckdialog | CUPS-Option |
+|---|---|---|---|
+| Druckeinstellungen › Geschwindigkeit: 51, 76, 102, 127, 152 … mm/s (bis zum Modellmaximum) | Druckoptionen › Druckeinstellungen › Geschwindigkeit (gleiche mm/s-Liste) | Druckoptionen › Geschwindigkeit („51 mm/s (2 Zoll/s)“ …) | `lwSpeed`: Zoll/s, `2` = 51 mm/s … `8` = 203 mm/s (`^PR`) |
+| Druckeinstellungen › Temperatur 1 … 30 | Temperatur 1 … 30 | Druckoptionen › Temperatur | `lwDarkness`: `0` … `30` (`~SD`) |
+| Druckeinstellungen › Druckmodus: Thermotransfer, Thermo-Direkt | Druckmodus (nur die Verfahren des Modells) | Druckoptionen › Druckmodus | `lwMediaType`: `ThermalTransfer`, `DirectThermal` (`^MT`) |
+| Versatz › Oben / Links (mm) | Versatz › Oben, Links | Druckoptionen › Versatz oben, Versatz links | `lwLabelTop`: −120 … 120 (`^LT`), `lwLabelLeft`: −9999 … 9999 Punkte (`^LS`) |
+| Erweiterte Einstellungen › Rückzug: Kein Rückzug, Vor dem Drucken, Nach dem Drucken, Standard | Erweiterte Einstellungen › Rückzug | Druckoptionen › Rückzug | `lwBackfeed`: `Off`, `Before`, `After`, `Normal` (`~JS`) |
+| Erweiterte Einstellungen › Pausieren: Keine Pause oder nach N Etiketten | Pausieren: „Keine Pause“ oder „Nach Etiketten“ mit Anzahl 1 … 9999 | Druckoptionen › Pausieren (Keine Pause, nach 1, 2, 5, 10, 25, 50, 100 Etiketten) | `lwPauseEvery`: `0` … `9999` (`^PQ n,p,0,N`, nur ZPL) |
+| Erweiterte Einstellungen › Steuerzeichen: Standard, Intern | Steuerzeichen; bei „Intern“ Formatpräfix, Steuerpräfix und Trennzeichen | Druckoptionen › Steuerzeichen (die Zeichen selbst nur über die App bzw. `lpadmin`) | `lwControlChars`: `Standard`, `Printer`; Zeichen `lwFormatPrefix`, `lwControlPrefix`, `lwDelimiter` (ASCII-Code 33 … 126) |
+| Erweiterte Einstellungen › RTC aktualisieren: Druckzeit starten, Jedes Etikett, Jede Minute | RTC aktualisieren | Druckoptionen › RTC aktualisieren | `lwRTC`: `JobStart`, `EveryLabel`, `EveryMinute` (`^ST`, nur ZPL) |
+| Aufträge vor dem Drucken abbrechen › „Alle aktuellen und nächsten Druckjobs löschen“, Verzögerung (ms, Standard 1000) | Aufträge vor dem Drucken abbrechen › „Alle aktuellen und nächsten Druckjobs löschen“, Verzögerung (ms, Standard 1000) | Druckoptionen › Aufträge vor dem Drucken abbrechen, Verzögerung (Abbrechen) | `lwCancelBefore=True` (`~JA`, ZPL und EPL), `lwCancelDelay`: 0 … 10000 ms |
+| – | Erweiterte Einstellungen › Druckersprache | Erweitert › Druckersprache | `lwLanguage`: `ZPL`, `EPL`, `CPCL` |
+| – | Erweiterte Einstellungen › Vor jedem Auftrag kalibrieren | Erweitert › Vor dem Auftrag kalibrieren | `lwCalibrate=True` (`~JC`) |
+| – | Erweiterte Einstellungen › Einstellungen im Drucker speichern | Erweitert › Einstellungen im Drucker speichern | `lwSaveSettings=True` (`^JUS`) |
+
+**Bedienermodus**
+
+| Windows (ZDesigner) | LabelWerk-App | macOS-Druckdialog | CUPS-Option |
+|---|---|---|---|
+| Modus: Abreißen, Spendemodus, Abschneider, Verzögerter Abschneider, Aufwickeln, Linerless ablösen, Linerless schneiden, Linerless verzögert schneiden, Linerless aufwickeln, Linerless-Abriss, Applikator | Bedienermodus › Modus – die Modi des Modells (dazu „Kiosk“), Linerless nur mit ZPL und Linerless-Ausstattung | Bedienermodus › Modus | `lwPrintMode`: `TearOff`, `PeelOff`, `Cutter`, `DelayedCut`, `Rewind`, `LinerlessPeel`, `LinerlessCut`, `LinerlessDelayedCut`, `LinerlessRewind`, `LinerlessTear`, `Applicator`, `Kiosk` (`^MM`; Linerless per SGD `media.printmode`) |
+| Versatz (mm) | Versatz (Abreißversatz) | Bedienermodus › Versatz | `lwTearOff`: −120 … 120 Punkte (`~TA`) |
+| Abschneider › Typ (nur in einem Modus mit Abschneider), „Schneiden alle N Etiketten“ | Abschneider › Typ: „Nur am Auftragsende“ oder „Nach Etikettenanzahl“, dann „Schneiden alle N Etiketten“ – nur in Modi mit Abschneider aktiv | Bedienermodus › Schneiden alle (Nur am Auftragsende, 1, 2, 5, 10, 25, 50, 100 Etiketten) | `lwCutEvery`: `0` … `9999` (`^PQ n,c,0,Y`) |
+
+**Grafik Optionen**
+
+| Windows (ZDesigner) | LabelWerk-App | macOS-Druckdialog | CUPS-Option |
+|---|---|---|---|
+| Rasterung von Grafiken (Dithering) | Grafik Optionen › Rasterung (Schwellenwert, Geordnet/Bayer, Halbton, Floyd–Steinberg, Atkinson, Stucki) mit Live-Vorschau, Schwelle | Grafik Optionen › Rasterung, Schwellenwert | `lwDither`, `lwThreshold`: `1` … `254` |
+| – | Kompression (Z64, ACS, Hex) mit geschätzter Auftragsgröße | Grafik Optionen › Grafikkompression | `lwCompression`: `Z64`, `ACS`, `Hex` |
+| – | Seiten › Leere Etiketten überspringen | Erweitert › Leere Etiketten überspringen | `lwSkipBlank=True` |
+
+**Kundenspezifische Befehle**
+
+| Windows (ZDesigner) | LabelWerk-App | macOS-Druckdialog | CUPS-Option |
+|---|---|---|---|
+| Eigene Befehle am Anfang und Ende des Auftrags | Kundenspezifische Befehle › Auftrag › Auftragsbeginn, Auftragsende (Editor mit Hervorhebung und Bausteinen) | – (freier Text; gilt als Standard der Warteschlange) | `lwStartCmd`, `lwEndCmd` (Base64url, s. u.) |
+| – | Kundenspezifische Befehle › Etikett › Etikettenbeginn (ZPL nach `^XA`), Etikettenende (vor `^XZ`) | – (wie oben) | `lwLabelStartCmd`, `lwLabelEndCmd` |
+
+**Wartung**
+
+| Windows (ZDesigner) | LabelWerk-App | macOS-Druckdialog | CUPS-Option |
+|---|---|---|---|
+| Zurücksetzen › „Auf Standardeinstellungen zurücksetzen“ | Wartung › Zurücksetzen › „Auf Standardeinstellungen zurücksetzen“ (gespeichert erst mit „OK“/„Übernehmen“) | „Voreinstellungen“ › „Standardeinstellungen“ | – |
+| Zurücksetzen › „Alle Einstellungen des Druckers verwenden“ [Festlegen] | „Alle Einstellungen des Druckers verwenden“ [Festlegen] – alle Werte mit Druckerwert stehen danach auf „Druckerwert“ | in jeder Option „Druckereinstellung“ | `Default` |
+| Kalibrieren › „Medien kalibrieren“ | Kalibrieren › „Medien kalibrieren“ (sofort, `~JC`) | Erweitert › Vor dem Auftrag kalibrieren | `lwCalibrate=True` |
+| Kalibrieren › „Echtzeituhr (RTC) synchronisieren“ [Sync] | „Echtzeituhr (RTC) synchronisieren“ [Sync] – stellt die Uhr des Druckers auf die Zeit des Mac | Druckoptionen › RTC aktualisieren | `lwRTC` |
+| – | Kalibrieren › Aktion beim Einschalten, Aktion nach dem Schließen des Druckkopfs | Erweitert › Aktion beim Einschalten, Aktion beim Schließen des Druckkopfs | `lwPowerUpAction`, `lwHeadCloseAction`: `Feed`, `Calibrate`, `Length`, `NoMotion`, `ShortCal` (`^MF`, nur beide zusammen) |
+| – | Zurücksetzen › „Werte vom Drucker übernehmen“; Drucker › „An den Drucker senden“, „Dauerhaft im Drucker speichern“ (`^JUS`), „macOS-Warteschlange“; Profil › Einstellungsprofil importieren/exportieren (JSON) | – | – |
+
+**Einheiten, Hilfe und Über, Testseite**
+
+| Windows (ZDesigner) | LabelWerk-App | macOS-Druckdialog | CUPS-Option |
+|---|---|---|---|
+| Einheiten › Standard-Maßeinheiten: Millimeter, Zoll, Punkte | Einheiten › Standard-Maßeinheiten: Millimeter, Zoll, Punkte (mit Beispiel bei der Auflösung des Druckers) | Längen in mm mit Druckerpunkten in Klammern; eigene Papierformate in der Maßeinheit der Region | Druckerpunkte (Versätze), Zoll/s (Geschwindigkeit) |
+| Hilfe und Über | Hilfe und Über: Hilfe zu jeder Option, App-, Treiber- und Firmwareversion, Modell, Auflösung, Warteschlange; „Hilfe“ unten öffnet die Hilfe zum aktuellen Bereich | – | – |
+| „Testseite drucken“ (unten links) | „Testseite drucken“ (unten links) – mit den Werten des Dialogs, auch ungespeicherten | – (in der App: Werkzeuge › „Testseite über macOS drucken“ über den kompletten Druckweg) | – |
+| „Druckvorschau“ (rechts) | „Druckvorschau“ (rechts) | Seitenvorschau des Programms (zeigt keine Treiberwirkung) | – |
+| OK, Abbrechen, Übernehmen, Hilfe | OK (⌘↩), Abbrechen, Übernehmen (⌘S), Hilfe | „Drucken“ bzw. „Abbrechen“ – gilt nur für diesen Auftrag | – |
+
+### Hinweise
+
+* **Nur ZPL:** Markierung Versatz, Pausieren, Steuerzeichen, RTC aktualisieren, Aktion beim
+  Einschalten/Schließen und die Linerless-Modi. „Aufträge vor dem Drucken abbrechen“ wirkt bei ZPL
+  und EPL; CPCL kennt keine Auftrags- und Etikettenbefehle. Die App weist bei der jeweiligen
+  Einstellung darauf hin.
+* **Pausieren und Schneiden alle N Etiketten** zählen je Seite und Kopiengruppe (`^PQ`). Bei
+  sortierten Kopien eines mehrseitigen Dokuments wird keine Gruppe voll – der Drucker pausiert
+  bzw. schneidet dann erst am Auftragsende. „Pausieren“ hat Vorrang vor dem Schneiden.
+* **Aktion beim Einschalten** wirkt erst beim nächsten Einschalten, also nur zusammen mit
+  „Einstellungen im Drucker speichern“ oder „Dauerhaft im Drucker speichern“.
+* **Werte zwischen den Stufen des Druckdialogs** (etwa „Pausieren nach 3 Etiketten“ oder ein
+  Versatz von 37 Punkten) übernimmt LabelWerk exakt als Standard der Warteschlange
+  (`<Option>-default`); im Druckdialog steht dafür nur der nächstliegende Wert zur Auswahl.
+  LabelWerk weist beim Speichern darauf hin.
+* **Ohne App** setzt `lpadmin` die Standardwerte der Warteschlange und `lp` die Werte eines
+  Auftrags. Befehle (`lwStartCmd` …) werden als Base64url (UTF-8, ohne `=`) übergeben; Werte, die
+  keine Auswahl der PPD sind, mit der Endung `-default`:
+
+```bash
+lp -d Versand -o lwMediaTracking=BlackMark -o lwMarkOffset=16 etikett.pdf   # Markierung Versatz +2 mm (203 dpi)
+lp -d Versand -o lwPrintMode=Cutter -o lwCutEvery=5 etiketten.pdf           # Abschneider, alle 5 Etiketten
+lp -d Versand -o lwRotation=90 -o lwNegative=True etikett.pdf               # 90° - Querformat, invers
+sudo lpadmin -p Versand -o lwSpeed=4 -o lwDarkness=20 -o lwBackfeed=After   # Standard der Warteschlange
+sudo lpadmin -p Versand -o lwPauseEvery-default=3                           # Wert außerhalb der PPD-Auswahl
+sudo lpadmin -p Versand -o "lwStartCmd-default=$(printf '%s' '^XA^CI28^XZ' | base64 | tr '+/' '-_' | tr -d '=')"
+```
+
+`lwctl print` und `lwctl encode` kennen dieselben Einstellungen als Optionen (`lwctl help print`).
 
 ## Entfernen
 
@@ -439,15 +597,18 @@ Vorschau; `lwctl render etikett.zpl -o vorschau.png` wandelt ZPL in ein PNG um, 
 ### Etiketten falsch positioniert, leere Etiketten dazwischen
 
 * Papiergröße im Druckdialog prüfen – sie muss dem eingelegten Etikett entsprechen.
-* Drucker kalibrieren: App › Werkzeuge › **Kalibrier-Assistent** (oder `~JC`).
-* Etikettenerkennung (`lwMediaTracking`) an das Material anpassen: Lücke, schwarze Markierung oder
+* Drucker kalibrieren: App › Werkzeuge › **Kalibrier-Assistent**, **Druckeinstellungen › Wartung ›
+  „Medien kalibrieren“** (oder `~JC`).
+* Medientyp (`lwMediaTracking`) an das Material anpassen: Einzeletiketten (Lücke), Etiketten mit
+  schwarzen Markierungen (dazu ggf. „Markierung Versatz“), Etiketten mit Seitenkerben oder
   Endlosmaterial.
 * Feinjustage über `lwLabelTop`/`lwLabelLeft` (Druckpunkte) bzw. in der App unter
-  **Druckeinstellungen › Position**.
+  **Druckeinstellungen › Druckoptionen › Versatz** (Oben/Links); die Abreißkante unter
+  **Bedienermodus › Versatz** (`lwTearOff`).
 
 ### Druck zu blass, zu dunkel oder Barcodes unlesbar
 
-* Schwärzung (`lwDarkness`) anpassen; bei Thermotransfer passend zum Farbband.
+* Temperatur (`lwDarkness`, Schwärzung) anpassen; bei Thermotransfer passend zum Farbband.
 * Geschwindigkeit (`lwSpeed`) reduzieren – langsamer druckt sauberer.
 * Für Text, Linien und Barcodes das Rasterverfahren **Schwellenwert** verwenden, für Fotos
   Floyd–Steinberg, Atkinson oder Stucki.

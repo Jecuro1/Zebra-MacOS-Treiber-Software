@@ -823,6 +823,15 @@ Grafikdaten in einer Zeile.
 * Kopien: `collate == false` oder nur eine Seite → je Seite `^PQ{copies}`.
   `collate == true` und > 1 Seite → gesamte Seitenfolge `copies`-mal wiederholen, je `^PQ1`.
 * Höhe `^LL` = Bitmaphöhe.
+* **Pausieren/Schneiden alle N Etiketten** (`pauseEvery`, `cutEvery`): `^PQ` zählt Gruppen innerhalb
+  der Menge **eines** Formats. Beide gelten deshalb je Seite und Kopiengruppe; bei sortierten
+  Aufträgen mit mehreren Seiten (jedes Etikett `^PQ1,{p},0,…`) wird eine Gruppe von p ≥ 2 nie voll –
+  der Drucker pausiert bzw. schneidet dann nicht zwischendurch (bewusst unverändert, in allen drei
+  Encodern gleich; ohne Sortierung bzw. mit einer Seite wirkt der Wert wie im Windows-Treiber).
+* **`^MF`** ist eine vorübergehende Einstellung: Die Aktion beim Schließen des Druckkopfs gilt sofort
+  (bis zum Ausschalten), die Aktion beim Einschalten erst beim nächsten Einschalten – also nur, wenn
+  die Einstellungen gespeichert werden (`saveToPrinter`/`lwSaveSettings` → `^JUS`, in der App auch
+  „Dauerhaft speichern“). Die Encoder fügen dafür kein `^JUS` hinzu.
 * **Echtzeituhr** (`rtcUpdate`): Zeit in ganzen Sekunden seit 1970 (abgerundet), als Ortszeit
   formatiert (Swift `JobEncoder.timeZone`, C/Python `localtime()` nach `TZ`). Auftragskopf: Zeit T0.
   Etikett k: Zeit Tk (laufende Uhr; zum Testen T0 + k·Schritt: Swift `now`/`timeStepSeconds`, C
@@ -897,22 +906,22 @@ Etikett entfallen ebenso wie alle ZPL-Optionen.
 | `lwTearOff` | `Default`, `-120`…`120` (PPD: Schritte von 10) | `~TA` |
 | `lwBackfeed` | `Default` `After` `Before` `Normal` `Off` | `~JS` |
 | `lwMirror` `lwNegative` | `False` `True` | |
-| `lwRotate180` | `False` `True` (nicht in der PPD, veraltet) | wirkt nur bei `lwRotation=0` (dann wie `180`) |
+| `lwRotate180` | `False` `True` (nicht in der PPD, veraltet) | wirkt nur bei `lwRotation=0` (dann wie `180`); Updates (postinstall, `lwctl install`) übernehmen den alten Warteschlangen-Standard `True` als `lwRotation=180` |
 | `lwRotation` | `0` `90` `180` `270` | Drehung im Uhrzeigersinn: 90/270 in Software vor dem Abschneiden, 180 per `^POI`/`ZB`/CPCL-Bitmap |
 | `lwMarkOffset` | `Default`, `-80`…`283` Punkte (PPD: -10 -5 -3 -2 -1 0 1 2 3 4 5 10 15 20 25 30 35 mm je Auflösung) | `^MNM,n` (nur `BlackMark`, nur ZPL); mm-Werte außerhalb des Bereichs entfallen |
 | `lwStopAtLast` | `False` `True` | nur `Continuous`: Seitenhöhe = letzte schwarze Zeile + 1 + `lwStopOffset` |
 | `lwStopOffset` | `0`…`32000` Punkte (PPD: 0 1 2 3 5 10 mm je Auflösung) | Abstand nach dem letzten Element |
-| `lwPauseEvery` | `0`…`9999` (PPD: 0 1 2 5 10 25 50 100) | `^PQn,p,0,N` (Vorrang vor `lwCutEvery`) |
+| `lwPauseEvery` | `0`…`9999` (PPD: 0 1 2 5 10 25 50 100) | `^PQn,p,0,N` (Vorrang vor `lwCutEvery`; je Seite und Kopiengruppe, ohne Wirkung bei sortierten Aufträgen mit mehreren Seiten, §8) |
 | `lwControlChars` | `Standard` `Printer` | `Printer` („Intern“): eigene Steuerzeichen aus `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` |
 | `lwFormatPrefix` `lwControlPrefix` `lwDelimiter` | `33`…`126` (dezimaler ASCII-Code, nicht in der PPD) | ersetzt `^` / `~` / `,`; fehlend oder ungültig → Standardzeichen |
 | `lwRTC` | `Default` `JobStart` `EveryLabel` `EveryMinute` | `^ST` (Ortszeit) |
 | `lwCancelBefore` | `False` `True` | `~JA` vor dem Auftrag (ZPL, EPL) |
 | `lwCancelDelay` | `0`…`10000` ms (PPD: 0 250 500 1000 2000 3000 5000 10000) | Wartezeit des Filters nach `~JA` (Standard 1000) |
-| `lwPowerUpAction` `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` | `^MFa,b` (nur wenn beide gesetzt) |
+| `lwPowerUpAction` `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` | `^MFa,b` (nur wenn beide gesetzt); die Aktion beim Einschalten wirkt erst beim nächsten Einschalten und braucht `lwSaveSettings=True` (§8) |
 | `lwDither` | `Threshold` `Ordered` `Halftone` `FloydSteinberg` `Atkinson` `Stucki` | |
 | `lwThreshold` | `1`…`254` (PPD: 64 96 128 160 192) | |
 | `lwCompression` | `Z64` `ACS` `Hex` | |
-| `lwCutEvery` | `0`…`9999` (PPD: 0 1 2 5 10 25 50 100) | |
+| `lwCutEvery` | `0`…`9999` (PPD: 0 1 2 5 10 25 50 100) | `^PQn,c,0,Y` (je Seite und Kopiengruppe wie `lwPauseEvery`) |
 | `lwCalibrate` `lwSaveSettings` `lwSkipBlank` | `False` `True` | |
 | `lwStartCmd` `lwEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle vor/nach dem Auftrag |
 | `lwLabelStartCmd` `lwLabelEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle am Anfang/Ende jedes Etiketts |
@@ -928,9 +937,12 @@ Windows-Treiber: „Seite einrichten“ (Seitengröße, `lwMediaTracking`, `lwMa
 `lwCalibrate`, `lwSaveSettings`, `lwSkipBlank`, `lwPowerUpAction`, `lwHeadCloseAction`, Auflösung,
 Farbmodell).
 
-Lesen der neuen Optionen (Swift `PrintSettings(cupsOptions:)`, C-Filter, Python-Referenz gleich):
-`lwRotation` ungültig → 0; `lwControlChars` ohne Beachtung der Groß-/Kleinschreibung, nur `Printer`
-aktiviert `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` (je fehlend, `Default` oder außerhalb
+Lesen der Optionen (Swift `PrintSettings(cupsOptions:)`, C-Filter, Python-Referenz gleich): Leerraum
+` \t\r\n\v\f` am Rand zählt nicht, leere Werte gelten als nicht gesetzt; Aufzählungen, `Default`
+und Wahrheitswerte ohne Beachtung der Groß-/Kleinschreibung (nur ASCII: `everylabel` = `EveryLabel`);
+Ganzzahlen optional mit `Custom.`-Präfix und Vorzeichen, sonst nur Ziffern (`12 mm`, `1.5` ungültig);
+`lwRotation` nur exakt `0`/`90`/`180`/`270` (`+90`, `090` ungültig → 0); `lwControlChars`: nur
+`Printer` aktiviert `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` (je fehlend, `Default` oder außerhalb
 33…126 → Standardzeichen `^`/`~`/`,`); Zahlen außerhalb des Bereichs werden begrenzt (`lwMarkOffset`
 −80…283, `lwStopOffset` 0…32000, `lwPauseEvery` 0…9999, `lwCancelDelay` 0…10000). `cupsOptions()`
 schreibt `lwRotation` und `lwRotate180` unverändert (Rundreise exakt), `lwFormatPrefix`… nur bei
