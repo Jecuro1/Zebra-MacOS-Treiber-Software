@@ -9,7 +9,8 @@ import LabelWerkCore
 ///
 /// Vor dem Rastern (nur ``encode(images:pageSizes:copies:collate:)``): Schritt F „An Etikett
 /// anpassen“ (``LabelFit``) für Seiten, deren Größe nicht zum Etikett passt – Inhalt zuschneiden,
-/// bei Bedarf um 90° drehen, auf das Etikett abzüglich 1,5 mm Rand skalieren, mittig setzen.
+/// bei Bedarf um 90° drehen, auf das Etikett abzüglich 1,5 mm Rand skalieren, mittig setzen; Drehung
+/// und Maßstab einheitlich für Seiten gleicher Größe (``LabelFit/Reference``).
 ///
 /// Ablauf je Seite (Vorverarbeitung):
 /// 0. Wirksame Drehung (``PrintSettings/effectiveRotation``) 90° bzw. 270° → Bitmap im
@@ -128,19 +129,37 @@ public struct JobEncoder: Sendable {
         guard pageSizes.count == images.count else {
             throw ImagingError.invalidArgument("\(pageSizes.count) Seitengrößen für \(images.count) Bilder")
         }
-        let fittedImages = zip(images, pageSizes).map { fitted($0, pageSize: $1) }
-        return try encode(images: fittedImages, copies: copies, collate: collate)
+        return try encode(images: fitted(images, pageSizes: pageSizes), copies: copies, collate: collate)
     }
 
-    /// Schritt F aus §8 für ein Bild: legt eine Seite, deren Größe (`pageSize`, Punkte) um mehr als
-    /// 2 mm vom Etikett (`settings.labelWidthHundredthsMM` × `labelHeightHundredthsMM`) abweicht,
-    /// auf das Etikett (Auflösung des Encoders in beide Richtungen; Inhalt ggf. gedreht und
-    /// vergrößert bzw. verkleinert, 1,5 mm Rand). Sonst unverändert.
+    /// Schritt F aus §8 für alle Seiten eines Auftrags (gleich viele Seitengrößen wie Bilder, sonst
+    /// gelten fehlende als `nil`): jede Seite wie ``fitted(_:pageSize:)``, Drehung und Maßstab aber
+    /// einheitlich für Seiten gleicher Größe (``LabelFit/Reference`` – die erste angepasste Seite mit
+    /// Inhalt entscheidet für die folgenden).
+    public func fitted(_ images: [GrayImage], pageSizes: [PageSizePoints?]) -> [GrayImage] {
+        var reference: LabelFit.Reference?
+        return images.enumerated().map { index, image in
+            let pageSize = index < pageSizes.count ? pageSizes[index] : nil
+            guard let pageSize, let plan = fitPlan(image, pageSize: pageSize),
+                  let pageWidth = LabelFit.hundredthsMM(fromPoints: pageSize.width),
+                  let pageHeight = LabelFit.hundredthsMM(fromPoints: pageSize.height)
+            else { return image }
+            return LabelFit.apply(image, plan: plan, pageWidth: pageWidth, pageHeight: pageHeight,
+                                  reference: &reference)
+        }
+    }
+
+    /// Schritt F aus §8 für ein Bild (allein bzw. die erste Seite eines Auftrags): legt eine Seite,
+    /// deren Größe (`pageSize`, Punkte) um mehr als 2 mm vom Etikett (`settings.labelWidthHundredthsMM`
+    /// × `labelHeightHundredthsMM`) abweicht, auf das Etikett (Auflösung des Encoders in beide
+    /// Richtungen; Inhalt ggf. gedreht und vergrößert bzw. verkleinert, 1,5 mm Rand). Sonst unverändert.
     public func fitted(_ image: GrayImage, pageSize: PageSizePoints?) -> GrayImage {
-        guard let plan = LabelFit.plan(settings: settings, pageSize: pageSize, xDPI: resolution.dpi,
-                                       yDPI: resolution.dpi, imageWidth: image.width, imageHeight: image.height)
-        else { return image }
-        return LabelFit.apply(image, plan: plan)
+        fitted([image], pageSizes: [pageSize])[0]
+    }
+
+    private func fitPlan(_ image: GrayImage, pageSize: PageSizePoints) -> LabelFit.Plan? {
+        LabelFit.plan(settings: settings, pageSize: pageSize, xDPI: resolution.dpi, yDPI: resolution.dpi,
+                      imageWidth: image.width, imageHeight: image.height)
     }
 
     /// Wendet die Vorverarbeitung (Schritte 0–5) auf eine Seite an, z. B. für eine

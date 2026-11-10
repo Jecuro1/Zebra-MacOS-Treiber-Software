@@ -43,7 +43,9 @@ struct QueueAdoptionTests {
     @Test func comparesHostsCaseInsensitivelyWithoutDecoration() {
         #expect(decide("ipp://zd621-lager.LOCAL.:631/ipp/print", name: "ZD621")
                 == .adopt(printerID: "lager", deviceURI: "socket://ZD621-Lager.local:9100"))
-        #expect(decide("lpd://admin@ZD621-LAGER.local/queue", name: "ZD621")
+        #expect(decide("lpd://admin@ZD621-LAGER.local", name: "ZD621")
+                == .adopt(printerID: "lager", deviceURI: "socket://ZD621-Lager.local:9100"))
+        #expect(decide("IPP://zd621-lager.local/IPP/Print?waitjob=false", name: "ZD621")
                 == .adopt(printerID: "lager", deviceURI: "socket://ZD621-Lager.local:9100"))
         let v6 = QueueAdoption.RegisteredPrinter(id: "v6", host: "fe80::1%en0", port: 9100)
         #expect(decide("ipp://[FE80::1%25en0]:631/ipp/print", name: "v6", printers: [v6])
@@ -64,6 +66,69 @@ struct QueueAdoptionTests {
         #expect(decide("") == .ignore)
         #expect(decide("ipp://10.62.13.19/ipp/print", name: "  ") == .ignore)
         #expect(decide("ipp://10.62.13.19/ipp/print", printers: []) == .ignore)
+    }
+
+    @Test func neverTouchesQueuesOfAPrintServerOrLoopback() {
+        // Ein in LabelWerk über einen Druckserver erreichter Drucker: alle anderen Warteschlangen
+        // dieses Servers gehören zu anderen Geräten.
+        let server = QueueAdoption.RegisteredPrinter(id: "zebra", host: "printserver.firma.local")
+        let windows = QueueAdoption.RegisteredPrinter(id: "zebra", host: "winsrv")
+        let box = QueueAdoption.RegisteredPrinter(id: "zebra", host: "10.62.13.19")
+        for (uri, printer) in [
+            ("ipp://printserver.firma.local/printers/HP_LaserJet", server),
+            ("ipp://printserver.firma.local/printers/Zebra_ZD421", server),
+            ("ipps://printserver.firma.local:631/classes/Etiketten", server),
+            ("http://winsrv:631/printers/Kyocera/.printer", windows),
+            ("https://winsrv/printers/Kyocera/.printer", windows),
+            ("ipp://winsrv/printers/Kyocera", windows),
+            ("lpd://winsrv/Kyocera", windows),
+            ("lpd://10.62.13.19/PORT2", box),
+            ("lpd://10.62.13.19/queue", box),
+            ("ipp://10.62.13.19/printer", box),
+            ("ipp://10.62.13.19/ipps", box),
+        ] {
+            #expect(decide(uri, name: "Q", makeAndModel: "HP LaserJet Pro M404 Postscript", printers: [printer])
+                    == .ignore, "\(uri)")
+        }
+        // Loopback: Tunnel, Proxy oder lokaler Druckserver – nie das Gerät selbst.
+        for host in ["localhost", "LOCALHOST.", "printer.localhost", "127.0.0.1", "127.1.2.3", "[::1]",
+                     "[0:0:0:0:0:0:0:1]", "[::ffff:127.0.0.1]"] {
+            let printer = QueueAdoption.RegisteredPrinter(id: "local", host: host)
+            #expect(decide("socket://\(host):9100", name: "Q", printers: [printer]) == .ignore, "\(host)")
+            #expect(decide("ipp://\(host)/ipp/print", name: "Q", printers: [printer]) == .ignore, "\(host)")
+            #expect(decide("ipp://\(host):631/printers/Zebra", name: "Q", printers: [printer]) == .ignore, "\(host)")
+        }
+    }
+
+    @Test func deviceEndpoints() {
+        func device(_ uri: String) -> Bool { QueueAdoption.deviceEndpoint(ofDeviceURI: uri) != nil }
+        #expect(device("socket://10.62.13.19"))
+        #expect(device("socket://10.62.13.19:9100?waiteof=false"))
+        #expect(device("ipp://10.62.13.19"))
+        #expect(device("ipp://10.62.13.19/"))
+        #expect(device("ipp://10.62.13.19/ipp"))
+        #expect(device("ipp://10.62.13.19/ipp/"))
+        #expect(device("ipps://10.62.13.19:631/ipp/print"))
+        #expect(device("http://10.62.13.19:631/ipp?x=/printers/y"))
+        #expect(device("lpd://10.62.13.19"))
+        #expect(device("lpd://10.62.13.19/"))
+        #expect(device("lpd://10.62.13.19/?banner=on"))
+        #expect(!device("ipp://10.62.13.19/printers/Zebra"))
+        #expect(!device("ipp://10.62.13.19/ippprint"))
+        #expect(!device("lpd://10.62.13.19/raw"))
+        #expect(!device("usb://Zebra%20Technologies/ZTC%20ZD421"))
+        #expect(!device("dnssd://Zebra._ipp._tcp.local./"))
+        #expect(!device("socket://localhost:9100"))
+        #expect(QueueAdoption.path(ofDeviceURI: "ipp://h:631/ipp/print?x=/y#z") == "/ipp/print")
+        #expect(QueueAdoption.path(ofDeviceURI: "socket://h:9100") == "")
+        #expect(QueueAdoption.path(ofDeviceURI: "lpd://h/?x=1") == "/")
+        #expect(QueueAdoption.path(ofDeviceURI: "/dev/null") == "")
+        #expect(QueueAdoption.isLoopbackHost("::1%lo0"))
+        #expect(!QueueAdoption.isLoopbackHost("128.0.0.1"))
+        #expect(!QueueAdoption.isLoopbackHost("fe80::1"))
+        #expect(!QueueAdoption.isLoopbackHost("::"))
+        #expect(!QueueAdoption.isLoopbackHost("localhost-printer.local"))
+        #expect(!QueueAdoption.isLoopbackHost(""))
     }
 
     @Test func labelWerkQueuesNeedNoAdoption() {
@@ -103,6 +168,17 @@ struct QueueAdoptionTests {
                 == QueueAdoption.RegisteredPrinter(id: "q", host: "zd421.local", port: 9100))
         #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "usb://Zebra%20Technologies/ZTC%20ZD421") == nil)
         #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "dnssd://Zebra._ipp._tcp.local./") == nil)
+        // Über die Freigabe eines Druckservers: dessen Host ist nicht der Drucker.
+        #expect(QueueAdoption.registeredPrinter(id: "q",
+                                                queueDeviceURI: "ipp://printserver.firma.local/printers/Zebra_ZD421") == nil)
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "http://winsrv:631/printers/Zebra/.printer") == nil)
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "lpd://winsrv/Zebra") == nil)
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "ipp://localhost:631/printers/Zebra") == nil)
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "socket://127.0.0.1:9100") == nil)
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "ipps://ZD421.local/ipp/print")
+                == QueueAdoption.RegisteredPrinter(id: "q", host: "zd421.local", port: 9100))
+        #expect(QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "lpd://10.62.13.19")
+                == QueueAdoption.RegisteredPrinter(id: "q", host: "10.62.13.19", port: 9100))
         // Eine zweite Warteschlange desselben Geräts wird dann übernommen.
         let viaQueue = QueueAdoption.registeredPrinter(id: "q", queueDeviceURI: "lpd://10.62.13.19/")!
         #expect(decide("ipp://10.62.13.19/ipp/print", printers: [viaQueue])

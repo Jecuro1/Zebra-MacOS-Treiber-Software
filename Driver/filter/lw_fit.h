@@ -12,8 +12,13 @@
  * (double, exakt wie spezifiziert).
  *
  * Freie Seite: Bei Endlosmaterial (lwMediaTracking=Continuous) oder lwLabelHeight=0 ist die
- * Etikettenlänge frei – angepasst wird nur die Breite (bei 90°/270° Drehung entsprechend die
- * Seitenhöhe), gedreht wird dann nie.
+ * Etikettenlänge frei – angepasst (nur verkleinert, nie vergrößert) wird nur die Breite (bei 90°/270°
+ * Drehung entsprechend die Seitenhöhe), die Länge folgt dem Inhalt, gedreht wird dann nie.
+ *
+ * Einheitlich je Auftrag (§8 „F“, Referenz): Die erste angepasste Seite mit Inhalt legt Drehung und
+ * Maßstab fest; folgende Seiten gleicher Größe (± 2 mm) und gleichen Etiketts übernehmen beides
+ * (den Maßstab nur, wenn ihr Inhalt damit in den Rahmen passt, sonst ihren eigenen). Eine Seite, zu
+ * der die Referenz nicht passt, entscheidet selbst und wird die neue Referenz.
  */
 
 #ifndef LW_FIT_H
@@ -29,7 +34,7 @@
 #define LW_FIT_CONTENT_LEVEL 250
 /** Abweichung in 1/100 mm, ab der angepasst wird (> 2 mm). */
 #define LW_FIT_TOLERANCE 200
-/** Größte Etikettenseite in Punkten (ZPL ^LL); auch Obergrenze einer freien Seite beim Vergrößern. */
+/** Größte feste Etikettenseite in Punkten (ZPL ^LL). */
 #define LW_FIT_MAX_DOTS 32000
 /** Größte gültige Seitenseite in Punkten (1/72 Zoll). */
 #define LW_FIT_MAX_PAGE_POINTS 100000.0
@@ -41,13 +46,25 @@
 #define LW_FIT_TURN_CW 90      /* im Uhrzeigersinn: (x, y) → (bh − 1 − y, x) */
 #define LW_FIT_TURN_CCW 270    /* gegen den Uhrzeigersinn: (x, y) → (y, bw − 1 − x) */
 
-/** Etikett in Punkten der Seite (0 = frei) und Sicherheitsrand je Seite in Punkten. */
+/** Etikett in Punkten der Seite (0 = frei) und Sicherheitsrand je Seite in Punkten; dazu die
+ *  Seitengröße in 1/100 mm (für die Referenz, von lw_fit_decide gesetzt). */
 typedef struct lw_fit_plan {
     int width;
     int height;
     int margin_x;   /* links und rechts */
     int margin_y;   /* oben und unten */
+    long page_w;    /* Seite in 1/100 mm (0 = unbekannt) */
+    long page_h;
 } lw_fit_plan;
+
+/** Referenz eines Auftrags (§8 „F“): Entscheidung einer Seite für die folgenden gleicher Größe. */
+typedef struct lw_fit_reference {
+    bool valid;
+    lw_fit_plan plan;          /* Etikett, Rand und Seitengröße der Referenzseite */
+    int turn;                  /* LW_FIT_TURN_* */
+    long long scale_num;       /* Maßstab als Bruch scale_num / scale_den */
+    long long scale_den;
+} lw_fit_reference;
 
 /** Punkte → 1/100 mm: floor(points * 2540.0 / 72.0 + 0.5); −1 bei ungültigem Wert
  *  (nicht 0 < points ≤ LW_FIT_MAX_PAGE_POINTS, auch NaN). */
@@ -80,13 +97,27 @@ int lw_fit_rotation(const lw_fit_plan *plan, int bw, int bh);
  */
 void lw_fit_rotate(const uint8_t *lum, size_t stride, int x0, int y0, int bw, int bh, int turn, uint8_t *dst);
 
-/** Schritt F.4: Zielrahmen für Inhalt `rw` × `rh`: feste Seite minus 2 · Rand (zu klein → ganze
- *  Seite), freie Seite max(Inhalt, LW_FIT_MAX_DOTS). */
+/** Schritt F.3/F.4: Zielrahmen für Inhalt `rw` × `rh`: feste Seite minus 2 · Rand (zu klein → ganze
+ *  Seite), freie Seite = Inhalt (entlang einer freien Seite wird nie vergrößert). */
 void lw_fit_box(const lw_fit_plan *plan, int rw, int rh, long long *box_w, long long *box_h);
 
-/** Schritt F.4: Zielgröße des (ggf. gedrehten) Inhalts `rw` × `rh`: so groß wie möglich im Rahmen
- *  (vergrößern und verkleinern), Seitenverhältnis erhalten. */
+/** Schritt F.4: eigener Maßstab des (ggf. gedrehten) Inhalts `rw` × `rh` als Bruch `*num` / `*den`:
+ *  (BW, rw), wenn BW · rh ≤ BH · rw, sonst (BH, rh) – so groß wie möglich im Rahmen. */
+void lw_fit_scale(int rw, int rh, const lw_fit_plan *plan, long long *num, long long *den);
+
+/** Schritt F.4: `rw` × `rh` mit dem Maßstab num/den, je Seite kaufmännisch gerundet, mindestens 1. */
+void lw_fit_scaled_size(int rw, int rh, long long num, long long den, int *tw, int *th);
+
+/** Schritt F.4 ohne Referenz: Zielgröße des (ggf. gedrehten) Inhalts `rw` × `rh` – so groß wie
+ *  möglich im Rahmen (vergrößern und verkleinern), Seitenverhältnis erhalten. */
 void lw_fit_target_size(int rw, int rh, const lw_fit_plan *plan, int *tw, int *th);
+
+/** Leere Referenz (Auftragsbeginn). */
+void lw_fit_reference_init(lw_fit_reference *ref);
+
+/** Gilt die Referenz für eine Seite mit diesem Plan? Gleiches Etikett und gleicher Rand, Seitengröße
+ *  auf ± 2 mm (LW_FIT_TOLERANCE) gleich. */
+bool lw_fit_reference_applies(const lw_fit_reference *ref, const lw_fit_plan *plan);
 
 /**
  * Schritt F.5: Flächenmittel des Ausschnitts (x0, y0, bw, bh) eines Bildes mit Zeilenabstand
@@ -99,9 +130,12 @@ bool lw_fit_area_average(const uint8_t *lum, size_t stride, int x0, int y0, int 
 /**
  * Schritte F.2–F.6: legt das Bild auf das Etikett. `*out` erhält ein neues Bild (malloc,
  * `*out_w` × `*out_h`, Zeilenabstand `*out_w`); `*turn` (darf NULL sein) die Drehung aus F.3.
- * Liefert false bei Speichermangel.
+ * `ref` (darf NULL sein: Seite entscheidet allein) ist die Referenz des Auftrags: Gilt sie
+ * (lw_fit_reference_applies), übernimmt die Seite Drehung und – wenn ihr Inhalt damit in den Rahmen
+ * passt – Maßstab; sonst entscheidet die Seite selbst und wird (mit Inhalt) die neue Referenz.
+ * Liefert false bei Speichermangel (`ref` unverändert).
  */
-bool lw_fit_apply(const lw_fit_plan *plan, const uint8_t *lum, int width, int height,
+bool lw_fit_apply(const lw_fit_plan *plan, lw_fit_reference *ref, const uint8_t *lum, int width, int height,
                   uint8_t **out, int *out_w, int *out_h, int *turn);
 
 #endif /* LW_FIT_H */

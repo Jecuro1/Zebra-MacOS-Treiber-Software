@@ -3031,6 +3031,12 @@
 "macOS-Drucker nicht aktualisiert" = "macOS-Drucker nicht aktualisiert";
 "macOS-Drucker aktualisiert" = "macOS-Drucker aktualisiert";
 "Alle Programme drucken auf „%@“ mit den Einstellungen aus LabelWerk." = "Alle Programme drucken auf „%@“ mit den Einstellungen aus LabelWerk.";
+"Im Druckdialog heißt er jetzt „%@“." = "Im Druckdialog heißt er jetzt „%@“.";
+"macOS-Drucker „%@“ nutzt jetzt den LabelWerk-Treiber." = "macOS-Drucker „%@“ nutzt jetzt den LabelWerk-Treiber.";
+"Die macOS-Drucker %@ nutzen jetzt den LabelWerk-Treiber." = "Die macOS-Drucker %@ nutzen jetzt den LabelWerk-Treiber.";
+"„%@“ verwendet weiterhin nicht den LabelWerk-Treiber: %@" = "„%@“ verwendet weiterhin nicht den LabelWerk-Treiber: %@";
+"%@ verwenden weiterhin nicht den LabelWerk-Treiber: %@" = "%@ verwenden weiterhin nicht den LabelWerk-Treiber: %@";
+"macOS-Drucker nicht umgestellt" = "macOS-Drucker nicht umgestellt";
 
 /* MARK: Services/UpdateController.swift */
 "Updates gibt es nur für die installierte App – ohne App-Bundle ist keine Version bekannt." = "Updates gibt es nur für die installierte App – ohne App-Bundle ist keine Version bekannt.";

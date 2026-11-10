@@ -27,6 +27,12 @@ public struct PageSizePoints: Hashable, Sendable, Codable {
 /// gedreht (Inhalt und Etikett verschieden ausgerichtet), per Flächenmittel auf das Etikett abzüglich
 /// 1,5 mm Rand je Seite vergrößert oder verkleinert und mittig auf ein weißes Etikett gesetzt.
 ///
+/// Einheitlich je Auftrag (``Reference``): Die erste angepasste Seite mit Inhalt legt Drehung und
+/// Maßstab fest; folgende Seiten gleicher Größe (± 2 mm) und gleichen Etiketts übernehmen beides
+/// (den Maßstab nur, wenn ihr Inhalt damit in den Rahmen passt). Eine Seite, zu der die Referenz nicht
+/// passt, entscheidet selbst und wird die neue Referenz. Bei freier Länge (Endlosmaterial) wird nie
+/// vergrößert.
+///
 /// Byte-gleich mit `lw_fit` im CUPS-Filter und `fit_page` der Python-Referenz: Bis auf die
 /// Umrechnung Punkte → 1/100 mm (``hundredthsMM(fromPoints:)``, `Double`) rechnet alles mit
 /// Ganzzahlen.
@@ -35,8 +41,7 @@ public enum LabelFit {
     public static let contentLevel: UInt8 = 250
     /// Abweichung in 1/100 mm, ab der angepasst wird (mehr als 2 mm).
     public static let toleranceHundredthsMM = 200
-    /// Größte Etikettenseite in Punkten (ZPL `^LL`); auch Obergrenze einer freien Seite beim
-    /// Vergrößern.
+    /// Größte feste Etikettenseite in Punkten (ZPL `^LL`).
     public static let maxDots = 32_000
     /// Sicherheitsrand je Seite in 1/100 mm (1,5 mm).
     public static let marginHundredthsMM = 150
@@ -58,6 +63,46 @@ public enum LabelFit {
             self.height = height
             self.marginX = marginX
             self.marginY = marginY
+        }
+    }
+
+    /// Maßstab als Bruch `numerator / denominator` (Schritt F.4).
+    public struct Scale: Hashable, Sendable {
+        public var numerator: Int
+        public var denominator: Int
+
+        public init(numerator: Int, denominator: Int) {
+            self.numerator = numerator
+            self.denominator = denominator
+        }
+    }
+
+    /// Referenz eines Auftrags (§8 „F“): Entscheidung einer Seite, die für die folgenden Seiten gleicher
+    /// Größe gilt.
+    public struct Reference: Hashable, Sendable {
+        /// Etikett und Rand der Referenzseite.
+        public var plan: Plan
+        /// Seitengröße der Referenzseite in 1/100 mm.
+        public var pageWidth: Int
+        public var pageHeight: Int
+        /// Drehung aus Schritt F.3.
+        public var turn: QuarterTurn
+        /// Maßstab aus Schritt F.4.
+        public var scale: Scale
+
+        public init(plan: Plan, pageWidth: Int, pageHeight: Int, turn: QuarterTurn, scale: Scale) {
+            self.plan = plan
+            self.pageWidth = pageWidth
+            self.pageHeight = pageHeight
+            self.turn = turn
+            self.scale = scale
+        }
+
+        /// Gilt die Referenz für eine Seite? Gleiches Etikett und gleicher Rand, Seitengröße (1/100 mm)
+        /// auf ± 2 mm gleich.
+        public func applies(to plan: Plan, pageWidth: Int, pageHeight: Int) -> Bool {
+            self.plan == plan && abs(pageWidth - self.pageWidth) <= LabelFit.toleranceHundredthsMM
+                && abs(pageHeight - self.pageHeight) <= LabelFit.toleranceHundredthsMM
         }
     }
 
@@ -148,26 +193,37 @@ public enum LabelFit {
         return .r0
     }
 
-    /// Schritt F.4: Zielrahmen für Inhalt `rw` × `rh`: feste Seite abzüglich zweimal Rand (zu klein →
-    /// ganze Seite), freie Seite `max(Inhalt, maxDots)`.
+    /// Schritt F.3/F.4: Zielrahmen für Inhalt `rw` × `rh`: feste Seite abzüglich zweimal Rand (zu klein →
+    /// ganze Seite), freie Seite = Inhalt (entlang einer freien Seite wird nie vergrößert).
     public static func box(contentWidth rw: Int, contentHeight rh: Int, plan: Plan) -> (width: Int, height: Int) {
         func inner(_ side: Int, _ margin: Int) -> Int {
             let value = side - 2 * margin
             return value >= 1 ? value : side
         }
-        return (plan.width.map { inner($0, plan.marginX) } ?? max(rw, maxDots),
-                plan.height.map { inner($0, plan.marginY) } ?? max(rh, maxDots))
+        return (plan.width.map { inner($0, plan.marginX) } ?? rw,
+                plan.height.map { inner($0, plan.marginY) } ?? rh)
     }
 
-    /// Schritt F.4: Zielgröße des (ggf. gedrehten) Inhalts – so groß wie möglich im Rahmen
-    /// (vergrößern und verkleinern), Seitenverhältnis erhalten (die abhängige Seite kaufmännisch
-    /// gerundet, mindestens 1).
-    public static func targetSize(contentWidth rw: Int, contentHeight rh: Int, plan: Plan) -> (width: Int, height: Int) {
+    /// Schritt F.4: eigener Maßstab des (ggf. gedrehten) Inhalts `rw` × `rh` – `BW / rw`, wenn
+    /// `BW · rh ≤ BH · rw`, sonst `BH / rh` (so groß wie möglich im Rahmen).
+    public static func scale(contentWidth rw: Int, contentHeight rh: Int, plan: Plan) -> Scale {
         let frame = box(contentWidth: rw, contentHeight: rh, plan: plan)
-        if frame.width * rh <= frame.height * rw {
-            return (frame.width, max(1, (2 * rh * frame.width + rw) / (2 * rw)))
-        }
-        return (max(1, (2 * rw * frame.height + rh) / (2 * rh)), frame.height)
+        return frame.width * rh <= frame.height * rw
+            ? Scale(numerator: frame.width, denominator: rw)
+            : Scale(numerator: frame.height, denominator: rh)
+    }
+
+    /// Schritt F.4: `rw` × `rh` mit dem Maßstab, je Seite kaufmännisch gerundet, mindestens 1.
+    public static func scaledSize(contentWidth rw: Int, contentHeight rh: Int, scale: Scale) -> (width: Int, height: Int) {
+        let n = scale.numerator, d = scale.denominator
+        return (max(1, (2 * rw * n + d) / (2 * d)), max(1, (2 * rh * n + d) / (2 * d)))
+    }
+
+    /// Schritt F.4 ohne Referenz: Zielgröße des (ggf. gedrehten) Inhalts – so groß wie möglich im
+    /// Rahmen (vergrößern und verkleinern), Seitenverhältnis erhalten (die begrenzende Seite füllt den
+    /// Rahmen genau, die abhängige kaufmännisch gerundet, mindestens 1).
+    public static func targetSize(contentWidth rw: Int, contentHeight rh: Int, plan: Plan) -> (width: Int, height: Int) {
+        scaledSize(contentWidth: rw, contentHeight: rh, scale: scale(contentWidth: rw, contentHeight: rh, plan: plan))
     }
 
     /// Schritt F.5: Flächenmittel des Ausschnitts (`x`, `y`, `width`, `height`) auf
@@ -239,14 +295,27 @@ public enum LabelFit {
         return GrayImage(width: tw, height: th, pixels: out)
     }
 
-    /// Schritte F.2–F.6: legt das Bild nach `plan` auf das Etikett – Inhalt zuschneiden, bei Bedarf
-    /// drehen (``rotation(contentWidth:contentHeight:plan:)``), skalieren, mittig einsetzen (leere
-    /// Seite → weißes Etikett, freie Seite 1 Punkt).
+    /// Schritte F.2–F.6 für eine Seite ohne Referenz (allein bzw. als erste Seite eines Auftrags):
+    /// legt das Bild nach `plan` auf das Etikett – Inhalt zuschneiden, bei Bedarf drehen
+    /// (``rotation(contentWidth:contentHeight:plan:)``), skalieren, mittig einsetzen (leere Seite →
+    /// weißes Etikett, freie Seite 1 Punkt).
     public static func apply(_ image: GrayImage, plan: Plan) -> GrayImage {
+        var reference: Reference?
+        return apply(image, plan: plan, pageWidth: 0, pageHeight: 0, reference: &reference)
+    }
+
+    /// Schritte F.2–F.6 für eine Seite eines Auftrags: Gilt `reference`
+    /// (``Reference/applies(to:pageWidth:pageHeight:)`` mit der Seitengröße in 1/100 mm), übernimmt die
+    /// Seite deren Drehung und – wenn ihr Inhalt damit in den Rahmen passt – deren Maßstab; sonst
+    /// entscheidet sie selbst und wird (mit Inhalt) die neue Referenz. Leere Seiten ändern `reference`
+    /// nicht.
+    public static func apply(_ image: GrayImage, plan: Plan, pageWidth: Int, pageHeight: Int,
+                             reference: inout Reference?) -> GrayImage {
         guard let bounds = contentBounds(image) else {
             return GrayImage(width: plan.width ?? 1, height: plan.height ?? 1, fill: 255)
         }
-        let turn = rotation(contentWidth: bounds.width, contentHeight: bounds.height, plan: plan)
+        let current = reference.flatMap { $0.applies(to: plan, pageWidth: pageWidth, pageHeight: pageHeight) ? $0 : nil }
+        let turn = current?.turn ?? rotation(contentWidth: bounds.width, contentHeight: bounds.height, plan: plan)
         let source: GrayImage
         let region: (x: Int, y: Int, width: Int, height: Int)
         if turn == .r0 {
@@ -256,7 +325,16 @@ public enum LabelFit {
             source = image.cropped(x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height).rotated(turn)
             region = (0, 0, source.width, source.height)
         }
-        let target = targetSize(contentWidth: region.width, contentHeight: region.height, plan: plan)
+        // Maßstab: eigener; mit Referenz deren, solange der Inhalt damit in den Rahmen passt
+        // (s_R ≤ s_p ⇔ n_R · d_p ≤ n_p · d_R).
+        var factor = scale(contentWidth: region.width, contentHeight: region.height, plan: plan)
+        if let current,
+           current.scale.numerator * factor.denominator <= factor.numerator * current.scale.denominator {
+            factor = current.scale
+        } else if current == nil {
+            reference = Reference(plan: plan, pageWidth: pageWidth, pageHeight: pageHeight, turn: turn, scale: factor)
+        }
+        let target = scaledSize(contentWidth: region.width, contentHeight: region.height, scale: factor)
         let scaled = areaAverage(source, x: region.x, y: region.y, width: region.width, height: region.height,
                                  toWidth: target.width, toHeight: target.height)
         let canvasWidth = plan.width ?? target.width

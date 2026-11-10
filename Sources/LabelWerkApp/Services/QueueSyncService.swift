@@ -32,8 +32,8 @@ import LabelWerkKit
 /// Netzwerkdrucker führt (z. B. „10.62.13.19“ aus „Drucker & Scanner“ mit AirPrint), stellt der Dienst
 /// still auf den LabelWerk-Treiber um (`QueueAdoption.decide`, ``CUPSService/adoptQueue(_:deviceURI:description:configuration:allowAdminPrompt:)``)
 /// und meldet das mit einem Hinweis – nach dem Start, bei jedem Aktivieren der App (``adoptionDebounce``)
-/// und wenn ein Drucker hinzukommt oder seine Verbindung ändert. Warteschlangen anderer Hosts bleiben
-/// unberührt.
+/// und wenn ein Drucker hinzukommt oder seine Verbindung ändert. Warteschlangen anderer Hosts und
+/// Freigaben eines Druckservers (`…/printers/…`) bleiben unberührt (`QueueAdoption.deviceEndpoint`).
 @MainActor
 final class QueueSyncService {
 
@@ -433,11 +433,16 @@ final class QueueSyncService {
                 host: printers.first { $0.id == printerID }?.host, queueName: info.name,
                 printerHasOtherQueue: hasOtherQueue)
             do {
-                try await serialized {
+                // `adoptQueue` liest die Warteschlange in der Reihe der `lpadmin`-Aufrufe erneut: Hat eine
+                // gleichzeitige Prüfung (Aktivieren der App, „OK“/„Übernehmen“, „Erneut versuchen“) sie
+                // nach demselben `lpstat`-Stand schon umgestellt, folgt weder ein zweites `lpadmin` noch
+                // ein zweiter Hinweis.
+                let changed = try await serialized {
                     try await CUPSService.adoptQueue(info.name, deviceURI: deviceURI, description: description,
                                                      configuration: configuration, allowAdminPrompt: allowAdminPrompt)
                 }
                 failedAdoptions[info.name] = nil
+                guard changed else { continue }
                 record(info.name, for: session, existing: existing)
                 adopted.append((info.name, description))
             } catch {

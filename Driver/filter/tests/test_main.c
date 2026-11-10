@@ -2324,7 +2324,7 @@ static void test_fit(void)
     /* Entscheidung */
     lw_settings s;
     lw_settings_init(&s);
-    lw_fit_plan plan = { -1, -1, -1, -1 };
+    lw_fit_plan plan = { -1, -1, -1, -1, 0, 0 };
     CHECK(!lw_fit_decide(&s, 100, 100, 595.0, 842.0, 203, 203, &plan));        /* Etikett unbekannt */
     s.label_width = 10400;
     s.label_height = 7620;
@@ -2333,6 +2333,7 @@ static void test_fit(void)
     CHECK_INT(plan.height, 609);
     CHECK_INT(plan.margin_x, 12);                                               /* 1,5 mm bei 203 dpi */
     CHECK_INT(plan.margin_y, 12);
+    CHECK_INT(plan.page_w, 20990); CHECK_INT(plan.page_h, 29704);              /* für die Referenz */
     CHECK(lw_fit_decide(&s, 100, 100, 595.0, 842.0, 300, 600, &plan));
     CHECK_INT(plan.width, 1228); CHECK_INT(plan.height, 1800);
     CHECK_INT(plan.margin_x, 18); CHECK_INT(plan.margin_y, 35);
@@ -2381,34 +2382,47 @@ static void test_fit(void)
     CHECK(lw_fit_content_bounds(page, 10, 10, &x0, &y0, &bw, &bh));
     CHECK_INT(x0, 1); CHECK_INT(y0, 5); CHECK_INT(bw, 4); CHECK_INT(bh, 3);
 
-    /* Zielrahmen und Zielgröße: vergrößern und verkleinern, Rand, freie Seite höchstens 32000 */
+    /* Zielrahmen und Zielgröße: vergrößern und verkleinern, Rand, freie Seite = Inhalt (nie größer) */
     int tw = 0, th = 0;
     long long box_w = 0, box_h = 0;
-    lw_fit_plan both = { 200, 200, 0, 0 }, width_only = { 200, 0, 0, 0 }, height_only = { 0, 200, 0, 0 };
-    lw_fit_plan label = { 831, 609, 12, 12 }, tiny = { 20, 30, 10, 14 }, endless = { 831, 0, 12, 12 };
+    lw_fit_plan both = { 200, 200, 0, 0, 0, 0 }, width_only = { 200, 0, 0, 0, 0, 0 }, height_only = { 0, 200, 0, 0, 0, 0 };
+    lw_fit_plan label = { 831, 609, 12, 12, 0, 0 }, tiny = { 20, 30, 10, 14, 0, 0 }, endless = { 831, 0, 12, 12, 0, 0 };
     lw_fit_box(&label, 5, 5, &box_w, &box_h); CHECK(box_w == 807 && box_h == 585);
     lw_fit_box(&tiny, 5, 5, &box_w, &box_h); CHECK(box_w == 20 && box_h == 2);   /* Rand zu groß */
     lw_fit_box(&endless, 5, 40000, &box_w, &box_h); CHECK(box_w == 807 && box_h == 40000);
-    lw_fit_box(&height_only, 7, 5, &box_w, &box_h); CHECK(box_w == 32000 && box_h == 200);
+    lw_fit_box(&endless, 5, 7, &box_w, &box_h); CHECK(box_w == 807 && box_h == 7);
+    lw_fit_box(&height_only, 7, 5, &box_w, &box_h); CHECK(box_w == 7 && box_h == 200);
     lw_fit_target_size(100, 50, &both, &tw, &th); CHECK_INT(tw, 200); CHECK_INT(th, 100);   /* vergrößern */
     lw_fit_target_size(400, 100, &both, &tw, &th); CHECK_INT(tw, 200); CHECK_INT(th, 50);
     lw_fit_target_size(100, 400, &both, &tw, &th); CHECK_INT(tw, 50); CHECK_INT(th, 200);
     lw_fit_target_size(401, 3, &both, &tw, &th); CHECK_INT(tw, 200); CHECK_INT(th, 1);  /* 1,496 → 1 */
-    lw_fit_target_size(3, 1000, &width_only, &tw, &th); CHECK_INT(tw, 96); CHECK_INT(th, 32000);
+    lw_fit_target_size(3, 1000, &width_only, &tw, &th); CHECK_INT(tw, 3); CHECK_INT(th, 1000);   /* nie größer */
     lw_fit_target_size(1000, 3, &width_only, &tw, &th); CHECK_INT(tw, 200); CHECK_INT(th, 1);
     lw_fit_target_size(1000, 300, &height_only, &tw, &th); CHECK_INT(tw, 667); CHECK_INT(th, 200);
+    lw_fit_target_size(300, 100, &height_only, &tw, &th); CHECK_INT(tw, 300); CHECK_INT(th, 100);
     lw_fit_target_size(416, 305, &label, &tw, &th); CHECK_INT(tw, 798); CHECK_INT(th, 585);
+    /* Meldung der Prüfung: Seitenzahl bzw. dünner Strich auf Endlosmaterial 80 mm → unverändert */
+    lw_fit_plan roll = { 639, 0, 12, 12, 0, 0 };
+    lw_fit_target_size(12, 30, &roll, &tw, &th); CHECK_INT(tw, 12); CHECK_INT(th, 30);
+    lw_fit_target_size(2, 900, &roll, &tw, &th); CHECK_INT(tw, 2); CHECK_INT(th, 900);
+    lw_fit_target_size(1000, 300, &roll, &tw, &th); CHECK_INT(tw, 615); CHECK_INT(th, 185);
+    /* Maßstab als Bruch: eigener (begrenzende Seite füllt den Rahmen), mit fremdem gerundet */
+    long long num = 0, den = 0;
+    lw_fit_scale(100, 50, &both, &num, &den); CHECK(num == 200 && den == 100);
+    lw_fit_scale(100, 400, &both, &num, &den); CHECK(num == 200 && den == 400);
+    lw_fit_scaled_size(151, 205, 807, 350, &tw, &th); CHECK_INT(tw, 348); CHECK_INT(th, 473);
+    lw_fit_scaled_size(1, 1, 1, 9, &tw, &th); CHECK_INT(tw, 1); CHECK_INT(th, 1);           /* mindestens 1 */
 
     /* Drehung: nur bei festem Etikett und > 10 % Gewinn; Richtung nach dem Inhalt */
     CHECK_INT(lw_fit_rotation(&label, 305, 416), LW_FIT_TURN_CW);              /* Fall aus der Meldung */
     CHECK_INT(lw_fit_rotation(&label, 416, 305), LW_FIT_TURN_NONE);
     CHECK_INT(lw_fit_rotation(&label, 100, 110), LW_FIT_TURN_NONE);            /* genau 10 % genügen nicht */
     CHECK_INT(lw_fit_rotation(&label, 100, 111), LW_FIT_TURN_CW);
-    lw_fit_plan four_by_six = { 812, 1218, 12, 12 };
+    lw_fit_plan four_by_six = { 812, 1218, 12, 12, 0, 0 };
     CHECK_INT(lw_fit_rotation(&four_by_six, 416, 305), LW_FIT_TURN_CCW);
     CHECK_INT(lw_fit_rotation(&four_by_six, 305, 416), LW_FIT_TURN_NONE);
     CHECK_INT(lw_fit_rotation(&endless, 305, 416), LW_FIT_TURN_NONE);          /* freie Länge */
-    lw_fit_plan square = { 500, 520, 12, 12 };                                  /* 476 × 496: kaum hoch */
+    lw_fit_plan square = { 500, 520, 12, 12, 0, 0 };                                  /* 476 × 496: kaum hoch */
     CHECK_INT(lw_fit_rotation(&square, 900, 100), LW_FIT_TURN_NONE);
     /* Kurzform = Definition s90 > 1,1 · s0 (Brüche über Kreuz multipliziert) */
     uint32_t seed = 4711;
@@ -2418,7 +2432,7 @@ static void test_fit(void)
         seed = seed * 1103515245u + 12345u;
         int rbh = 1 + (int)(seed >> 16) % 60;
         seed = seed * 1103515245u + 12345u;
-        lw_fit_plan p = { 1 + (int)(seed >> 16) % 80, 0, 0, 0 };
+        lw_fit_plan p = { 1 + (int)(seed >> 16) % 80, 0, 0, 0, 0, 0 };
         seed = seed * 1103515245u + 12345u;
         p.height = 1 + (int)(seed >> 16) % 80;
         seed = seed * 1103515245u + 12345u;
@@ -2499,8 +2513,8 @@ static void test_fit(void)
     /* Einsetzen: Rand größer als das Etikett → ganze Seite; Inhalt 4 × 3 → 10 × 8 an (0, 1) */
     uint8_t *fitted = NULL;
     int fw = 0, fh = 0, turn = -1;
-    lw_fit_plan ten = { 10, 10, 15, 15 };
-    CHECK(lw_fit_apply(&ten, page, 10, 10, &fitted, &fw, &fh, &turn));
+    lw_fit_plan ten = { 10, 10, 15, 15, 0, 0 };
+    CHECK(lw_fit_apply(&ten, NULL, page, 10, 10, &fitted, &fw, &fh, &turn));
     CHECK_INT(fw, 10); CHECK_INT(fh, 10); CHECK_INT(turn, LW_FIT_TURN_NONE);
     uint8_t expect_area[80];
     CHECK(lw_fit_area_average(page, 10, 1, 5, 4, 3, expect_area, 10, 10, 8));
@@ -2511,18 +2525,18 @@ static void test_fit(void)
     CHECK_INT(white, 20);
     free(fitted);
     uint8_t blank[6] = { 255, 255, 255, 250, 254, 255 };
-    CHECK(lw_fit_apply(&ten, blank, 3, 2, &fitted, &fw, &fh, NULL));
+    CHECK(lw_fit_apply(&ten, NULL, blank, 3, 2, &fitted, &fw, &fh, NULL));
     CHECK_INT(fw, 10); CHECK_INT(fh, 10);
     white = 0;
     for (int i = 0; i < 100; i++)
         white += fitted[i] == 255;
     CHECK_INT(white, 100);
     free(fitted);
-    lw_fit_plan free_len = { 2, 0, 0, 0 };
-    CHECK(lw_fit_apply(&free_len, page, 10, 10, &fitted, &fw, &fh, NULL));
+    lw_fit_plan free_len = { 2, 0, 0, 0, 0, 0 };
+    CHECK(lw_fit_apply(&free_len, NULL, page, 10, 10, &fitted, &fw, &fh, NULL));
     CHECK_INT(fw, 2); CHECK_INT(fh, 2);                                         /* 4 × 3 → 2 × 2 (1,5 → 2) */
     free(fitted);
-    CHECK(lw_fit_apply(&free_len, blank, 3, 2, &fitted, &fw, &fh, NULL));
+    CHECK(lw_fit_apply(&free_len, NULL, blank, 3, 2, &fitted, &fw, &fh, NULL));
     CHECK_INT(fw, 2); CHECK_INT(fh, 1);
     free(fitted);
 
@@ -2540,8 +2554,8 @@ static void test_fit(void)
     lw_fit_rotate(upright, LW_, 0, 0, LW_, LH_, LW_FIT_TURN_CCW, ccw);           /* 30 × 40 */
     for (int y = 0; y < LW_; y++)
         memcpy(portrait + (size_t)(60 + y) * PW_ + 45, ccw + (size_t)y * LH_, LH_);
-    lw_fit_plan small_label = { 430, 330, 15, 15 };
-    CHECK(lw_fit_apply(&small_label, portrait, PW_, PH_, &fitted, &fw, &fh, &turn));
+    lw_fit_plan small_label = { 430, 330, 15, 15, 0, 0 };
+    CHECK(lw_fit_apply(&small_label, NULL, portrait, PW_, PH_, &fitted, &fw, &fh, &turn));
     CHECK_INT(fw, 430); CHECK_INT(fh, 330); CHECK_INT(turn, LW_FIT_TURN_CW);
     int wrong = 0;
     for (int y = 0; y < 300; y++)
@@ -2553,6 +2567,58 @@ static void test_fit(void)
     CHECK_INT(fx0, 15); CHECK_INT(fy0, 15); CHECK_INT(fbw, 400); CHECK_INT(fbh, 300);
     free(fitted);
     free(portrait);
+
+    /* Referenz (einheitlich je Auftrag): Etikett-PDF halb so groß, gegen den Uhrzeigersinn gedreht
+     * auf A4 (20 dpi: Seite 165 × 234, Etikett 82 × 60, Rahmen 80 × 58). Nur Seite 1 ist deutlich
+     * hoch; die Seiten 2 und 3 (kurze Zeilen) werden wie sie gedreht und gleich groß, Seite 4 passt
+     * nur kleiner, Letter entscheidet selbst – wie `selftest` der Python-Referenz. */
+    lw_fit_reference ref;
+    lw_fit_reference_init(&ref);
+    CHECK(!ref.valid);
+    static const int boxes[5][4] = { { 70, 100, 20, 34 }, { 70, 100, 20, 15 }, { 60, 110, 24, 10 },
+                                     { 60, 90, 40, 30 }, { 60, 90, 20, 15 } };
+    static const int sizes[5][2] = { { 80, 47 }, { 35, 47 }, { 24, 56 }, { 44, 58 }, { 77, 58 } };
+    static const int turns[5] = { LW_FIT_TURN_CW, LW_FIT_TURN_CW, LW_FIT_TURN_CW, LW_FIT_TURN_CW, LW_FIT_TURN_NONE };
+    for (int p = 0; p < 5; p++) {
+        const int pw = p < 4 ? 165 : 170, ph = p < 4 ? 234 : 220;
+        lw_fit_plan job_plan = { 82, 60, 1, 1, p < 4 ? 21000 : 21590, p < 4 ? 29700 : 27940 };
+        uint8_t *sheet = malloc((size_t)(pw * ph));
+        memset(sheet, 255, (size_t)(pw * ph));
+        for (int y = boxes[p][1]; y < boxes[p][1] + boxes[p][3]; y++)
+            memset(sheet + (size_t)y * (size_t)pw + boxes[p][0], 0, (size_t)boxes[p][2]);
+        CHECK_INT(lw_fit_reference_applies(&ref, &job_plan), p >= 1 && p <= 3);
+        CHECK(lw_fit_apply(&job_plan, &ref, sheet, pw, ph, &fitted, &fw, &fh, &turn));
+        CHECK_INT(fw, 82); CHECK_INT(fh, 60); CHECK_INT(turn, turns[p]);
+        CHECK(lw_fit_content_bounds(fitted, fw, fh, &fx0, &fy0, &fbw, &fbh));
+        CHECK_INT(fbw, sizes[p][0]); CHECK_INT(fbh, sizes[p][1]);
+        CHECK_INT(fx0, (82 - sizes[p][0]) / 2); CHECK_INT(fy0, (60 - sizes[p][1]) / 2);
+        if (p == 1) {
+            /* Allein entschiede Seite 2 anders: nicht gedreht. */
+            free(fitted);
+            CHECK(lw_fit_apply(&job_plan, NULL, sheet, pw, ph, &fitted, &fw, &fh, &turn));
+            CHECK_INT(turn, LW_FIT_TURN_NONE);
+        }
+        free(fitted);
+        free(sheet);
+    }
+    CHECK(ref.valid && ref.plan.page_w == 21590 && ref.turn == LW_FIT_TURN_NONE);
+    CHECK(ref.scale_num == 58 && ref.scale_den == 15);
+    lw_fit_plan other = ref.plan;
+    other.page_w += 200;
+    other.page_h -= 200;
+    CHECK(lw_fit_reference_applies(&ref, &other));                              /* ± 2 mm */
+    other.page_w += 1;
+    CHECK(!lw_fit_reference_applies(&ref, &other));
+    other = ref.plan;
+    other.margin_x = 0;
+    CHECK(!lw_fit_reference_applies(&ref, &other));                             /* anderes Etikett/Rand */
+    CHECK(!lw_fit_reference_applies(NULL, &other));
+    /* Leere Seite ändert die Referenz nicht. */
+    lw_fit_plan same = ref.plan;
+    CHECK(lw_fit_apply(&same, &ref, blank, 3, 2, &fitted, &fw, &fh, NULL));
+    free(fitted);
+    CHECK(ref.valid && ref.plan.page_w == 21590 && ref.plan.page_h == 27940 && ref.turn == LW_FIT_TURN_NONE);
+    CHECK(ref.scale_num == 58 && ref.scale_den == 15);
 }
 
 static void test_util(void)

@@ -490,9 +490,11 @@ druckt jedes Programm auf das Etikett:
    dreht den Inhalt bei Bedarf aufrecht (ein Querformat-Etikett, das macOS gegen den Uhrzeigersinn
    gedreht auf ein Hochformat-Blatt legt, wird zurückgedreht – umgekehrt ebenso), vergrößert oder
    verkleinert ihn seitenverhältnistreu und druckt ihn mittig und formatfüllend mit 1,5 mm Rand auf
-   das Etikett. Ein Etikett-PDF mit 15 Seiten ergibt 15 Etiketten in voller Größe, eine ganze A4-Seite
-   wird auf das Etikett verkleinert. Seiten, die schon Etikettengröße haben, druckt der Treiber
-   unverändert; bei Endlosmaterial folgt die Länge dem Inhalt.
+   das Etikett. Ein Etikett-PDF mit 15 Seiten ergibt 15 Etiketten in voller Größe – alle gleich
+   gedreht und gleich groß wie das erste, auch wenn auf einem Etikett nur kurze Zeilen stehen –, eine
+   ganze A4-Seite wird auf das Etikett verkleinert. Seiten, die schon Etikettengröße haben, druckt der
+   Treiber unverändert; bei Endlosmaterial folgt die Länge dem Inhalt (dort wird nur verkleinert,
+   nie vergrößert).
 4. **macOS-Drucker aus den Systemeinstellungen stellt LabelWerk um.** Wurde ein in LabelWerk
    eingerichteter Drucker zusätzlich unter **Systemeinstellungen › Drucker & Scanner** per
    IP-Adresse hinzugefügt (er heißt dann z. B. **„10.62.13.19“** und nutzt AirPrint oder einen
@@ -504,8 +506,9 @@ druckt jedes Programm auf das Etikett:
    Hinweis meldet das einmal: *„macOS-Drucker „10.62.13.19“ nutzt jetzt den LabelWerk-Treiber.“*
    Voraussetzung: Der Drucker ist in LabelWerk mit derselben IP-Adresse bzw. demselben Hostnamen
    eingerichtet, und LabelWerk wurde danach einmal geöffnet. macOS-Drucker anderer Adressen ändert
-   LabelWerk nie. Darf der Benutzer keine Drucker ändern, fragt **„Erneut versuchen“** im Hinweis nach
-   dem Administratorpasswort.
+   LabelWerk nie – ebenso wenig Drucker, die über einen Druckserver eingerichtet sind (freigegebene
+   Drucker eines anderen Macs, eines CUPS- oder Windows-Servers). Darf der Benutzer keine Drucker
+   ändern, fragt **„Erneut versuchen“** im Hinweis nach dem Administratorpasswort.
 
 **Optional:** Wer will, wählt im Druckdialog trotzdem das Etikettenformat als Papierformat und
 „Skalierung 100 %“ bzw. sichert beides als Voreinstellung – nötig ist das nicht. Soll eine Seite

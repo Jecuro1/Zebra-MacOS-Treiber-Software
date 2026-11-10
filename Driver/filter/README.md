@@ -104,9 +104,16 @@ Seite ganz (8-Bit-Luminanz, `cupsWidth · cupsHeight` Bytes, höchstens 1 GiB) u
    Box-Abtastung in Ganzzahlen (byte-gleich zu `LabelFit` in Swift und `fit_page` in Python),
 4. setzt ihn mittig auf ein weißes Etikett in der Auflösung des Auftrags (`HWResolution`).
 
+Drehung und Maßstab gelten einheitlich für den Auftrag (`lw_fit_reference`): Die erste angepasste
+Seite mit Inhalt entscheidet; folgende Seiten gleicher Größe (± 2 mm) übernehmen ihre Drehung und
+ihren Maßstab (kleiner nur, wenn ihr Inhalt sonst nicht passt) – auch ein Adressetikett mit kurzen
+Zeilen, dessen Inhalt allein die Drehung von macOS nicht erkennen ließe. Eine Seite anderer Größe
+entscheidet selbst und gilt danach für die folgenden.
+
 Danach geht es normal weiter (Rastern, Drehung `lwRotation`, Spiegeln, Negativ, Abschneiden …). Bei
 90°/270° Drehung gilt das Etikett quer. Endlosmaterial (`Continuous` bzw. Länge 0): nur die Breite
-wird angepasst (mit Rand), die Länge folgt dem Inhalt (höchstens 32000 Punkte), gedreht wird nie.
+wird angepasst (mit Rand, nur verkleinert – nie vergrößert), die Länge folgt dem Inhalt, gedreht wird
+nie.
 Meldung: `INFO: Seite 1 (210 × 297 mm) passt nicht zum Etikett – der Inhalt wird automatisch auf das
 Etikett gelegt (831 × 609 Punkte, um 90° im Uhrzeigersinn gedreht).` Passende Seiten, `Off` und
 Warteschlangen ohne `lwLabelWidth` laufen wie bisher zeilenweise ohne Seitenpuffer (byte-gleich).
@@ -186,8 +193,10 @@ werden mit `DEBUG:` übergangen.
   (auch vertauscht `^`↔`~`), RTC mit fester und schrittweiser Uhr, `~JA` samt Wartehaken,
   Etikettenbefehle, `^MF`, Linerless, Kerben, Markenversatz; An Etikett anpassen (Entscheidung,
   Rand, Inhaltsrahmen, Drehung samt Kurzform = `s90 > 1,1 · s0` für 5000 Zufallsfälle, Zielrahmen und
-  Zielgröße, Flächenmittel beim Verkleinern und Vergrößern gegen die Definition, Einsetzen, freie
-  Länge, der Fall aus der Meldung: gedrehtes halbes Etikett auf A4 → aufrecht und 10-fach).
+  Zielgröße, Maßstab als Bruch, Flächenmittel beim Verkleinern und Vergrößern gegen die Definition,
+  Einsetzen, freie Länge ohne Vergrößern, der Fall aus der Meldung: gedrehtes halbes Etikett auf A4 →
+  aufrecht und 10-fach; Referenz eines mehrseitigen Auftrags: gleiche Drehung und gleicher Maßstab,
+  kleiner nur bei zu großem Inhalt, andere Seitengröße als neue Referenz, leere Seite ohne Wirkung).
 * **End-to-End** (`tests/run_e2e.py`): fast 500 Fälle – alle Sprachen × Kompressionen ×
   Rasterverfahren, Negativ/Spiegeln/180°/leere Seiten/Abschneiden/Kopien/Sortierung/Start- und
   Endbefehle, sämtliche Auftragseinstellungen, Vorrangregeln mit PPD-Varianten, 36 Rasterformate
@@ -199,7 +208,8 @@ werden mit `DEBUG:` übergangen.
   Faktor, SIGTERM). „An Etikett anpassen“: A4/Letter mit kleinem Etikett in der Ecke (vergrößert),
   volle Seiten (verkleinert), halb so großes, gegen den Uhrzeigersinn gedrehtes Etikett auf A4
   (Meldung, ZPL und EPL), Querformat-Inhalt auf 4 × 6 Zoll, quer, leer, gemischt, Drehung,
-  Endlosmaterial (auch vergrößert), `PageSize`-Ersatz, PWG, 300 und 600 dpi und
+  mehrseitiges Etikett-PDF (alle Seiten wie die erste gedreht), Endlosmaterial (nie vergrößert, auch
+  Seitenzahl und dünner Strich), `PageSize`-Ersatz, PWG, 300 und 600 dpi und
   die unveränderten Fälle (passende Größe, `Off`, ohne Etikett, PPD-Standard `Off`). `mkraster`
   setzt dafür `pw=`/`ph=` (Seitengröße in Punkten), `cps=0` und ein Inhaltsrechteck `bx/by/bw/bh`.
   Die Referenz prüft sich vorab selbst (`python3 tests/reference_encoder.py`).

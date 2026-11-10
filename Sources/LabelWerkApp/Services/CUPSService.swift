@@ -260,14 +260,19 @@ enum CUPSService {
     /// alle Standardwerte des Plans (`lwLabelWidth`/`lwLabelHeight`, `lwFitToLabel` …). Name, Standort,
     /// Freigabe und Zustand der Warteschlange bleiben.
     ///
+    /// - Returns: `false`, wenn die Warteschlange beim Aufruf schon den LabelWerk-Treiber hat (z. B. von
+    ///   einer gleichzeitigen Prüfung umgestellt, deren Entscheidung auf demselben `lpstat`-Stand
+    ///   beruhte) – dann läuft kein `lpadmin`.
     /// - Throws: `queueMissing`, `driverNotInstalled`, `noPPD`, `notAuthorized` (ohne Passwortabfrage),
     ///   `notLabelWerkQueue` (danach weiterhin fremder Treiber), Fehler von `lpadmin`.
+    @discardableResult
     static func adoptQueue(_ queue: String, deviceURI: String, description: String,
-                           configuration: QueueConfiguration, allowAdminPrompt: Bool) async throws {
+                           configuration: QueueConfiguration, allowAdminPrompt: Bool) async throws -> Bool {
         guard isDriverInstalled else { throw CUPSError.driverNotInstalled }
         guard !queue.isEmpty, !queue.contains("/"), !queue.hasPrefix(".") else { throw CUPSError.invalidQueueName }
         let before = await queueState(queue)
         guard before.isKnown else { throw CUPSError.queueMissing(queue) }
+        if before.isLabelWerk { return false }
         guard let ppd = ppdURL(modelID: configuration.modelID, resolution: configuration.resolution ?? .dpi203,
                                language: configuration.language ?? .zpl) else {
             throw CUPSError.noPPD(configuration.modelID.flatMap { ModelCatalog.shared.model(id: $0)?.displayName } ?? queue)
@@ -291,6 +296,7 @@ enum CUPSService {
             NSLog("LabelWerk: übernommene Warteschlange %@ hat Optionen nicht übernommen: %@", queue,
                   difference.mismatchedOptions.joined(separator: ", "))
         }
+        return true
     }
 
     // MARK: Abgleich (Soll ↔ Ist)

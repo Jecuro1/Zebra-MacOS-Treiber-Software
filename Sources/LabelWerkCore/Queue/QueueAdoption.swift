@@ -11,6 +11,11 @@ import Foundation
 /// Regel:
 /// * Nur Netzwerk-URIs (`socket`, `ipp`, `ipps`, `lpd`, `http`, `https`); `usb://`, `dnssd://`,
 ///   `file:` und Hüllen wie `beh:/…` gehören zu keinem Host und bleiben unberührt.
+/// * Nur URIs, die das Gerät selbst nennen (``deviceEndpoint(ofDeviceURI:)``): kein Loopback-Host
+///   (`localhost`, `127.x.x.x`, `::1`), bei IPP/HTTP nur die Endpunkte eines Druckers (Pfad leer, `/`,
+///   `/ipp`, `/ipp/…`), bei LPD nur die Standardwarteschlange (leer bzw. `/`). Warteschlangen eines
+///   Druckservers (`/printers/…`, `/classes/…` von CUPS, macOS und Windows, benannte
+///   LPD-Warteschlangen eines Druckservers mit mehreren Anschlüssen) gehören zu einem anderen Gerät.
 /// * Host gleich (ohne Groß-/Kleinschreibung, ohne Port, Pfad, Benutzerangabe, eckige Klammern und
 ///   abschließenden Punkt) dem Host eines eingerichteten Druckers.
 /// * `socket://` nennt mit dem Port das Gerät (Druckserver mit mehreren Anschlüssen): Der Port muss dem
@@ -85,8 +90,7 @@ public enum QueueAdoption {
     public static func decide(queueName: String, deviceURI: String, makeAndModel: String?, isLabelWerk: Bool,
                               printers: [RegisteredPrinter]) -> Decision {
         guard !queueName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let endpoint = endpoint(ofDeviceURI: deviceURI),
-              networkSchemes.contains(endpoint.scheme),
+              let endpoint = deviceEndpoint(ofDeviceURI: deviceURI),
               let printer = printers.first(where: { matches(endpoint, $0) })
         else { return .ignore }
         if isLabelWerk || makeAndModel?.range(of: "LabelWerk", options: .caseInsensitive) != nil {
@@ -107,12 +111,73 @@ public enum QueueAdoption {
 
     /// Eingerichteter Drucker, dessen LabelWerk-Verbindung selbst eine macOS-Warteschlange ist
     /// (`ConnectionDescriptor.cupsQueue`): Host und Port stammen aus deren Geräte-URI (`socket://` mit
-    /// ihrem Port, sonst ``rawPort``). `nil`, wenn die URI keinen Netzwerkhost nennt (USB, Bonjour,
-    /// Datei …).
+    /// ihrem Port, sonst ``rawPort``). `nil`, wenn die URI nicht das Gerät selbst nennt
+    /// (``deviceEndpoint(ofDeviceURI:)``: USB, Bonjour, Datei, Loopback, die Warteschlange eines
+    /// Druckservers wie `ipp://server/printers/Zebra` – dessen Host ist nicht der Drucker).
     public static func registeredPrinter(id: String, queueDeviceURI uri: String) -> RegisteredPrinter? {
-        guard let endpoint = endpoint(ofDeviceURI: uri), networkSchemes.contains(endpoint.scheme) else { return nil }
+        guard let endpoint = deviceEndpoint(ofDeviceURI: uri) else { return nil }
         let port = endpoint.scheme == "socket" ? (endpoint.port ?? rawPort) : rawPort
         return RegisteredPrinter(id: id, host: endpoint.host, port: port)
+    }
+
+    // MARK: Gerät oder Druckserver
+
+    /// Schema, Host und Port einer Geräte-URI, die das Gerät **selbst** nennt – sonst `nil`:
+    /// * Schema aus ``networkSchemes``, Host kein Loopback (``isLoopbackHost(_:)``: über `localhost`
+    ///   erreichte Ziele sind Tunnel, Proxys oder ein lokaler Druckserver, nie das Gerät selbst);
+    /// * `socket`: jeder Pfad (der Port nennt das Gerät);
+    /// * `ipp`, `ipps`, `http`, `https`: nur die IPP-Endpunkte eines Druckers – Pfad leer, `/`, `/ipp`
+    ///   oder `/ipp/…` (`/ipp/print` von AirPrint/IPP Everywhere). Freigaben eines CUPS-, macOS- oder
+    ///   Windows-Druckservers (`/printers/<name>`, `/classes/<name>`, `/printers/<name>/.printer`) und
+    ///   alle anderen Pfade führen zu einem Druckserver bzw. einem unbekannten Gerät;
+    /// * `lpd`: nur die Standardwarteschlange (Pfad leer bzw. `/`, so legt „Drucker & Scanner“ ohne
+    ///   Angabe einer Warteschlange an) – eine benannte Warteschlange kann ein Druckserver bzw. ein
+    ///   Anschluss eines Druckservers mit mehreren Anschlüssen sein (`lpd://host/PORT2`).
+    public static func deviceEndpoint(ofDeviceURI uri: String) -> Endpoint? {
+        guard let endpoint = endpoint(ofDeviceURI: uri), networkSchemes.contains(endpoint.scheme),
+              !isLoopbackHost(endpoint.host)
+        else { return nil }
+        let path = self.path(ofDeviceURI: uri).lowercased()
+        switch endpoint.scheme {
+        case "socket":
+            return endpoint
+        case "lpd":
+            return path.isEmpty || path == "/" ? endpoint : nil
+        default:
+            return path.isEmpty || path == "/" || path == "/ipp" || path.hasPrefix("/ipp/") ? endpoint : nil
+        }
+    }
+
+    /// Pfad einer URI ohne Abfrage und Fragment (`ipp://h:631/ipp/print?x=1` → `/ipp/print`), leer ohne
+    /// Pfad bzw. ohne `://`. Prozentkodierte Zeichen bleiben kodiert.
+    public static func path(ofDeviceURI uri: String) -> String {
+        let trimmed = uri.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = trimmed.range(of: "://") else { return "" }
+        let rest = trimmed[range.upperBound...]
+        let end = rest.firstIndex(where: { $0 == "?" || $0 == "#" }) ?? rest.endIndex
+        let beforeQuery = rest[..<end]
+        guard let slash = beforeQuery.firstIndex(of: "/") else { return "" }
+        return String(beforeQuery[slash...])
+    }
+
+    /// Loopback-Host (normalisiert, ``normalizedHost(_:)``): `localhost` und `*.localhost`,
+    /// `127.0.0.0/8`, `::1` (auch ausgeschrieben) und `::ffff:127.x.x.x`.
+    public static func isLoopbackHost(_ host: String) -> Bool {
+        guard let value = normalizedHost(host) else { return false }
+        if value == "localhost" || value.hasSuffix(".localhost") { return true }
+        if isIPv4Literal(value) { return value.hasPrefix("127.") }
+        let address = String(value.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+        guard isIPv6Literal(address) else { return false }
+        if address.hasPrefix("::ffff:") {
+            let mapped = String(address.dropFirst("::ffff:".count))
+            return isIPv4Literal(mapped) && mapped.hasPrefix("127.")
+        }
+        // ::1 in jeder Schreibweise: alle Gruppen 0 bis auf die letzte = 1.
+        let groups = address.components(separatedBy: ":")
+        guard groups.count >= 3, groups.count <= 8, groups.allSatisfy({ $0.count <= 4 }),
+              let last = groups.last, let lastValue = Int(last, radix: 16), lastValue == 1
+        else { return false }
+        return groups.dropLast().allSatisfy { $0.isEmpty || Int($0, radix: 16) == 0 }
     }
 
     // MARK: Namen

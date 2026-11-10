@@ -31,7 +31,8 @@ Querformat-Inhalt auf Hochformat-Etikett, ``Off``, Drehung, Endlosmaterial und z
 dazu Rand, automatische Drehung (``turns``: erwartete Drehung je Seite, Referenz und Filtermeldung)
 und Vergrößern – der Fall aus der Meldung (halb so großes, gegen den Uhrzeigersinn gedrehtes Etikett
 mitten auf A4), Etikett in Originalgröße auf A4, Letter bei 300 dpi, Querformat auf 4 × 6 Zoll,
-600 dpi, die 10-%-Grenze und Endlosmaterial.
+600 dpi, die 10-%-Grenze, mehrseitige Aufträge mit einheitlicher Drehung und einheitlichem Maßstab
+(Referenz; ``same_scale``) und Endlosmaterial (nie vergrößert, die Länge folgt dem Inhalt).
 Kennt das gebaute ``lwctl`` eine der neuen Optionen noch nicht, werden genau die Fälle, die sie
 brauchen, mit Hinweis übersprungen. Bei einer Abweichung nennt die Meldung die erste abweichende
 Befehlszeile (Zeile, Spalte, Auszug) und – bei Grafikdaten – das erste
@@ -186,6 +187,7 @@ class Case:
     time_zone: str = "UTC"                   # --time-zone / TZ
     same_as_unfitted: bool = False           # §8 „F“ darf hier nichts ändern (passende Größe, Off)
     turns: Optional[Tuple[int, ...]] = None  # §8 „F.3“: erwartete Drehung je Seite (0/90/270)
+    same_scale: bool = False                 # §8 „F“ Referenz: alle angepassten Seiten im selben Maßstab
 
     def image_format(self, index: int) -> str:
         if self.formats:
@@ -199,11 +201,12 @@ def build_cases() -> List[Case]:
     def add(name: str, pages: Sequence[Page], copies: int = 1, collate: bool = True, dpi: int = 203,
             max_width: Optional[int] = None, stock: Optional[str] = None, formats: Tuple[str, ...] = (),
             fixed_time: Optional[int] = None, time_step: int = 0, time_zone: str = "UTC",
-            same_as_unfitted: bool = False, turns: Optional[Tuple[int, ...]] = None, **settings) -> None:
+            same_as_unfitted: bool = False, turns: Optional[Tuple[int, ...]] = None, same_scale: bool = False,
+            **settings) -> None:
         if settings.get("rtc") and fixed_time is None:
             fixed_time = FIXED_TIME            # ^ST nur mit fester Uhr reproduzierbar
         cases.append(Case(name, tuple(pages), dict(settings), copies, collate, dpi, max_width, stock, formats,
-                          fixed_time, time_step, time_zone, same_as_unfitted, turns))
+                          fixed_time, time_step, time_zone, same_as_unfitted, turns, same_scale))
 
     # 1. Sprache × Kompression × Rasterverfahren
     for lang in LANGS:
@@ -586,13 +589,36 @@ def fit_cases(add) -> None:
             max_width=832, language=lang, label_width=10160, label_height=15240, turns=(270,))
     add("anpassen_600dpi_gedreht", [sized((216.0, 288.0), 600, "bars", 0, (300, 400, 700, 1100))], dpi=600,
         max_width=1248, compression="ACS", label_width=5000, label_height=3000, turns=(90,))
-    add("anpassen_grenze_10_prozent", [sized(A4, 203, "bars", 0, (40, 40, 200, 220)),
-                                       sized(A4, 203, "bars", 0, (40, 40, 200, 221))],
-        max_width=832, turns=(0, 90), **label)
-    add("anpassen_endlos_vergroessert", [sized(A4, 203, "bars", 2, (30, 100, 300, 400))], max_width=640,
+    # Grenze 10 %: je allein entschieden; im selben Auftrag gilt die erste Seite (Referenz) auch für
+    # die zweite – gleiche Drehung, gleicher Maßstab.
+    add("anpassen_grenze_10_prozent", [sized(A4, 203, "bars", 0, (40, 40, 200, 220))], max_width=832,
+        turns=(0,), **label)
+    add("anpassen_grenze_10_prozent_ueber", [sized(A4, 203, "bars", 0, (40, 40, 200, 221))], max_width=832,
+        turns=(90,), **label)
+    add("anpassen_grenze_10_prozent_referenz", [sized(A4, 203, "bars", 0, (40, 40, 200, 220)),
+                                                sized(A4, 203, "bars", 0, (40, 40, 200, 221))],
+        max_width=832, turns=(0, 0), **label)                         # 221 passt nur kleiner: eigener Maßstab
+    # Mehrseitiges Etikett-PDF (Adressetiketten, gleiches Layout, verschieden lange Zeilen), halb so groß
+    # und gegen den Uhrzeigersinn gedreht mitten auf A4: Nur der Inhalt von Seite 1 ist deutlich hoch –
+    # alle Seiten werden wie sie zurückgedreht und im selben Maßstab gedruckt (Prüfung, perpage.py).
+    for lang in ("ZPL", "EPL"):
+        add("anpassen_mehrseitig_einheitlich_%s" % lang,
+            [sized(A4, 203, "bars", 0, centered(A4, 203, 205, 350)), sized(A4, 203, "bars", 0, centered(A4, 203, 205, 151)),
+             sized(A4, 203, "bars", 0, centered(A4, 203, 240, 101))],
+            max_width=832, language=lang, turns=(90, 90, 90), same_scale=True, **label)
+    # Andere Seitengröße im selben Auftrag: Letter entscheidet selbst und wird die neue Referenz.
+    add("anpassen_mehrseitig_letter_neu", [sized(A4, 203, "bars", 0, centered(A4, 203, 205, 350)),
+                                          sized(LETTER, 203, "bars", 0, centered(LETTER, 203, 205, 151)),
+                                          sized(LETTER, 203, "text", 4, centered(LETTER, 203, 300, 120))],
+        max_width=832, compression="ACS", turns=(90, 0, 0), **label)
+    # Endlosmaterial: entlang der freien Länge nie vergrößern (Länge folgt dem Inhalt).
+    add("anpassen_endlos_nicht_vergroessert", [sized(A4, 203, "bars", 2, (30, 100, 300, 400))], max_width=640,
         tracking="Continuous", label_width=8000, label_height=15000, turns=(0,))
-    add("anpassen_endlos_drehung_90_vergroessert", [sized(A4, 203, "text", 3, (30, 100, 300, 400))],
+    add("anpassen_endlos_drehung_90_nicht_vergroessert", [sized(A4, 203, "text", 3, (30, 100, 300, 400))],
         max_width=832, tracking="Continuous", rotation=90, label_width=8000, label_height=15000, turns=(0,))
+    add("anpassen_endlos_seitenzahl_und_strich", [sized(A4, 203, "black", 0, (800, 2300, 12, 30)),
+                                                  sized(A4, 203, "black", 0, (400, 100, 2, 900))],
+        max_width=640, tracking="Continuous", label_width=8000, label_height=0, turns=(0, 0))
     add("anpassen_leer_mit_rand", [sized(LETTER, 203, "blank"), sized(A4, 203, "text", 1, half_turned)],
         max_width=832, language="CPCL", turns=(0, 90), **label)
 
@@ -1184,14 +1210,15 @@ class EncoderConformanceTest(unittest.TestCase):
         self.assertIn(stock, self.tools.stock_gaps_mm, "Etikettenformat %s fehlt in „lwctl stocks“" % stock)
         gap = gap_dots(self.tools.stock_gaps_mm[stock], case.dpi)
         prepared = self.raster_for(case.pages, case.dpi)
+        # §8 „F“ in der Referenz, mit den Entscheidungen je Seite (Drehung, Maßstab; Referenz des Auftrags)
+        memory = ref.FitMemory()
+        fitted = ref.fit_images(prepared.images, s, prepared.page_sizes, case.dpi, memory)
         if case.turns is not None:
-            # §8 „F.3“: Drehung je Seite wie erwartet (Referenz: Rahmen des Inhalts, Etikett, Rand)
-            turns = []
-            for (w, h, lum), size in zip(prepared.images, prepared.page_sizes):
-                plan = ref.fit_plan(s.clamped(), w, h, size, case.dpi, case.dpi)
-                bounds = ref.content_bounds(lum, w, h) if plan is not None else None
-                turns.append(ref.fit_rotation(bounds[2], bounds[3], plan) if bounds is not None else 0)
-            self.assertEqual(tuple(turns), case.turns, "%s: Drehung je Seite" % case.name)
+            turns = tuple(decision[0] if decision is not None else 0 for decision in memory.decisions)
+            self.assertEqual(turns, case.turns, "%s: Drehung je Seite" % case.name)
+        if case.same_scale:
+            scales = {decision[1] for decision in memory.decisions if decision is not None}
+            self.assertEqual(len(scales), 1, "%s: ein Maßstab für alle Seiten, nicht %s" % (case.name, scales))
         files = [self.image_file(page, case.image_format(i)) for i, page in enumerate(case.pages)]
         directory = self.workdir / "faelle" / case.name
         directory.mkdir(parents=True, exist_ok=True)
@@ -1249,7 +1276,6 @@ class EncoderConformanceTest(unittest.TestCase):
 
         # Gegen triviale Übereinstimmung (z. B. alle leer): Die Referenz muss genau die erwarteten
         # Etiketten enthalten (Seiten nach Vorverarbeitung × Kopienregel).
-        fitted = ref.fit_images(prepared.images, s, prepared.page_sizes, case.dpi)
         processed = [bm for bm in (ref.preprocess(ref.dither(lum, w, h, s.dither, s.threshold), s.clamped(),
                                                   case.max_width or 0)
                                    for w, h, lum in fitted) if bm is not None]
@@ -1326,10 +1352,12 @@ class EncoderConformanceTest(unittest.TestCase):
         self.assertTrue(any(case.same_as_unfitted for case in fit))
         self.assertTrue({A4, LETTER, LABEL_PAGE} <= {page.points for case in fit for page in case.pages})
         self.assertTrue(set(LANGS) <= {case.settings.get("language", "ZPL") for case in fit})
-        # v2: Drehung in beide Richtungen und ohne, 203/300/600 dpi, Endlosmaterial mit Vergrößern
+        # v2: Drehung in beide Richtungen und ohne, 203/300/600 dpi, Endlosmaterial (nie vergrößert),
+        # mehrseitige Aufträge mit Referenz (gleiche Drehung und gleicher Maßstab)
         self.assertTrue({0, 90, 270} <= {turn for case in fit for turn in case.turns or ()})
         self.assertTrue({203, 300, 600} <= {case.dpi for case in fit if case.turns})
         self.assertTrue(any(case.settings.get("tracking") == "Continuous" for case in fit if case.turns))
+        self.assertTrue(any(case.same_scale and len(case.pages) >= 3 for case in fit))
 
 
 def _make_test(case: Case):

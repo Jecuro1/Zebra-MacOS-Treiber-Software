@@ -62,7 +62,25 @@ bool lw_fit_decide(const lw_settings *s, int width, int height, double page_w_pt
     plan->height = (int)th;
     plan->margin_x = lw_fit_margin(xdpi);
     plan->margin_y = lw_fit_margin(ydpi);
+    plan->page_w = page_w;
+    plan->page_h = page_h;
     return true;
+}
+
+void lw_fit_reference_init(lw_fit_reference *ref)
+{
+    memset(ref, 0, sizeof(*ref));
+    ref->valid = false;
+}
+
+bool lw_fit_reference_applies(const lw_fit_reference *ref, const lw_fit_plan *plan)
+{
+    if (ref == NULL || !ref->valid)
+        return false;
+    const lw_fit_plan *r = &ref->plan;
+    return r->width == plan->width && r->height == plan->height && r->margin_x == plan->margin_x &&
+           r->margin_y == plan->margin_y && labs_ll((long long)plan->page_w - r->page_w) <= LW_FIT_TOLERANCE &&
+           labs_ll((long long)plan->page_h - r->page_h) <= LW_FIT_TOLERANCE;
 }
 
 bool lw_fit_content_bounds(const uint8_t *lum, int width, int height, int *x0, int *y0, int *bw, int *bh)
@@ -112,9 +130,9 @@ static long long inner_side(long long side, long long margin)
 
 void lw_fit_box(const lw_fit_plan *plan, int rw, int rh, long long *box_w, long long *box_h)
 {
-    /* Freie Seite: höchstens LW_FIT_MAX_DOTS beim Vergrößern, nie kürzer als der Inhalt. */
-    *box_w = plan->width > 0 ? inner_side(plan->width, plan->margin_x) : (rw > LW_FIT_MAX_DOTS ? rw : LW_FIT_MAX_DOTS);
-    *box_h = plan->height > 0 ? inner_side(plan->height, plan->margin_y) : (rh > LW_FIT_MAX_DOTS ? rh : LW_FIT_MAX_DOTS);
+    /* Freie Seite = Inhalt: entlang einer freien Seite wird nie vergrößert (die Länge folgt dem Inhalt). */
+    *box_w = plan->width > 0 ? inner_side(plan->width, plan->margin_x) : rw;
+    *box_h = plan->height > 0 ? inner_side(plan->height, plan->margin_y) : rh;
 }
 
 int lw_fit_rotation(const lw_fit_plan *plan, int bw, int bh)
@@ -151,24 +169,38 @@ void lw_fit_rotate(const uint8_t *lum, size_t stride, int x0, int y0, int bw, in
     }
 }
 
-/* Gerundete Höhe zur Breite `target` bzw. Breite zur Höhe `target` (mindestens 1). */
-static int scaled_other(long long other, long long target, long long side)
-{
-    long long v = (2 * other * target + side) / (2 * side);
-    return v < 1 ? 1 : (int)v;
-}
-
-void lw_fit_target_size(int rw, int rh, const lw_fit_plan *plan, int *tw, int *th)
+void lw_fit_scale(int rw, int rh, const lw_fit_plan *plan, long long *num, long long *den)
 {
     long long bw_box, bh_box;
     lw_fit_box(plan, rw, rh, &bw_box, &bh_box);
     if (bw_box * rh <= bh_box * rw) {
-        *tw = (int)bw_box;
-        *th = scaled_other(rh, bw_box, rw);
+        *num = bw_box;
+        *den = rw;
     } else {
-        *th = (int)bh_box;
-        *tw = scaled_other(rw, bh_box, rh);
+        *num = bh_box;
+        *den = rh;
     }
+}
+
+/* Gerundete Seite `side` · num / den (mindestens 1). */
+static int scaled_side(long long side, long long num, long long den)
+{
+    long long v = (2 * side * num + den) / (2 * den);
+    return v < 1 ? 1 : (int)v;
+}
+
+void lw_fit_scaled_size(int rw, int rh, long long num, long long den, int *tw, int *th)
+{
+    *tw = scaled_side(rw, num, den);
+    *th = scaled_side(rh, num, den);
+}
+
+void lw_fit_target_size(int rw, int rh, const lw_fit_plan *plan, int *tw, int *th)
+{
+    /* Mit dem eigenen Maßstab füllt die begrenzende Seite den Rahmen genau: (2·rw·BW + rw)/(2·rw) = BW. */
+    long long num, den;
+    lw_fit_scale(rw, rh, plan, &num, &den);
+    lw_fit_scaled_size(rw, rh, num, den, tw, th);
 }
 
 /* Überlappung der Quelle s (Einheiten [s·n_dst, (s+1)·n_dst)) mit dem Ziel d ([d·n_src, (d+1)·n_src)). */
@@ -243,17 +275,20 @@ bool lw_fit_area_average(const uint8_t *lum, size_t stride, int x0, int y0, int 
     return true;
 }
 
-bool lw_fit_apply(const lw_fit_plan *plan, const uint8_t *lum, int width, int height,
+bool lw_fit_apply(const lw_fit_plan *plan, lw_fit_reference *ref, const uint8_t *lum, int width, int height,
                   uint8_t **out, int *out_w, int *out_h, int *turn)
 {
     int x0 = 0, y0 = 0, bw = 0, bh = 0, tw = 1, th = 1;
     int rotation = LW_FIT_TURN_NONE;
+    long long num = 1, den = 1;
     const uint8_t *source = lum;
     size_t source_stride = (size_t)width;
     uint8_t *rotated = NULL;
     bool content = lw_fit_content_bounds(lum, width, height, &x0, &y0, &bw, &bh);
+    const bool applies = content && lw_fit_reference_applies(ref, plan);
     if (content) {
-        rotation = lw_fit_rotation(plan, bw, bh);
+        /* Gilt die Referenz, dreht die Seite wie sie (auch wenn ihr eigener Inhalt es nicht zeigt). */
+        rotation = applies ? ref->turn : lw_fit_rotation(plan, bw, bh);
         if (rotation != LW_FIT_TURN_NONE) {
             /* Ausschnitt gedreht puffern (bh × bw), dann wie einen ungedrehten Inhalt skalieren. */
             rotated = malloc((size_t)bw * (size_t)bh);
@@ -267,7 +302,14 @@ bool lw_fit_apply(const lw_fit_plan *plan, const uint8_t *lum, int width, int he
             bw = bh;
             bh = swap;
         }
-        lw_fit_target_size(bw, bh, plan, &tw, &th);
+        /* Maßstab: eigener; mit Referenz deren, solange der Inhalt damit in den Rahmen passt
+         * (s_R ≤ s_p ⇔ num_R · den_p ≤ num_p · den_R). */
+        lw_fit_scale(bw, bh, plan, &num, &den);
+        if (applies && ref->scale_num * den <= num * ref->scale_den) {
+            num = ref->scale_num;
+            den = ref->scale_den;
+        }
+        lw_fit_scaled_size(bw, bh, num, den, &tw, &th);
     }
     /* Leere Seite: weißes Etikett, freie Seite 1 Punkt. */
     int canvas_w = plan->width > 0 ? plan->width : tw;
@@ -289,6 +331,14 @@ bool lw_fit_apply(const lw_fit_plan *plan, const uint8_t *lum, int width, int he
         }
     }
     free(rotated);
+    if (content && ref != NULL && !applies) {
+        /* Keine passende Referenz: Diese Seite wird die Referenz für die folgenden. */
+        ref->valid = true;
+        ref->plan = *plan;
+        ref->turn = rotation;
+        ref->scale_num = num;
+        ref->scale_den = den;
+    }
     *out = canvas;
     *out_w = canvas_w;
     *out_h = canvas_h;

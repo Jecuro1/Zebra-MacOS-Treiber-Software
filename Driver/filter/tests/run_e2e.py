@@ -26,7 +26,8 @@ An Etikett anpassen (§8 „F“, ``lwFitToLabel``/``lwLabelWidth``/``lwLabelHei
 kleinem Etikett in der Ecke (vergrößert, 1,5 mm Rand), volle Seiten (verkleinert), leere Seiten,
 passende Größen (unverändert), automatische Drehung (halb so großes, gegen den Uhrzeigersinn gedrehtes
 Etikett mitten auf A4 → im Uhrzeigersinn zurück; Querformat auf 4 × 6 Zoll → gegen den Uhrzeigersinn;
-600 dpi), Benutzer-Drehung, Endlosmaterial (nur Breite, auch vergrößert), ``PageSize`` statt
+600 dpi), mehrseitige Aufträge (Drehung und Maßstab der ersten Seite gelten für Seiten gleicher
+Größe), Benutzer-Drehung, Endlosmaterial (nur Breite, nie vergrößert), ``PageSize`` statt
 ``cupsPageSize``, PPD-Standard ``Off``.
 
 Aufruf:
@@ -956,9 +957,24 @@ def fit_cases() -> List[Case]:
     add(Case("anpassen-600dpi-gedreht", [sized_page(200.0, 150.0, dpi=600, extra="pattern=text,seed=9,bx=300,"
                                                                                   "by=200,bw=500,bh=800")],
              {"lwLabelWidth": "5000", "lwLabelHeight": "3000", "lwCompression": "ACS"}, stderr_has=cw_note))
-    add(Case("anpassen-endlos-vergroessert", [sized_page(*a4, extra="pattern=bars,bx=30,by=100,bw=300,bh=400")],
+    add(Case("anpassen-endlos-nicht-vergroessert", [sized_page(*a4, extra="pattern=bars,bx=30,by=100,bw=300,bh=400")],
              {"lwLabelWidth": "8000", "lwMediaTracking": "Continuous", "lwRotation": "90"},
              stderr_lacks=cw_note + ccw_note))
+    # Endlosmaterial 80 mm: eine Seitenzahl bzw. ein dünner Strich bleiben so groß (639 × 30 bzw. 639 × 900
+    # Punkte), statt auf volle Breite und bis zu 4 m Länge vergrößert zu werden.
+    add(Case("anpassen-endlos-seitenzahl-strich", [sized_page(*a4, extra="pattern=black,bx=800,by=2300,bw=12,bh=30"),
+                                                   sized_page(*a4, extra="pattern=black,bx=400,by=100,bw=2,bh=900")],
+             {"lwLabelWidth": "8000", "lwMediaTracking": "Continuous"},
+             stderr_has=["(639 × 30 Punkte)", "(639 × 900 Punkte)"]))
+    # Mehrseitiges Etikett-PDF halb so groß und gegen den Uhrzeigersinn gedreht auf A4: Nur Seite 1 ist
+    # deutlich hoch; die Seiten 2 und 3 (kurze Zeilen) werden wie sie zurückgedreht (Referenz des Auftrags).
+    add(Case("anpassen-mehrseitig-einheitlich",
+             [sized_page(*a4, extra="pattern=bars,bx=736,by=1012,bw=205,bh=350"),
+              sized_page(*a4, extra="pattern=bars,bx=736,by=1111,bw=205,bh=151"),
+              sized_page(*a4, extra="pattern=bars,bx=719,by=1136,bw=240,bh=101")],
+             dict(label, lwCompression="Z64"),
+             stderr_has=["Seite %d (210 × 297 mm) passt nicht zum Etikett – der Inhalt wird automatisch auf das "
+                         "Etikett gelegt (831 × 609 Punkte, um 90° im Uhrzeigersinn gedreht)" % n for n in (1, 2, 3)]))
     # Unverändert: passende Seite (± 2 mm), Off, kein Etikett, PPD-Standard Off
     add(Case("anpassen-passend-unveraendert", [sized_page(296.0, 218.0, extra="pattern=text,seed=6")], label,
              expect=unfitted, stderr_lacks=note, quick=True))

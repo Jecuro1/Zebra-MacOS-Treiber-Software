@@ -875,8 +875,10 @@ Auftrags für beide), Einstellungen `lwFitToLabel`, `lwLabelWidth` (`lw`), `lwLa
    wird das Ergebnis ein weißes Etikett `W × H` (`L = 255`; freie Seite = 1 Punkt) – weiter mit dem
    Rastern.
 3. **Drehen.** Rahmen für einen Inhalt `u × v` (auch in Schritt 4):
-   `BW = W − 2 · mx` (ist das `< 1`: `W`; freie Breite: `max(u, 32000)`),
-   `BH = H − 2 · my` (ist das `< 1`: `H`; freie Länge: `max(v, 32000)`). Gedreht wird nur, wenn
+   `BW = W − 2 · mx` (ist das `< 1`: `W`; freie Breite: `u`),
+   `BH = H − 2 · my` (ist das `< 1`: `H`; freie Länge: `v`) – entlang einer freien Seite wird also nie
+   vergrößert. Gilt die **Referenz** des Auftrags (siehe unten), übernimmt die Seite deren Drehung
+   `t_R`. Sonst gilt die eigene Drehung: Gedreht wird nur, wenn
    **beide** Seiten fest sind (dann hängt der Rahmen `BW × BH` nicht vom Inhalt ab) und der gedrehte
    Inhalt mehr als 10 % größer würde: `s90 > 1,1 · s0` mit `s0 = min(BW / bw, BH / bh)` und
    `s90 = min(BW / bh, BH / bw)` (exakte Brüche). Das ist gleichwertig zu – und wird so gerechnet:
@@ -893,10 +895,15 @@ Auftrags für beide), Einstellungen `lwFitToLabel`, `lwLabelWidth` (`lw`), `lwLa
    `S(y, bw − 1 − x) = L(x0 + x, y0 + y)` (`0 ≤ x < bw`, `0 ≤ y < bh`). Ohne Drehung: `rw × rh = bw × bh`,
    `S(x, y) = L(x0 + x, y0 + y)`.
 4. **Zielgröße** `tw × th` (vergrößern **und** verkleinern, Seitenverhältnis erhalten): Rahmen
-   `BW × BH` aus Schritt 3 für `u × v = rw × rh`. `BW · rh ≤ BH · rw` → `tw = BW`,
-   `th = max(1, (2 · rh · BW + rw) / (2 · rw))`; andernfalls `th = BH`, `tw = max(1, (2 · rw · BH + rh) / (2 · rh))`.
-   Bei freier Länge wird also auf die Breite `BW` skaliert (höchstens 32000 Punkte lang, ein schon
-   längerer Inhalt wird nicht länger); bei freier Breite entsprechend auf die Höhe `BH`.
+   `BW × BH` aus Schritt 3 für `u × v = rw × rh`. Eigener Maßstab als Bruch `sp = np / dp`:
+   `BW · rh ≤ BH · rw` → `(np, dp) = (BW, rw)`, andernfalls `(BH, rh)`. Maßstab `s = n / d`: der
+   eigene; gilt die Referenz, deren Maßstab `sR = nR / dR`, sofern der Inhalt damit in den Rahmen
+   passt (`sR ≤ sp`, gerechnet als `nR · dp ≤ np · dR`), sonst der eigene. Dann
+   `tw = max(1, (2 · rw · n + d) / (2 · d))`, `th = max(1, (2 · rh · n + d) / (2 · d))`. Mit dem eigenen
+   Maßstab füllt die begrenzende Seite den Rahmen genau (`tw = BW` bzw. `th = BH`), die andere ist
+   kaufmännisch gerundet. Bei freier Länge ist `BH = rh` und damit `sp ≤ 1` (auch `sR ≤ 1`): Es wird
+   nie vergrößert, die Länge folgt dem Inhalt; mit dem eigenen Maßstab wird ein Inhalt breiter als
+   `BW` auf `BW` verkleinert, ein schmalerer bleibt unverändert. Bei freier Breite entsprechend.
 5. **Skalieren (Flächenmittel, beide Richtungen).** Quellpunkt `x` deckt auf einer gemeinsamen
    Ganzzahlachse `[x · tw, (x + 1) · tw)`, Zielpunkt `X` deckt `[X · rw, (X + 1) · rw)` (senkrecht mit
    `th`/`rh` ebenso). Für jeden Zielpunkt `(X, Y)`:
@@ -914,10 +921,25 @@ Auftrags für beide), Einstellungen `lwFitToLabel`, `lwLabelWidth` (`lw`), `lwLa
    mittig; da `tw ≤ BW` und `th ≤ BH`, bleibt bei fester Seite auf jeder Seite mindestens der Rand
    `mx` bzw. `my` frei, außer der Rand ist größer als das Etikett). Dieses Bild ersetzt die Seite.
 
+**Referenz (einheitlich je Auftrag).** Jeder Encoder führt je Auftrag eine Referenz
+`R = (W, H, mx, my, Pw, Ph, t_R, nR, dR)`, anfangs keine (Filter: `lw_fit_reference` im Auftrag, Swift:
+`LabelFit.Reference` in `JobEncoder.fitted(_:pageSizes:)`, Python: `FitMemory` in `fit_images`). Sie
+**gilt** für eine Seite mit Schritt F und Inhalt, wenn `W`, `H` (frei = frei), `mx` und `my` gleich sind
+und `|Pw − Pw_R| ≤ 200 ∧ |Ph − Ph_R| ≤ 200` (gleiche Seitengröße auf ± 2 mm). Gilt sie nicht, entscheidet
+die Seite selbst (eigene Drehung und eigener Maßstab) und wird danach die neue Referenz – mit ihrer
+Drehung `t` und ihrem eigenen Maßstab `(np, dp)`. Seiten ohne Schritt F, leere Seiten und Seiten, die
+der Filter mangels Speicher unverändert druckt, lassen `R` unverändert. Grund: macOS dreht und
+verkleinert jede Seite eines Etikett-PDFs gleich, doch der Inhaltsrahmen einer einzelnen Seite zeigt
+die Drehung nur, wenn ihr Inhalt das Etikett ausfüllt – ein Adressetikett mit kurzen Zeilen ist auch
+nach der Drehung von macOS breiter als hoch und käme sonst quer und in anderer Größe heraus. So
+entscheidet die erste angepasste Seite mit Inhalt für alle folgenden gleicher Größe: gleiche Drehung,
+gleicher Maßstab (kleiner nur, wenn ein Inhalt sonst nicht in den Rahmen passt).
+
 Folgen: Ein Etikett-PDF, das Vorschau oder Safari bei 100 % auf A4 oder Letter setzt – auch halb so
 groß und gegen den Uhrzeigersinn gedreht mitten auf der Seite –, wird ohne den weißen Rand aufrecht,
-seitenverhältnistreu und formatfüllend (1,5 mm Rand) gedruckt; größerer Inhalt (z. B. eine ganze
-A4-Seite) wird verkleinert, kleinerer vergrößert; eine leere Seite ergibt ein leeres Etikett (mit
+seitenverhältnistreu und formatfüllend (1,5 mm Rand) gedruckt, alle Seiten gleich gedreht und gleich
+groß; größerer Inhalt (z. B. eine ganze A4-Seite) wird verkleinert, kleinerer vergrößert (bei
+Endlosmaterial nur verkleinert); eine leere Seite ergibt ein leeres Etikett (mit
 `skipBlankLabels` übersprungen). `lwLabelWidth`/`lwLabelHeight` sind Warteschlangen-Standards aus
 dem Etikettenformat (§9); ohne sie (ältere Warteschlangen, `lwctl encode` ohne `--label-size`) und mit
 `lwFitToLabel=Off` bleibt alles wie bisher. Der Filter puffert nur in Schritt F eine ganze Seite
@@ -930,7 +952,8 @@ Uhrzeigersinn gedreht“).
 Entscheidungen (gegenüber dem ersten Entwurf präzisiert): Bei Endlosmaterial
 (`lwMediaTracking=Continuous`) bzw. `lwLabelHeight=0` ist die Länge frei – sonst würde ein langer
 Beleg auf die Abschnittslänge des Formats geschrumpft; gedreht wird dann nie, der Rand gilt nur für
-die feste Seite. Bei `R` = 90/270 gilt das Etikett quer (wie `lwctl print` die Seite für eine Drehung
+die feste Seite, und vergrößert wird nie (der Rahmen der freien Seite ist der Inhalt: eine Seitenzahl
+oder ein Strich auf sonst leerer Seite würde sonst auf volle Breite und bis zu 4 m Länge vergrößert). Bei `R` = 90/270 gilt das Etikett quer (wie `lwctl print` die Seite für eine Drehung
 quer einpasst); Schritt F dreht in Seitenrichtung, die Benutzer-Drehung `R` folgt danach in Schritt 0.
 Die Inhaltsschwelle 250 ignoriert JPEG-/Scanner-Rauschen nahe Weiß; dunklere Punkte gehören zum
 Inhalt, auch wenn das gewählte Rasterverfahren sie weiß drucken würde. Version 2 (Meldung „Etikett
@@ -1256,6 +1279,16 @@ frühere „fremde Warteschlangen nie ändern“).
 den Netzwerkdruckern der App (`RegisteredPrinter`: Kennung, Host, Rohdatenport):
 * Nur Netzwerk-URIs `socket`, `ipp`, `ipps`, `lpd`, `http`, `https`; `usb://`, `dnssd://` (nennt nur
   den Bonjour-Dienstnamen), `file:` und Backend-Hüllen wie `beh:/…` → `ignore`. Leerer Name → `ignore`.
+* Nur URIs, die das **Gerät selbst** nennen (`QueueAdoption.deviceEndpoint`), sonst `ignore`: kein
+  Loopback-Host (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`, `::ffff:127.x.x.x` – Tunnel, Proxy
+  oder lokaler Druckserver); `socket://` mit jedem Pfad; `ipp`/`ipps`/`http`/`https` nur mit dem
+  IPP-Endpunkt eines Druckers als Pfad (ohne Abfrage, ohne Groß-/Kleinschreibung: leer, `/`, `/ipp`
+  oder `/ipp/…` wie `/ipp/print`); `lpd://` nur mit der Standardwarteschlange (Pfad leer bzw. `/`, so
+  legt „Drucker & Scanner“ ohne Warteschlangenangabe an). Freigaben eines CUPS-, macOS- oder
+  Windows-Druckservers (`ipp://server/printers/<name>`, `…/classes/<name>`,
+  `http://server:631/printers/<name>/.printer`), benannte LPD-Warteschlangen (`lpd://box/PORT2` eines
+  Druckservers mit mehreren Anschlüssen) und alle übrigen Pfade gehören zu anderen Geräten – sonst
+  stellte ein über einen Druckserver erreichter Drucker alle Warteschlangen dieses Servers um.
 * Host gleich ohne Groß-/Kleinschreibung, ohne Benutzerangabe, Port, Pfad und Abfrage, ohne eckige
   Klammern (IPv6; Zone `%25` dekodiert) und abschließende Punkte (`ZD421.local.`). Hostnamen werden
   nicht aufgelöst: Ein per Hostname eingerichteter Drucker passt nicht zu einer URI mit seiner
@@ -1265,7 +1298,9 @@ den Netzwerkdruckern der App (`RegisteredPrinter`: Kennung, Host, Rohdatenport):
   Dienst.
 * Drucker der App: TCP-Verbindungen mit Host und Port; Verbindungen über eine macOS-Warteschlange
   (`cupsQueue`) mit Host und Port aus deren Geräte-URI (`QueueAdoption.registeredPrinter(id:queueDeviceURI:)`,
-  `socket://` mit Port, sonst 9100); USB, Bluetooth und der Demo-Drucker nie. Passen mehrere, gilt der
+  `socket://` mit Port, sonst 9100) – nur wenn diese URI nach derselben Regel das Gerät selbst nennt
+  (eine Warteschlange über einen Druckserver wie `ipp://server/printers/Zebra` liefert keinen Drucker:
+  der Host ist der Server); USB, Bluetooth und der Demo-Drucker nie. Passen mehrere, gilt der
   erste in der Reihenfolge der Seitenleiste.
 * LabelWerk-Treiber (oder „LabelWerk“ in `printer-make-and-model`) → `labelWerk` (nichts zu tun);
   sonst `adopt` mit der Geräte-URI `socket://<host>:<port>` des Druckers (`QueueAdoption.socketURI`,
@@ -1294,8 +1329,11 @@ App (`NSApplication.didBecomeActiveNotification`, nach 1 s zusammengefasst), wen
 oder seine Verbindung ändert (Beobachtung von `AppModel.sessions`, nur bei geänderten Netzwerk- bzw.
 Warteschlangenverbindungen) und bei „OK“/„Übernehmen“ in „Druckeinstellungen“, wenn eine Warteschlange
 des Druckers noch einen fremden Treiber hat. Eine Prüfung liest `lpstat -v` und `lpoptions -p`
-(`CUPSService.queues`); `lpadmin` läuft nur für umzustellende Warteschlangen, nie zwei Prüfungen
-gleichzeitig. Automatisch ohne Passwortabfrage; Erfolg → **ein** Hinweis „macOS-Drucker „10.62.13.19“
+(`CUPSService.queues`); `lpadmin` läuft nur für umzustellende Warteschlangen, nie zwei automatische
+Prüfungen gleichzeitig. Alle `lpadmin`-Aufrufe laufen nacheinander, und `CUPSService.adoptQueue` liest
+die Warteschlange unmittelbar davor erneut: Hat eine gleichzeitige Prüfung („OK“/„Übernehmen“,
+„Erneut versuchen“ neben der beim Aktivieren) sie schon umgestellt, folgen weder ein zweites `lpadmin`
+noch ein zweiter Hinweis. Automatisch ohne Passwortabfrage; Erfolg → **ein** Hinweis „macOS-Drucker „10.62.13.19“
 nutzt jetzt den LabelWerk-Treiber.“ (bei mehreren einer für alle), Fehler → ein Hinweis mit „Erneut
 versuchen“ (dann mit Passwortabfrage). Eine fehlgeschlagene Übernahme versucht die App erst wieder,
 wenn sich Geräte-URI, Treiber oder Soll-Zustand ändern, oder nach einem Neustart.

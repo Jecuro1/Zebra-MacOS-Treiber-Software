@@ -13,7 +13,8 @@
  *      (cupsPageSize) um mehr als 2 mm vom Etikett der Warteschlange ab (lwLabelWidth/
  *      lwLabelHeight, lwFitToLabel=Auto), wird die Seite zuerst ganz gelesen und an das Etikett
  *      angepasst (§8 „F“, lw_fit: Inhalt zuschneiden, bei Bedarf um 90° drehen, auf das Etikett
- *      abzüglich 1,5 mm Rand vergrößern bzw. verkleinern, mittig setzen) – sonst zeilenweise ohne
+ *      abzüglich 1,5 mm Rand vergrößern bzw. verkleinern, mittig setzen; Drehung und Maßstab
+ *      einheitlich für Seiten gleicher Größe, lw_fit_reference) – sonst zeilenweise ohne
  *      Seitenpuffer.
  *   3. Seiten byte-genau nach §8 kodieren (lw_job) und nach stdout schreiben.
  *
@@ -318,7 +319,7 @@ static int resolution_or_zero(unsigned dpi)
 
 static page_result process_page(cups_raster_t *ras, const cups_page_header2_t *h, int page_number,
                                 lw_job *job, const lw_settings *settings, int max_print_width,
-                                page_buffers *b, const lw_logger *log)
+                                page_buffers *b, lw_fit_reference *fit_ref, const lw_logger *log)
 {
     lw_raster_format format = {
         .width = h->cupsWidth,
@@ -399,7 +400,7 @@ static page_result process_page(cups_raster_t *ras, const cups_page_header2_t *h
     int fitted_w = 0, fitted_h = 0, turn = LW_FIT_TURN_NONE;
     row_source buffered = stream;
     page_result result;
-    if (lw_fit_apply(&plan, image, width, height, &fitted, &fitted_w, &fitted_h, &turn)) {
+    if (lw_fit_apply(&plan, fit_ref, image, width, height, &fitted, &fitted_w, &fitted_h, &turn)) {
         lw_log(log, LW_LOG_INFO,
                "Seite %d (%.0f × %.0f mm) passt nicht zum Etikett – der Inhalt wird automatisch auf "
                "das Etikett gelegt (%d × %d Punkte%s).",
@@ -528,6 +529,9 @@ int main(int argc, char *argv[])
 
     page_buffers buffers;
     memset(&buffers, 0, sizeof(buffers));
+    /* §8 „F“: Drehung und Maßstab einheitlich für Seiten gleicher Größe (Referenz des Auftrags). */
+    lw_fit_reference fit_ref;
+    lw_fit_reference_init(&fit_ref);
     cups_page_header2_t header;
     int page_number = 0;
     bool failed = false;
@@ -538,7 +542,7 @@ int main(int argc, char *argv[])
         lw_log(&log, LW_LOG_INFO, "Seite %d wird verarbeitet (%s) …", page_number,
                lw_language_name(settings.language));
         page_result r = process_page(ras, &header, page_number, &job, &settings, max_print_width,
-                                     &buffers, &log);
+                                     &buffers, &fit_ref, &log);
         if (r == PAGE_FAILED) {
             failed = true;
             break;

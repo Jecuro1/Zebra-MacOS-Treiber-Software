@@ -80,7 +80,7 @@ struct LabelFitTests {
         #expect(b?.x == 1 && b?.y == 5 && b?.width == 4 && b?.height == 3)
     }
 
-    @Test("Zielrahmen und Zielgröße: vergrößern und verkleinern, Rand, freie Seite höchstens 32000")
+    @Test("Zielrahmen und Zielgröße: vergrößern und verkleinern, Rand, freie Seite = Inhalt (nie größer)")
     func targetSize() {
         func size(_ w: Int, _ h: Int, _ plan: LabelFit.Plan) -> [Int] {
             let s = LabelFit.targetSize(contentWidth: w, contentHeight: h, plan: plan)
@@ -94,17 +94,73 @@ struct LabelFitTests {
         #expect(box(5, 5, label) == [807, 585])
         #expect(box(5, 5, LabelFit.Plan(width: 20, height: 30, marginX: 10, marginY: 14)) == [20, 2], "Rand zu groß")
         #expect(box(5, 40_000, LabelFit.Plan(width: 831, height: nil, marginX: 12, marginY: 12)) == [807, 40_000])
-        #expect(box(7, 5, LabelFit.Plan(width: nil, height: 200)) == [32_000, 200])
+        #expect(box(5, 7, LabelFit.Plan(width: 831, height: nil, marginX: 12, marginY: 12)) == [807, 7])
+        #expect(box(7, 5, LabelFit.Plan(width: nil, height: 200)) == [7, 200])
         let both = LabelFit.Plan(width: 200, height: 200)
         #expect(size(100, 50, both) == [200, 100], "vergrößern")
         #expect(size(400, 100, both) == [200, 50])
         #expect(size(100, 400, both) == [50, 200])
         #expect(size(401, 3, both) == [200, 1])
         let widthOnly = LabelFit.Plan(width: 200, height: nil)
-        #expect(size(3, 1000, widthOnly) == [96, 32_000], "freie Länge höchstens 32000 Punkte")
+        #expect(size(3, 1000, widthOnly) == [3, 1000], "freie Länge: nie vergrößern")
         #expect(size(1000, 3, widthOnly) == [200, 1])
         #expect(size(1000, 300, LabelFit.Plan(width: nil, height: 200)) == [667, 200])
+        #expect(size(300, 100, LabelFit.Plan(width: nil, height: 200)) == [300, 100])
         #expect(size(416, 305, label) == [798, 585])
+        // Meldung der Prüfung: Seitenzahl bzw. dünner Strich auf Endlosmaterial 80 mm → unverändert
+        let roll = LabelFit.Plan(width: 639, height: nil, marginX: 12, marginY: 12)
+        #expect(size(12, 30, roll) == [12, 30])
+        #expect(size(2, 900, roll) == [2, 900])
+        #expect(size(1000, 300, roll) == [615, 185])
+        // Maßstab als Bruch
+        #expect(LabelFit.scale(contentWidth: 100, contentHeight: 50, plan: both) == LabelFit.Scale(numerator: 200, denominator: 100))
+        #expect(LabelFit.scale(contentWidth: 100, contentHeight: 400, plan: both) == LabelFit.Scale(numerator: 200, denominator: 400))
+        let scaled = LabelFit.scaledSize(contentWidth: 151, contentHeight: 205, scale: LabelFit.Scale(numerator: 807, denominator: 350))
+        #expect(scaled.width == 348 && scaled.height == 473)
+        let tiny = LabelFit.scaledSize(contentWidth: 1, contentHeight: 1, scale: LabelFit.Scale(numerator: 1, denominator: 9))
+        #expect(tiny.width == 1 && tiny.height == 1, "mindestens 1")
+    }
+
+    @Test("Referenz: einheitliche Drehung und Maßstab für Seiten gleicher Größe (wie C und Python)")
+    func reference() {
+        // Etikett-PDF halb so groß, gegen den Uhrzeigersinn gedreht auf A4 (20 dpi: Seite 165 × 234,
+        // Etikett 82 × 60, Rahmen 80 × 58). Nur Seite 1 ist deutlich hoch; Seiten 2 und 3 (kurze Zeilen)
+        // werden wie sie gedreht und gleich groß, Seite 4 passt nur kleiner, Letter entscheidet selbst.
+        func sheet(_ w: Int, _ h: Int, _ box: (Int, Int, Int, Int)) -> GrayImage {
+            var image = GrayImage(width: w, height: h)
+            for y in box.1..<(box.1 + box.3) {
+                for x in box.0..<(box.0 + box.2) { image[x, y] = 0 }
+            }
+            return image
+        }
+        let pages = [(70, 100, 20, 34), (70, 100, 20, 15), (60, 110, 24, 10), (60, 90, 40, 30)]
+            .map { sheet(165, 234, $0) } + [sheet(170, 220, (60, 90, 20, 15))]
+        let plan = LabelFit.Plan(width: 82, height: 60, marginX: 1, marginY: 1)
+        let sizes = [(21000, 29700), (21000, 29700), (21000, 29700), (21000, 29700), (21590, 27940)]
+        let expected = [(80, 47), (35, 47), (24, 56), (44, 58), (77, 58)]
+        var reference: LabelFit.Reference?
+        for (index, page) in pages.enumerated() {
+            #expect((reference?.applies(to: plan, pageWidth: sizes[index].0, pageHeight: sizes[index].1) ?? false)
+                    == (1...3).contains(index))
+            let fitted = LabelFit.apply(page, plan: plan, pageWidth: sizes[index].0, pageHeight: sizes[index].1,
+                                        reference: &reference)
+            #expect(fitted.width == 82 && fitted.height == 60)
+            let bounds = LabelFit.contentBounds(fitted)
+            #expect(bounds?.width == expected[index].0 && bounds?.height == expected[index].1, "Seite \(index + 1)")
+            #expect(bounds?.x == (82 - expected[index].0) / 2 && bounds?.y == (60 - expected[index].1) / 2)
+        }
+        #expect(reference == LabelFit.Reference(plan: plan, pageWidth: 21590, pageHeight: 27940, turn: .r0,
+                                                scale: LabelFit.Scale(numerator: 58, denominator: 15)))
+        // Allein entschiede Seite 2 anders (nicht gedreht: 15 hoch → 58)
+        #expect(LabelFit.contentBounds(LabelFit.apply(pages[1], plan: plan))?.height == 58)
+        // Leere Seite ändert die Referenz nicht; ± 2 mm, anderer Rand
+        let before = reference
+        _ = LabelFit.apply(GrayImage(width: 9, height: 9), plan: plan, pageWidth: 21590, pageHeight: 27940,
+                           reference: &reference)
+        #expect(reference == before)
+        #expect(reference?.applies(to: plan, pageWidth: 21790, pageHeight: 27740) == true)
+        #expect(reference?.applies(to: plan, pageWidth: 21791, pageHeight: 27940) == false)
+        #expect(reference?.applies(to: LabelFit.Plan(width: 82, height: 60), pageWidth: 21590, pageHeight: 27940) == false)
     }
 
     @Test("Drehung: nur festes Etikett, > 10 % Gewinn (= s90 > 1,1 · s0), Richtung nach dem Inhalt")

@@ -1031,11 +1031,35 @@ def _inner(side: int, margin: int) -> int:
 
 
 def fit_box(plan: FitPlan, rw: int, rh: int) -> Tuple[int, int]:
-    """Schritt F.4: Zielrahmen (BW, BH) für Inhalt ``rw × rh`` – feste Seite W − 2·mx bzw. H − 2·my,
-    freie Seite max(Inhalt, 32000)."""
-    box_w = _inner(plan.width, plan.margin_x) if plan.width is not None else max(rw, FIT_MAX_DOTS)
-    box_h = _inner(plan.height, plan.margin_y) if plan.height is not None else max(rh, FIT_MAX_DOTS)
+    """Schritt F.3/F.4: Zielrahmen (BW, BH) für Inhalt ``rw × rh`` – feste Seite W − 2·mx bzw. H − 2·my,
+    freie Seite = Inhalt (entlang einer freien Seite wird nie vergrößert)."""
+    box_w = _inner(plan.width, plan.margin_x) if plan.width is not None else rw
+    box_h = _inner(plan.height, plan.margin_y) if plan.height is not None else rh
     return box_w, box_h
+
+
+class FitReference(NamedTuple):
+    """§8 F „Referenz“: Entscheidung einer Seite, die für die folgenden Seiten gleicher Größe gilt –
+    Plan, Seitengröße in 1/100 mm, Drehung und Maßstab als Bruch (Zähler, Nenner)."""
+    plan: FitPlan
+    page_w: int
+    page_h: int
+    turn: int
+    scale: Tuple[int, int]
+
+    def applies(self, plan: FitPlan, page_w: int, page_h: int) -> bool:
+        """Gleicher Plan (Etikett, Rand) und Seitengröße auf ± 2 mm."""
+        return (self.plan == plan and abs(page_w - self.page_w) <= FIT_TOLERANCE
+                and abs(page_h - self.page_h) <= FIT_TOLERANCE)
+
+
+class FitMemory:
+    """Auftragszustand von §8 F: die Referenz (anfangs keine) und – für Tests – je angepasster Seite
+    ``(Drehung, Maßstab)`` bzw. None (Schritt F entfällt oder leere Seite)."""
+
+    def __init__(self) -> None:
+        self.reference: Optional[FitReference] = None
+        self.decisions: List[Optional[Tuple[int, Tuple[int, int]]]] = []
 
 
 def fit_rotation(bw: int, bh: int, plan: FitPlan) -> int:
@@ -1087,12 +1111,22 @@ def content_bounds(lum: bytes, width: int, height: int) -> Optional[Tuple[int, i
     return left, top, right - left + 1, bottom - top + 1
 
 
+def fit_scale(rw: int, rh: int, box_w: int, box_h: int) -> Tuple[int, int]:
+    """Schritt F.4: eigener Maßstab der Seite als Bruch – (BW, rw), wenn BW·rh ≤ BH·rw, sonst (BH, rh)."""
+    return (box_w, rw) if box_w * rh <= box_h * rw else (box_h, rh)
+
+
+def fit_scaled_size(rw: int, rh: int, scale: Tuple[int, int]) -> Tuple[int, int]:
+    """Schritt F.4: ``rw × rh`` mit dem Maßstab n/d, je Seite kaufmännisch gerundet, mindestens 1."""
+    n, d = scale
+    return max(1, (2 * rw * n + d) // (2 * d)), max(1, (2 * rh * n + d) // (2 * d))
+
+
 def fit_target_size(rw: int, rh: int, box_w: int, box_h: int) -> Tuple[int, int]:
-    """Schritt F.4: größte Größe mit dem Seitenverhältnis von ``rw × rh`` im Rahmen ``box_w × box_h``
-    (vergrößern und verkleinern; die abhängige Seite kaufmännisch gerundet, mindestens 1)."""
-    if box_w * rh <= box_h * rw:
-        return box_w, max(1, (2 * rh * box_w + rw) // (2 * rw))
-    return max(1, (2 * rw * box_h + rh) // (2 * rh)), box_h
+    """Schritt F.4 ohne Referenz: größte Größe mit dem Seitenverhältnis von ``rw × rh`` im Rahmen
+    ``box_w × box_h`` (vergrößern und verkleinern; die begrenzende Seite füllt den Rahmen genau, die
+    abhängige kaufmännisch gerundet, mindestens 1)."""
+    return fit_scaled_size(rw, rh, fit_scale(rw, rh, box_w, box_h))
 
 
 def _axis_spans(source: int, target: int) -> List[Tuple[int, int, List[Tuple[int, int]]]]:
@@ -1146,23 +1180,36 @@ def area_average(lum: bytes, width: int, x0: int, y0: int, bw: int, bh: int, tw:
 
 
 def fit_page(lum: bytes, width: int, height: int, s: Settings, page_size: Optional[Tuple[float, float]],
-             xdpi: int, ydpi: int) -> Tuple[int, int, bytes]:
-    """§8 „F“ für eine Seite: liefert (Breite, Höhe, Luminanz) – unverändert, wenn nichts anzupassen ist."""
+             xdpi: int, ydpi: int, memory: Optional[FitMemory] = None) -> Tuple[int, int, bytes]:
+    """§8 „F“ für eine Seite: liefert (Breite, Höhe, Luminanz) – unverändert, wenn nichts anzupassen ist.
+    ``memory``: Auftragszustand (Referenz) – ohne ihn entscheidet die Seite allein."""
     plan = fit_plan(s, width, height, page_size, xdpi, ydpi)
-    if plan is None:
-        return width, height, lum
-    bounds = content_bounds(lum, width, height)
-    if bounds is None:                                                   # leere Seite → leeres Etikett
-        cw, ch = plan.width or 1, plan.height or 1
+    bounds = content_bounds(lum, width, height) if plan is not None else None
+    if plan is None or bounds is None:
+        if memory is not None:
+            memory.decisions.append(None)
+        if plan is None:
+            return width, height, lum
+        cw, ch = plan.width or 1, plan.height or 1                       # leere Seite → leeres Etikett
         return cw, ch, b"\xff" * (cw * ch)
+    page_w, page_h = (points_to_hundredths_mm(v) for v in page_size)
+    reference = memory.reference if memory is not None else None
+    applies = reference is not None and reference.applies(plan, page_w, page_h)
     x0, y0, bw, bh = bounds
-    turn = fit_rotation(bw, bh, plan)
+    turn = reference.turn if applies else fit_rotation(bw, bh, plan)
     if turn:                                                             # Ausschnitt drehen, dann skalieren
         cut = b"".join(lum[(y0 + y) * width + x0:(y0 + y) * width + x0 + bw] for y in range(bh))
         source, stride, sx, sy, rw, rh = rotate_luminance(cut, bw, bh, turn), bh, 0, 0, bh, bw
     else:
         source, stride, sx, sy, rw, rh = lum, width, x0, y0, bw, bh
-    tw, th = fit_target_size(rw, rh, *fit_box(plan, rw, rh))
+    scale = fit_scale(rw, rh, *fit_box(plan, rw, rh))
+    if applies and reference.scale[0] * scale[1] <= scale[0] * reference.scale[1]:
+        scale = reference.scale                                          # passt: Maßstab der Referenz
+    if memory is not None:
+        if not applies:
+            memory.reference = FitReference(plan, page_w, page_h, turn, scale)
+        memory.decisions.append((turn, scale))
+    tw, th = fit_scaled_size(rw, rh, scale)
     scaled = area_average(source, stride, sx, sy, rw, rh, tw, th)
     cw = plan.width if plan.width is not None else tw
     ch = plan.height if plan.height is not None else th
@@ -1175,16 +1222,21 @@ def fit_page(lum: bytes, width: int, height: int, s: Settings, page_size: Option
 
 
 def fit_images(images: Sequence[Tuple[int, int, bytes]], settings: Settings, page_sizes=None,
-               resolution_dpi: int = 203) -> List[Tuple[int, int, bytes]]:
-    """Wendet §8 „F“ auf alle Seiten an. ``page_sizes``: je Seite None, (pw, ph) in Punkten oder
-    (pw, ph, xdpi, ydpi); ohne Auflösung gilt ``resolution_dpi`` für beide Richtungen."""
+               resolution_dpi: int = 203, memory: Optional[FitMemory] = None) -> List[Tuple[int, int, bytes]]:
+    """Wendet §8 „F“ auf alle Seiten eines Auftrags an (eine Referenz für den ganzen Auftrag).
+    ``page_sizes``: je Seite None, (pw, ph) in Punkten oder (pw, ph, xdpi, ydpi); ohne Auflösung gilt
+    ``resolution_dpi`` für beide Richtungen. ``memory`` (optional, sonst neu) sammelt die
+    Entscheidungen je Seite."""
     s = settings.clamped()
+    memory = memory if memory is not None else FitMemory()
     result = []
     for index, (w, h, lum) in enumerate(images):
         size = page_sizes[index] if page_sizes is not None else None
         if size is not None:
             xdpi, ydpi = (size[2], size[3]) if len(size) == 4 else (resolution_dpi, resolution_dpi)
-            w, h, lum = fit_page(lum, w, h, s, (size[0], size[1]), xdpi, ydpi)
+            w, h, lum = fit_page(lum, w, h, s, (size[0], size[1]), xdpi, ydpi, memory)
+        else:
+            memory.decisions.append(None)
         result.append((w, h, lum))
     return result
 
@@ -1265,13 +1317,27 @@ def selftest() -> None:
     assert fit_box(FitPlan(831, 609, 12, 12), 5, 5) == (807, 585)
     assert fit_box(FitPlan(20, 30, 10, 14), 5, 5) == (20, 2)                     # Rand zu groß → ganze Seite
     assert fit_box(FitPlan(831, None, 12, 12), 5, 40000) == (807, 40000)
-    assert fit_box(FitPlan(None, 609, 12, 12), 7, 5) == (32000, 585)
+    assert fit_box(FitPlan(831, None, 12, 12), 5, 7) == (807, 7)                  # freie Seite = Inhalt
+    assert fit_box(FitPlan(None, 609, 12, 12), 7, 5) == (7, 585)
     assert fit_target_size(100, 50, 200, 200) == (200, 100)                      # vergrößern
     assert fit_target_size(400, 100, 200, 200) == (200, 50)
     assert fit_target_size(100, 400, 200, 200) == (50, 200)
     assert fit_target_size(401, 3, 200, 200) == (200, 1)                         # 1,496 → 1
-    assert fit_target_size(3, 1000, 200, 32000) == (96, 32000)                   # freie Länge höchstens 32000
-    assert fit_target_size(1000, 3, 200, 32000) == (200, 1)
+    assert fit_target_size(12, 30, *fit_box(FitPlan(639, None, 12, 12), 12, 30)) == (12, 30)  # nie größer
+    assert fit_target_size(2, 900, *fit_box(FitPlan(639, None, 12, 12), 2, 900)) == (2, 900)
+    assert fit_target_size(1000, 300, *fit_box(FitPlan(639, None, 12, 12), 1000, 300)) == (615, 185)
+    assert fit_target_size(300, 1000, *fit_box(FitPlan(None, 609, 12, 12), 300, 1000)) == (176, 585)
+    assert fit_scale(100, 50, 200, 200) == (200, 100) and fit_scale(100, 400, 200, 200) == (200, 400)
+    assert fit_scaled_size(151, 205, (807, 350)) == (348, 473)
+    for _ in range(2000):                                                        # = Rahmen genau gefüllt
+        rw, rh, box_w, box_h = (rng.randint(1, 900) for _ in range(4))
+        tw, th = fit_target_size(rw, rh, box_w, box_h)
+        assert tw <= box_w and th <= box_h and (tw == box_w or th == box_h), (rw, rh, box_w, box_h)
+    # Referenz: gleicher Plan, Seite auf ± 2 mm
+    a4_ref = FitReference(FitPlan(831, 609, 12, 12), 21000, 29700, 90, (807, 350))
+    assert a4_ref.applies(FitPlan(831, 609, 12, 12), 21200, 29500)
+    assert not a4_ref.applies(FitPlan(831, 609, 12, 12), 21590, 27940)           # Letter
+    assert not a4_ref.applies(FitPlan(831, 609, 0, 0), 21000, 29700)
     # Drehung: Bruchvergleich s90 > 1,1·s0 ⇔ Kurzform aus §8 (C/Swift), Richtung nach dem Inhalt
     for _ in range(3000):
         bw, bh = rng.randint(1, 60), rng.randint(1, 60)
@@ -1314,6 +1380,29 @@ def selftest() -> None:
         assert area_average(lum, w, x0, y0, bw, bh, tw, th) == brute(lum, w, x0, y0, bw, bh, tw, th)
     assert area_average(bytes([0, 255]), 2, 0, 0, 2, 1, 4, 1) == bytes([0, 0, 255, 255])   # ganzzahlig: Kopien
     assert area_average(bytes([0, 255]), 2, 0, 0, 2, 1, 3, 1) == bytes([0, 128, 255])
+    # Referenz: ein Etikett-PDF, das macOS halb so groß und gegen den Uhrzeigersinn gedreht auf A4 legt
+    # (20 dpi: A4 165 × 234, Etikett 82 × 60, Rahmen 80 × 58). Nur Seite 1 ist deutlich hoch; Seiten 2
+    # und 3 (kurze Zeilen) werden wie sie gedreht und gleich groß, Seite 4 passt nur kleiner, Letter
+    # entscheidet selbst.
+    def page_with_box(w, h, box):
+        x0, y0, bw, bh = box
+        data = bytearray(b"\xff" * (w * h))
+        for y in range(y0, y0 + bh):
+            data[y * w + x0:y * w + x0 + bw] = b"\x00" * bw
+        return w, h, bytes(data)
+
+    a4_pt, letter_pt = (595.2756, 841.8898), (612.0, 792.0)
+    job = [page_with_box(165, 234, box) for box in ((70, 100, 20, 34), (70, 100, 20, 15), (60, 110, 24, 10),
+                                                     (60, 90, 40, 30))] + [page_with_box(170, 220, (60, 90, 20, 15))]
+    memory = FitMemory()
+    label_s = Settings(label_width=10400, label_height=7620)
+    fitted_job = fit_images(job, label_s, [a4_pt] * 4 + [letter_pt], 20, memory)
+    assert memory.decisions == [(90, (80, 34))] * 3 + [(90, (58, 40)), (0, (58, 15))], memory.decisions
+    assert [(w, h) for w, h, _ in fitted_job] == [(82, 60)] * 5
+    assert memory.reference == FitReference(FitPlan(82, 60, 1, 1), 21590, 27940, 0, (58, 15))
+    assert content_bounds(fitted_job[1][2], 82, 60) == (23, 6, 35, 47)              # 15 × 20 · 80/34 → 35 × 47
+    assert fit_rotation(20, 15, FitPlan(82, 60, 1, 1)) == 0                       # allein: nicht gedreht
+    assert fit_page(job[1][2], 165, 234, label_s, a4_pt, 20, 20) != fitted_job[1]
     page = bytes([255] * 50 + [255, 0, 255, 255, 100] + [255] * 45)          # 10 × 10, Inhalt in Zeile 5
     assert content_bounds(page, 10, 10) == (1, 5, 4, 1)
     assert content_bounds(bytes([250] * 12), 4, 3) is None and content_bounds(bytes([249]), 1, 1) == (0, 0, 1, 1)
