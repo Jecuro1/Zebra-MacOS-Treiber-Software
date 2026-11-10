@@ -270,31 +270,35 @@ enum LabelElementPainter {
         }
     }
 
+    /// Zeichnet ein lineares Symbol exakt nach der Geometrie des Renderers
+    /// (`LinearBarcodeLayout`), damit Vektor- und Pixelvorschau übereinstimmen.
     private static func drawLinear(_ element: LinearBarcodeElement, in context: GraphicsContext) {
-        let module = max(1, element.moduleWidth)
-        let widths = element.barcode.widthsInDots(moduleWidth: module, ratio: element.ratio)
-        let total = CGFloat(widths.reduce(0) { $0 + $1.dots })
-        let barHeight = CGFloat(max(1, element.height))
-        let textHeight: CGFloat = element.printInterpretation ? max(12, CGFloat(module) * 9) : 0
-        let fieldSize = CGSize(width: total, height: barHeight + textHeight)
+        let layout = element.layout
+        let fieldSize = CGSize(width: CGFloat(layout.width), height: CGFloat(layout.height))
         var ctx = oriented(context, origin: element.origin, size: fieldSize, orientation: element.orientation)
-        var x: CGFloat = 0
-        let barTop: CGFloat = element.printInterpretation && element.interpretationAbove ? textHeight : 0
+        if element.reverse { ctx.blendMode = .difference }
+        let ink: Color = element.reverse ? .white : .black
         var bars = Path()
-        for piece in widths {
-            if piece.isBar {
-                bars.addRect(CGRect(x: x, y: barTop, width: CGFloat(piece.dots), height: barHeight))
-            }
-            x += CGFloat(piece.dots)
+        for bar in layout.bars {
+            let height = CGFloat(layout.barHeight + (bar.isGuard ? layout.guardExtension : 0))
+            bars.addRect(CGRect(x: CGFloat(layout.barsX + bar.x), y: CGFloat(layout.barsY),
+                                width: CGFloat(bar.width), height: height))
         }
-        ctx.fill(bars, with: .color(.black))
-        if element.printInterpretation {
-            let label = element.barcode.humanReadable.isEmpty ? element.text : element.barcode.humanReadable
-            let text = Text(label)
-                .font(.system(size: textHeight * 0.82, weight: .regular, design: .monospaced))
-                .foregroundStyle(Color.black)
-            let y = element.interpretationAbove ? textHeight * 0.5 : barHeight + textHeight * 0.55
-            ctx.draw(text, at: CGPoint(x: total / 2, y: y), anchor: .center)
+        ctx.fill(bars, with: .color(ink))
+        // Klarschrift: Bitmap-Schrift A (Zelle 9 × 5 Module) → Monospace in Zellhöhe.
+        let fontSize = CGFloat(layout.textHeight) * 0.92
+        for run in layout.texts {
+            let text = Text(run.text)
+                .font(.system(size: fontSize, weight: .regular, design: .monospaced))
+                .foregroundStyle(ink)
+            var textCtx = ctx
+            let resolved = textCtx.resolve(text)
+            let natural = resolved.measure(in: CGSize(width: 100_000, height: 100_000))
+            let target = CGFloat(layout.textAdvance * run.text.count)
+            let scaleX = natural.width > 0 ? max(0.3, min(3, target / natural.width)) : 1
+            textCtx.translateBy(x: CGFloat(run.x), y: CGFloat(run.y))
+            textCtx.scaleBy(x: scaleX, y: 1)
+            textCtx.draw(resolved, at: CGPoint(x: 0, y: CGFloat(layout.textHeight) / 2), anchor: .leading)
         }
     }
 
@@ -302,14 +306,15 @@ enum LabelElementPainter {
         let m = CGFloat(max(1, element.moduleSize))
         let matrix = element.matrix
         let size = CGSize(width: CGFloat(matrix.width) * m, height: CGFloat(matrix.height) * m)
-        let ctx = oriented(context, origin: element.origin, size: size, orientation: element.orientation)
+        var ctx = oriented(context, origin: element.origin, size: size, orientation: element.orientation)
+        if element.reverse { ctx.blendMode = .difference }
         var path = Path()
         for y in 0..<matrix.height {
             for x in 0..<matrix.width where matrix[x, y] {
                 path.addRect(CGRect(x: CGFloat(x) * m, y: CGFloat(y) * m, width: m, height: m))
             }
         }
-        ctx.fill(path, with: .color(.black))
+        ctx.fill(path, with: .color(element.reverse ? .white : .black))
     }
 }
 
