@@ -98,10 +98,19 @@ public struct TextElement: Hashable, Sendable {
     public var direction: TextDirection
     /// Zusätzlicher Zeichenabstand in Punkten (`^FP`, Parameter g).
     public var characterGap: Int
+    /// Auflösung (Punkte/mm), für die die Schriftmatrix gewählt wurde, oder `nil` = Auflösung
+    /// des umgebenden Etiketts (ohne Etikett: 8 Punkte/mm).
+    ///
+    /// Relevant für die Bitmap-Schriften E (OCR-B) und H (OCR-A), die bei 12 und 24 Punkten/mm
+    /// eigene, größere Zellen haben – Zeichenvorschub und damit Feldbreite hängen davon ab. Der
+    /// Interpreter setzt den Wert stets, sodass `LabelElement.boundingBox` und der
+    /// `SoftwareRasterizer` dieselben Metriken verwenden.
+    public var dotsPerMM: Int?
 
     public init(origin: LabelPoint, fontName: String, height: Int, width: Int,
                 orientation: FieldOrientation = .normal, text: String, reverse: Bool = false,
-                block: FieldBlock? = nil, direction: TextDirection = .horizontal, characterGap: Int = 0) {
+                block: FieldBlock? = nil, direction: TextDirection = .horizontal, characterGap: Int = 0,
+                dotsPerMM: Int? = nil) {
         self.origin = origin
         self.fontName = fontName
         self.height = height
@@ -112,6 +121,7 @@ public struct TextElement: Hashable, Sendable {
         self.block = block
         self.direction = direction
         self.characterGap = characterGap
+        self.dotsPerMM = dotsPerMM
     }
 }
 
@@ -203,7 +213,14 @@ public struct GraphicElement: Hashable, Sendable {
 ///
 /// Feldrechteck (ungedreht): Symbolbreite (bei EAN/UPC mit Klarschrift zuzüglich der außen
 /// stehenden Ziffern) × (Balkenhöhe + Klarschriftzeile). `origin` ist dessen linke obere Ecke
-/// nach der Drehung. Die genaue Aufteilung liefert `LinearBarcodeLayout`.
+/// nach der Drehung.
+///
+/// Die Balken beginnen **nicht** immer bei `origin`: Bei EAN-13, UPC-A und UPC-E mit
+/// Klarschrift unten liegt links eine Randzone von 7 Modulen für die außen stehende Ziffer
+/// (UPC-A/UPC-E auch rechts), und bei Klarschrift oben beginnen die Balken unter der
+/// Schriftzeile. Die genaue Aufteilung (Balken, Klarschriftläufe, Begrenzungsbalken) liefert
+/// `layout` (`LinearBarcodeLayout`, ungedrehte Feldkoordinaten); `barsOrigin` ist die linke
+/// obere Ecke der Balken auf dem Etikett.
 public struct LinearBarcodeElement: Hashable, Sendable {
     public var origin: LabelPoint
     public var symbology: BarcodeSymbology
@@ -237,6 +254,27 @@ public struct LinearBarcodeElement: Hashable, Sendable {
         self.interpretationAbove = interpretationAbove
         self.text = text
         self.reverse = reverse
+    }
+
+    /// Genaue Geometrie des Felds in ungedrehten Feldkoordinaten (wie sie der
+    /// `SoftwareRasterizer` zeichnet).
+    public var layout: LinearBarcodeLayout { LinearBarcodeLayout(self) }
+
+    /// Umschließendes Rechteck der Balken (ohne Klarschrift und Verlängerung der
+    /// Begrenzungsbalken) in Etikettenpunkten, nach der Drehung.
+    public var barsFrame: (x: Int, y: Int, width: Int, height: Int) {
+        let layout = self.layout
+        let bars = IntRect(x: layout.barsX, y: layout.barsY, width: layout.barsWidth, height: layout.barHeight)
+        let frame = SoftwareRasterizer.screenRect(of: bars, width: layout.width, height: layout.height,
+                                                  origin: origin, orientation: orientation)
+        return (frame.x, frame.y, frame.width, frame.height)
+    }
+
+    /// Linke obere Ecke der Balken auf dem Etikett (nach der Drehung), z. B. `origin.x + 14` bei
+    /// EAN-13 mit Klarschrift unten und Modulbreite 2.
+    public var barsOrigin: LabelPoint {
+        let frame = barsFrame
+        return LabelPoint(x: frame.x, y: frame.y)
     }
 }
 
@@ -279,12 +317,20 @@ public enum LabelElement: Hashable, Sendable {
 
     /// Umschließendes Rechteck in Etikettenpunkten (nach Drehung).
     ///
-    /// Text wird mit den Metriken der eingebauten Rasterschriften vermessen; Akzente und
-    /// Unterlängen können geringfügig über das Feldrechteck hinausragen.
+    /// Text wird mit den Metriken der eingebauten Rasterschriften vermessen – in der
+    /// Auflösung `TextElement.dotsPerMM` (vom Interpreter stets gesetzt), ersatzweise 8 Punkte/mm.
+    /// Akzente und Unterlängen können geringfügig über das Feldrechteck hinausragen. Mit
+    /// `RenderedLabel.boundingBox(of:)` gilt ersatzweise die Auflösung des Etiketts.
     public var boundingBox: (x: Int, y: Int, width: Int, height: Int) {
+        boundingBox(dotsPerMM: 8)
+    }
+
+    /// Umschließendes Rechteck in Etikettenpunkten (nach Drehung); `dotsPerMM` gilt für
+    /// Textelemente ohne eigene Auflösung (`TextElement.dotsPerMM == nil`).
+    public func boundingBox(dotsPerMM: Int) -> (x: Int, y: Int, width: Int, height: Int) {
         switch self {
         case .text(let text):
-            let size = TextLayout.fieldSize(of: text)
+            let size = TextLayout.fieldSize(of: text, dotsPerMM: max(1, text.dotsPerMM ?? dotsPerMM))
             return Self.rotated(text.origin, size, text.orientation)
         case .box(let box):
             return (box.origin.x, box.origin.y, box.width, box.height)
@@ -383,6 +429,12 @@ public struct RenderedLabel: Hashable, Sendable {
         self.inverted = inverted
         self.mirrored = mirrored
         self.warnings = warnings
+    }
+
+    /// Umschließendes Rechteck eines Elements in Formatkoordinaten (vor `^PO`/`^PM`), vermessen
+    /// in der Auflösung dieses Etiketts (sofern das Element keine eigene trägt).
+    public func boundingBox(of element: LabelElement) -> (x: Int, y: Int, width: Int, height: Int) {
+        element.boundingBox(dotsPerMM: dotsPerMM)
     }
 }
 

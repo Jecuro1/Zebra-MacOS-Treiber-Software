@@ -12,7 +12,7 @@ extension InterpreterEngine {
         "JS", "JU", "JZ", "JT", "JW", "JJ", "JH", "JI", "JB", "KD", "KL", "KN", "KP", "KV", "SC", "SE",
         "SL", "SO", "SP", "SQ", "SR", "SS", "ST", "SX", "SZ", "SI", "XB", "XS", "ZZ", "HH", "HW", "HF",
         "HG", "HT", "HV", "HY", "HZ", "HR", "WD", "TO", "CM", "CO", "CV", "FL", "LF", "NC", "ND", "NI",
-        "NN", "NP", "NS", "NT", "NW", "NB", "CN", "CP", "LT", "FX", "CC", "CT", "CD", "XZ",
+        "NN", "NP", "NS", "NT", "NW", "NB", "CN", "CP", "FX", "CC", "CT", "CD", "XZ",
         "RS", "RF", "RW", "RB", "RR", "RT", "RU", "RL", "RM", "RN", "RQ", "RZ", "WT", "WF", "RI", "RA",
         "RE", "RV",
     ]
@@ -116,7 +116,8 @@ extension InterpreterEngine {
         case "CI":
             changeCharacterSet(p)
         case "CW":
-            if let alias = p.character(0), let file = p.string(1) {
+            // Kennbuchstabe A–Z bzw. Ziffer 0–9 (wie bei ^A); andere Zeichen wären nie abrufbar.
+            if let alias = p.character(0), alias.isASCII, alias.isLetter || alias.isNumber, let file = p.string(1) {
                 printer.fontAliases[String(alias)] = ObjectName.normalize(file, defaultExtension: ".FNT")
             } else {
                 warn(name, "Ungültige Schriftzuordnung – ignoriert.")
@@ -156,6 +157,8 @@ extension InterpreterEngine {
                                            y: p.int(1, in: 0...32_000) ?? printer.labelHome.y)
         case "LS":
             printer.labelShift = p.int(0, in: -9999...9999) ?? 0
+        case "LT":
+            setLabelTop(p)
         case "LR":
             printer.labelReverse = p.bool(0) ?? false
         case "PO":
@@ -203,6 +206,29 @@ extension InterpreterEngine {
         }
     }
 
+    // MARK: Etikettenlage
+
+    /// `^LTx`: verschiebt das gesamte Druckbild um x Punktzeilen (−120…120; positiv = vom
+    /// Etikettenanfang weg nach unten). Ohne Wert ignoriert die Firmware den Befehl; Werte
+    /// außerhalb des Bereichs werden begrenzt. Angewandt wird die Verschiebung beim Abschluss
+    /// des Formats auf das fertige Druckbild (`InterpreterEngine.applyingLabelTop`).
+    private mutating func setLabelTop(_ p: ZPLParameters) {
+        guard let value = p.int(0) else {
+            if p.string(0) != nil {
+                warn("^LT", "Ungültiger Wert „\(p.string(0) ?? "")“ – ^LT wird ignoriert.")
+            }
+            return
+        }
+        let limited = min(Self.labelTopRange.upperBound, max(Self.labelTopRange.lowerBound, value))
+        if limited != value {
+            warn("^LT", "Etikettenanfang \(value) liegt außerhalb von −120…120 – auf \(limited) begrenzt.")
+        }
+        printer.labelTop = limited
+    }
+
+    /// Zulässiger Bereich von `^LT` (Punktzeilen).
+    static let labelTopRange = -120...120
+
     // MARK: Feldposition
 
     private mutating func setPosition(_ p: ZPLParameters, typeset: Bool) {
@@ -223,7 +249,7 @@ extension InterpreterEngine {
             field.font = FontSelection(name: printer.defaultFontName, orientation: nil, height: nil, width: nil)
             return
         }
-        let identifier = Character(first.uppercased())
+        let identifier = first.asciiUppercased
         let rest = String(token.arguments.dropFirst())
         let p = ZPLParameters(rest.isEmpty ? [] : rest.split(separator: token.delimiter,
                                                              omittingEmptySubsequences: false).map(String.init))
@@ -250,14 +276,18 @@ extension InterpreterEngine {
     }
 
     private mutating func changeDefaultFont(_ p: ZPLParameters) {
-        if let identifier = p.string(0)?.first {
-            var name = identifier.uppercased()
-            if let alias = printer.fontAliases[name] {
-                name = alias
-            } else if !ZPLFonts.isResident(name) {
-                warn("^CF", "Schrift „\(name)“ ist nicht resident – Darstellung mit Ersatzschrift.")
+        if let identifier = p.character(0) {
+            if identifier.isASCII && (identifier.isLetter || identifier.isNumber) {
+                var name = String(identifier)
+                if let alias = printer.fontAliases[name] {
+                    name = alias
+                } else if !ZPLFonts.isResident(name) {
+                    warn("^CF", "Schrift „\(name)“ ist nicht resident – Darstellung mit Ersatzschrift.")
+                }
+                printer.defaultFontName = name
+            } else {
+                warn("^CF", "Ungültiger Schriftbezeichner „\(identifier)“ – die Standardschrift bleibt unverändert.")
             }
-            printer.defaultFontName = name
         }
         if let height = p.int(1), height > 0 {
             printer.defaultFontHeight = height
@@ -380,7 +410,8 @@ extension InterpreterEngine {
         }
         var element = TextElement(origin: .zero, fontName: fontName, height: size.height, width: size.width,
                                   orientation: orientation, text: text, reverse: reverse, block: block,
-                                  direction: field.direction, characterGap: field.characterGap)
+                                  direction: field.direction, characterGap: field.characterGap,
+                                  dotsPerMM: dotsPerMM)
         let layout = TextLayout(element: element, dotsPerMM: dotsPerMM)
         if let block, layout.overflowLines > 0, !block.truncatesOverflow {
             warn("^FB", "Der Text benötigt \(layout.lineCount) Zeilen, ^FB erlaubt \(block.maxLines) – "

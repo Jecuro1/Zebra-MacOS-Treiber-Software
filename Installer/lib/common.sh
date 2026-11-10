@@ -347,12 +347,82 @@ lw_jobs() {
     fi
 }
 
-# Führt einen benannten CI-Schritt aus, misst die Dauer und meldet das Ergebnis.
-# $1: Name, $2: Funktionsname, weitere Argumente gehen an die Funktion.
+# --- CI-Schritte in eigenen Prozessen ----------------------------------------------------------
 #
-# Der Schritt läuft in einer Subshell mit aktivem `set -e`: Jeder fehlschlagende Befehl beendet
-# den Schritt (ein Aufruf in einem `||`-Kontext würde `set -e` für die ganze Funktion abschalten).
-# Änderungen an Variablen (z. B. PATH) wirken deshalb nicht über den Schritt hinaus.
+# Warum ein eigener Prozess je Schritt: Bash ignoriert `set -e` für alles, was in einem
+# Bedingungskontext läuft (`if f`, `! f`, `f || …`, `f && …`) – und zwar für den gesamten
+# Funktionsrumpf einschließlich aller Subshells und Hintergrundprozesse, selbst wenn diese
+# `set -e` erneut setzen. Ein Schritt, der so aufgerufen wird, scheitert dann nur noch, wenn sein
+# *letzter* Befehl scheitert. Erst ein neu gestarteter Bash-Prozess hat wieder ein wirksames
+# `set -e`. Deshalb startet lw_ci_run_process das CI-Skript für jeden Schritt neu, und zwar mit
+# dem internen Argument LW_CI_PROCESS_ARG; das Skript führt dann nur diese eine Funktion auf
+# oberster Ebene aus (lw_ci_exec_process) und beendet sich.
+#
+# Vertrag für ein CI-Skript:
+#   * LW_CI_SCRIPT       Pfad des Skripts selbst (wird neu gestartet),
+#   * LW_CI_PROCESS_OPTIONS  Optionen, die jeder Schrittprozess erneut erhält (z. B.
+#                        --strict-strings); Optionen mit einmaliger Wirkung (--install-deps)
+#                        gehören nicht hinein. Exportierte Umgebungsvariablen (PATH …) erbt der
+#                        Prozess ohnehin.
+#   * Beim Lesen der Argumente: Steht LW_CI_PROCESS_ARG da, sind alle folgenden Argumente
+#     Funktionsname und Funktionsargumente (in LW_CI_PROCESS_CALL ablegen),
+#   * nach den Funktionsdefinitionen und vor dem eigentlichen Ablauf:
+#       if [[ ${#LW_CI_PROCESS_CALL[@]} -gt 0 ]]; then lw_ci_exec_process "${LW_CI_PROCESS_CALL[@]}"; exit 0; fi
+#
+# Variablen, die ein Schritt setzt, wirken nicht über den Schritt hinaus (eigener Prozess).
+
+LW_CI_PROCESS_ARG="--lw-ci-run-function"
+LW_CI_SCRIPT=""
+LW_CI_PROCESS_OPTIONS=()
+# shellcheck disable=SC2034  # wird von den CI-Skripten beim Lesen der Argumente gefüllt
+LW_CI_PROCESS_CALL=()
+
+# Führt eine Funktion des CI-Skripts in einem neuen Bash-Prozess aus und liefert deren Exitcode.
+# $1: Funktionsname (muss mit step_ beginnen), weitere Argumente gehen an die Funktion.
+# Jeder fehlschlagende Befehl der Funktion beendet den Prozess – unabhängig davon, ob der Aufrufer
+# lw_ci_run_process in einem Bedingungskontext aufruft.
+lw_ci_run_process() {
+    [[ -n "${LW_CI_SCRIPT}" && -f "${LW_CI_SCRIPT}" ]] \
+        || lw_die "lw_ci_run_process: LW_CI_SCRIPT ist nicht gesetzt (Pfad des CI-Skripts)."
+    local status=0
+    "${BASH:-bash}" "${LW_CI_SCRIPT}" ${LW_CI_PROCESS_OPTIONS[@]+"${LW_CI_PROCESS_OPTIONS[@]}"} \
+        "${LW_CI_PROCESS_ARG}" "$@" || status=$?
+    return "${status}"
+}
+
+# Im neu gestarteten Prozess: führt die Funktion auf oberster Ebene aus (wirksames `set -e`).
+# Muss selbst außerhalb jedes Bedingungskontexts aufgerufen werden (siehe Vertrag oben).
+lw_ci_exec_process() {
+    local function="${1:-}"
+    case "${function}" in
+        step_*) ;;
+        *) lw_die "Interner Aufruf: „${function}“ ist keine Schrittfunktion (step_…)." 64 ;;
+    esac
+    if ! declare -F "${function}" >/dev/null; then
+        lw_die "Interner Aufruf: Funktion „${function}“ ist nicht definiert." 64
+    fi
+    [[ "$-" == *e* ]] || lw_die "Interner Aufruf: set -e ist nicht gesetzt." 70
+    # Probe, ob `set -e` hier tatsächlich wirkt: Die Subshell erbt einen umgebenden
+    # Bedingungskontext; nur bei wirksamem `set -e` endet sie schon bei `false` (Exitcode 1).
+    # Bewusst ohne if/||, sonst entstünde genau der Kontext, der geprüft werden soll.
+    local probe=0
+    set +e
+    (
+        set -e
+        false
+        exit 0
+    )
+    probe=$?
+    set -e
+    if [[ "${probe}" -eq 0 ]]; then
+        lw_die "Interner Aufruf: set -e ist hier unwirksam (lw_ci_exec_process in einem Bedingungskontext aufgerufen)." 70
+    fi
+    "$@"
+}
+
+# Führt einen benannten CI-Schritt aus (eigener Prozess, siehe oben), misst die Dauer und meldet
+# das Ergebnis. $1: Name, $2: Funktionsname (step_…), weitere Argumente gehen an die Funktion.
+# Rückgabe: Exitcode des Schritts – auch wenn ein früher Befehl scheitert und der letzte gelingt.
 lw_ci_run_step() {
     local name="$1"
     local function="$2"
@@ -360,13 +430,7 @@ lw_ci_run_step() {
     local started status=0
     started="$(date +%s)"
     lw_ci_group "Schritt „${name}“"
-    set +e
-    (
-        set -euo pipefail
-        "${function}" "$@"
-    )
-    status=$?
-    set -e
+    lw_ci_run_process "${function}" "$@" || status=$?
     lw_ci_endgroup
     local elapsed=$(( $(date +%s) - started ))
     if [[ "${status}" -eq 0 ]]; then

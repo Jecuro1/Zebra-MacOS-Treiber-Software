@@ -12,6 +12,10 @@ deutsche Übersetzungen, der gzip-Modus, ``index.json`` und die exakte Übereins
 libcups-Headern vorhanden, werden alle PPDs zusätzlich von CUPS selbst geprüft und geparst
 (``tests/ppdcheck.c``: Optionen, Lokalisierung via ``ppdLocalize``, Rasterkopf via
 ``cupsRasterInterpretPPD``).
+
+Die Tests laufen ohne root-Rechte (CI-Runner, Entwickler-Mac) und unabhängig von der
+Systemsprache: libcups-Programme starten mit ``generate_ppds.cups_environment`` (``LANG`` plus
+``SOFTWARE``, das die libcups von macOS dafür verlangt).
 """
 
 from __future__ import annotations
@@ -28,7 +32,8 @@ import tempfile
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 PPD_DIR = HERE.parent
@@ -245,9 +250,15 @@ def target_for(stem: str):
     return next(t for t in TARGETS if t.stem == stem)
 
 
-def run_cli(*args: str) -> subprocess.CompletedProcess:
+def run_cli(*args: str, env: Optional[Mapping[str, str]] = None) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, str(SCRIPT), *args], stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, universal_newlines=True, check=False)
+                          stderr=subprocess.PIPE, universal_newlines=True, check=False,
+                          env=None if env is None else dict(env))
+
+
+#: Deutsche Systemsprache, wie sie Entwickler-Macs und -Rechner typischerweise haben.
+GERMAN_LOCALE = {"LANG": "de_DE.UTF-8", "LC_ALL": "de_DE.UTF-8", "LC_MESSAGES": "de_DE.UTF-8",
+                 "LANGUAGE": "de"}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -323,6 +334,30 @@ class HelperTests(unittest.TestCase):
         self.assertRegex(name, r"^LW[0-9A-F]{6}\.PPD$")
         self.assertNotEqual(name, gen.pc_file_name_candidate("LabelWerk-zd421t-203dpi", 1))
 
+    def test_check_attribute_value(self):
+        self.assertEqual(gen.check_attribute_value("NickName", "Zebra ZD421t"), "Zebra ZD421t")
+        for bad in ('a"b', "a\nb", "a\rb", "Zebra 斑马", "Größe"):
+            with self.assertRaises(gen.GenerationError):
+                gen.check_attribute_value("NickName", bad)
+
+    def test_cups_environment_forces_language(self):
+        """Regression: libcups unter macOS beachtet ``LANG`` nur zusammen mit ``SOFTWARE``;
+        Variablen, die ``LANG`` überstimmen, müssen weg (ppdcheck und cupstestppd)."""
+        base = {"PATH": "/usr/bin", "HOME": "/home/x", "LANG": "fr_FR.UTF-8", "LC_ALL": "fr_FR.UTF-8",
+                "LC_MESSAGES": "fr_FR", "LC_CTYPE": "fr_FR.ISO8859-1", "LANGUAGE": "fr", "SOFTWARE": "x"}
+        env = gen.cups_environment("de_DE.UTF-8", base)
+        self.assertEqual(env, {"PATH": "/usr/bin", "HOME": "/home/x", "LANG": "de_DE.UTF-8",
+                               "SOFTWARE": gen.CUPS_SOFTWARE})
+        self.assertRegex(gen.CUPS_SOFTWARE, r"^CUPS/\d")
+        self.assertEqual(base["LANG"], "fr_FR.UTF-8")          # Vorlage bleibt unverändert
+        with mock.patch.dict(os.environ, GERMAN_LOCALE):
+            env = gen.cups_environment(gen.CUPSTESTPPD_LANGUAGE)
+        self.assertEqual(env["LANG"], "en_US.UTF-8")
+        self.assertEqual(env["SOFTWARE"], gen.CUPS_SOFTWARE)
+        for name in gen.LOCALE_OVERRIDE_VARIABLES:
+            self.assertNotIn(name, env)
+        self.assertEqual(env.get("PATH"), os.environ.get("PATH"))
+
 
 class CatalogValidationTests(unittest.TestCase):
     def _catalog(self, **model_overrides):
@@ -387,6 +422,49 @@ class CatalogValidationTests(unittest.TestCase):
             result = run_cli("--catalog", str(path), "--output", str(Path(tmp) / "out"))
             self.assertEqual(result.returncode, 2)
             self.assertIn("JSON", result.stderr)
+
+    def _unusable_catalogs(self):
+        """Kataloge, die ``parse_catalog`` annimmt, aus denen sich aber keine PPD bilden lässt."""
+        no_name = self._catalog()
+        no_name["stocks"][1]["name"] = "   "
+        return [
+            ("Name nicht in ASCII", self._catalog(name="斑马"), "LabelWerk-test1-203dpi", "ASCII"),
+            ("IEEE-1284 nicht in ASCII", self._catalog(ieee1284=["ZTC 斑马-203dpi ZPL"]),
+             "LabelWerk-test1-203dpi", "ASCII"),
+            ("IEEE-1284 mit Anführungszeichen", self._catalog(ieee1284=['ZTC TEST1"-203dpi ZPL']),
+             "LabelWerk-test1-203dpi", "1284DeviceID"),
+            ("Format ohne Namen", no_name, "c4in", "Leerer PPD-Text"),
+        ]
+
+    def test_targets_are_validated_early(self):
+        """Regression: Datenfehler fallen schon in ``build_targets`` auf, nicht erst beim Schreiben."""
+        for label, data, context, message in self._unusable_catalogs():
+            with self.subTest(label):
+                catalog = gen.parse_catalog(data)
+                with self.assertRaises(gen.CatalogError) as caught:
+                    gen.build_targets(catalog)
+                self.assertIn(context, str(caught.exception))
+                self.assertIn(message, str(caught.exception))
+
+    def test_list_and_write_report_unusable_catalog_alike(self):
+        """Regression: ``--list`` endet bei Katalogfehlern wie das Schreiben mit Meldung und
+        Exit-Status 2 statt mit Traceback und Exit-Status 1."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for index, (label, data, context, message) in enumerate(self._unusable_catalogs()):
+                path = Path(tmp) / f"models-{index}.json"
+                path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                out = Path(tmp) / f"out-{index}"
+                for mode in (["--list"], ["--list", "--model", "test1"], ["--output", str(out)],
+                             ["--output", str(out), "--model", "test1", "--gzip"]):
+                    with self.subTest(label, mode=mode):
+                        result = run_cli("--catalog", str(path), *mode)
+                        self.assertEqual(result.returncode, 2, result.stderr)
+                        self.assertNotIn("Traceback", result.stderr)
+                        self.assertTrue(result.stderr.startswith("Fehler: "), result.stderr)
+                        self.assertIn(context, result.stderr)
+                        self.assertIn(message, result.stderr)
+                        self.assertEqual(result.stdout, "")
+                        self.assertFalse(out.exists())
 
 
 # ---------------------------------------------------------------------------------------------
@@ -918,12 +996,95 @@ class CommandLineTests(unittest.TestCase):
             else:
                 self.assertIn("cupstestppd nicht gefunden", result.stderr)
 
+    @unittest.skipUnless(shutil.which("cupstestppd"), "cupstestppd nicht installiert")
+    def test_check_option_with_german_system_language(self):
+        """Regression: Mit deutscher Systemsprache meldet ``cupstestppd`` „BESTANDEN“ und
+        deutsche Warnungen; ``--check`` muss trotzdem bestehen (Paketbau auf deutschen Macs)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_cli("--model", "zd421t", "--check", "--output", tmp,
+                             env=dict(os.environ, **GERMAN_LOCALE))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("2 von 2 bestanden", result.stdout)
+
 
 # ---------------------------------------------------------------------------------------------
 # Prüfung mit CUPS selbst
 # ---------------------------------------------------------------------------------------------
 
 SIZE_WARNING = re.compile(r'^WARN\s+Size "w\d+h\d+" should be the Adobe standard name ".+"\.$')
+
+#: PPDs für die strenge Prüfung: ZPL+EPL2, reines EPL2, generisch CPCL.
+STRICT_SAMPLE = ("LabelWerk-zd421t-203dpi", "LabelWerk-lp2844-203dpi", "LabelWerk-generic-cpcl-203dpi")
+#: Filterprogramme relativ zum Wurzelverzeichnis (ARCHITECTURE.md §10).
+FILTER_PROGRAMS = tuple(line.split(" ", 2)[2].lstrip("/") for line in gen.CUPS_FILTERS)
+#: Gewöhnlicher Benutzer („nobody“) für den Test der strengen Prüfung ohne root-Eigentümer.
+NON_ROOT_UID = 65534
+
+#: Rechte, die ``cupstestppd`` (``check_filters`` in cupstestppd.c) für installierte Dateien
+#: verlangt: Eigentümer root (``st_uid == 0``), nicht für Gruppe/andere beschreibbar
+#: (``MODE_WRITE`` 0022) und ``st_mode & 0555`` gleich ``MODE_PROGRAM``/``MODE_DIRECTORY``
+#: (0555) bzw. ``MODE_DATAFILE`` (0444). Symbol und Dienstprogramm prüft nur das cupstestppd
+#: von macOS; gemeldet wird stets der Pfad samt ``-R``-Wurzel.
+INSTALLED_FILE_MODES = {
+    "cupsFilter": 0o555,
+    "cupsFilter2": 0o555,
+    "cupsPreFilter": 0o555,
+    "APPrinterIconPath": 0o444,
+    "APPrinterUtilityPath": 0o555,
+}
+BAD_PERMISSIONS = re.compile(r'^\*\*FAIL\*\*\s+Bad permissions on (?P<kind>\w+) file "(?P<path>.+)"\.$')
+
+
+def build_installed_layout(base: Path) -> Path:
+    """Bildet die Installationspfade aus ARCHITECTURE.md §10 unter ``base/root`` nach
+    (Filter 0755, Symbol 0644, App-Verzeichnis 0755) und liefert ``base/root``."""
+    root = base / "root"
+    for program in FILTER_PROGRAMS:
+        path = root / program
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+    icon = root / gen.ICON_PATH.lstrip("/")
+    icon.parent.mkdir(parents=True, exist_ok=True)
+    icon.write_bytes(b"icns")
+    icon.chmod(0o644)
+    (root / gen.UTILITY_PATH.lstrip("/")).mkdir(parents=True)
+    for directory in [root, *(p for p in root.rglob("*") if p.is_dir())]:
+        directory.chmod(0o755)
+    return root
+
+
+def installed_layout_files(root: Path) -> List[Path]:
+    """Alle Dateien und Verzeichnisse des nachgebildeten Wurzelverzeichnisses."""
+    return sorted(root.rglob("*"))
+
+
+def split_ownership_failures(errors: Sequence[str], root: Path) -> Tuple[List[str], List[str]]:
+    """Teilt Fehler der strengen ``cupstestppd``-Prüfung (``-R root``) in ``(eigentümer, sonstige)``.
+
+    Zur ersten Liste gehören nur „Bad permissions“-Meldungen zu Dateien des nachgebildeten
+    Wurzelverzeichnisses, die *ausschließlich* daran scheitern, dass sie nicht root gehören –
+    die Rechte stimmen (``INSTALLED_FILE_MODES``). Ohne root-Rechte lässt sich der Eigentümer
+    nicht setzen; alles andere bleibt so streng geprüft wie als root.
+    """
+    prefix = str(root).rstrip(os.sep) + os.sep
+    ownership: List[str] = []
+    other: List[str] = []
+    for line in errors:
+        match = BAD_PERMISSIONS.match(line)
+        expected = INSTALLED_FILE_MODES.get(match.group("kind")) if match else None
+        if expected is not None:
+            reported = match.group("path")
+            try:
+                info = Path(reported).stat() if reported.startswith(prefix) else None
+            except OSError:
+                info = None
+            if (info is not None and info.st_uid != 0 and not info.st_mode & 0o022
+                    and info.st_mode & 0o555 == expected):
+                ownership.append(line)
+                continue
+        other.append(line)
+    return ownership, other
 
 
 @unittest.skipUnless(shutil.which("cupstestppd"), "cupstestppd nicht installiert")
@@ -945,37 +1106,96 @@ class CupsTestPPDTests(unittest.TestCase):
             self.assertTrue(all(r.passed for r in results), [r.errors for r in results])
 
     def test_strict_with_installed_filter_layout(self):
-        """Ohne ``-I filters``: Filter und Symbol liegen in einem nachgebildeten Wurzelverzeichnis."""
+        """Ohne ``-I filters``: Filter, Symbol und App liegen in einem nachgebildeten
+        Wurzelverzeichnis (``-R``). Als root muss die strenge Prüfung vollständig bestehen; ohne
+        root-Rechte (CI-Runner, Entwickler-Mac) gehören die Dateien nicht root, dann sind allein
+        die daraus folgenden „Bad permissions“-Meldungen zulässig (``split_ownership_failures``)."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "root"
-            filter_dir = root / "Library/Printers/LabelWerk/Filter"
-            icon_dir = root / "Library/Printers/LabelWerk/Icons"
-            app_dir = root / "Applications/LabelWerk.app"
-            for directory in (filter_dir, icon_dir, app_dir):
-                directory.mkdir(parents=True)
-            for path in [root] + [p for d in (filter_dir, icon_dir, app_dir) for p in [d, *d.parents]
-                                  if root in p.parents or p == root]:
-                path.chmod(0o755)
-            for name in ("rastertolabelwerk", "commandtolabelwerk"):
-                program = filter_dir / name
-                program.write_text("#!/bin/sh\nexit 0\n")
-                program.chmod(0o755)
-            (icon_dir / "LabelWerk.icns").write_bytes(b"icns")
-            (icon_dir / "LabelWerk.icns").chmod(0o644)
-            sample = [OUT / f"{stem}.ppd" for stem in ("LabelWerk-zd421t-203dpi", "LabelWerk-lp2844-203dpi",
-                                                        "LabelWerk-generic-cpcl-203dpi")]
+            root = build_installed_layout(Path(tmp))
+            owned_by_root = all(p.stat().st_uid == 0 for p in installed_layout_files(root))
+            sample = [OUT / f"{stem}.ppd" for stem in STRICT_SAMPLE]
             results = gen.run_cupstestppd(sample, extra_args=("-R", str(root)))
+            self.assertEqual(len(results), len(sample))
             for result in results:
-                self.assertTrue(result.passed, f"{result.path.name}: {result.errors}")
-            # Gegenprobe: ohne Filter schlägt die strenge Prüfung fehl
-            (filter_dir / "rastertolabelwerk").unlink()
-            results = gen.run_cupstestppd(sample[:1], extra_args=("-R", str(root)))
-            self.assertFalse(results[0].passed)
+                with self.subTest(result.path.name):
+                    for warning in result.warnings:
+                        self.assertRegex(warning, SIZE_WARNING)
+                    if owned_by_root:
+                        self.assertTrue(result.passed, f"{result.path.name}: {result.errors}")
+                        continue
+                    other = split_ownership_failures(result.errors, root)[1]
+                    self.assertEqual(other, [], f"{result.path.name}: {result.errors}")
+            # Gegenprobe: ohne Filter schlägt die strenge Prüfung fehl – auch ohne root-Rechte
+            (root / FILTER_PROGRAMS[0]).unlink()
+            result = gen.run_cupstestppd(sample[:1], extra_args=("-R", str(root)))[0]
+            self.assertFalse(result.passed)
+            missing = [e for e in result.errors if "Missing cupsFilter file" in e]
+            self.assertEqual(len(missing), 1, result.errors)
+            self.assertIn("rastertolabelwerk", missing[0])
+            self.assertIn(missing[0], split_ownership_failures(result.errors, root)[1])
+
+    def test_strict_check_tolerates_only_ownership(self):
+        """Regression: Die strenge Prüfung darf ohne root-Rechte nicht scheitern, aber auch nichts
+        außer dem Eigentümer durchgehen lassen. Läuft der Test als root, werden die Dateien einem
+        gewöhnlichen Benutzer übertragen – genau die Lage auf CI-Runnern und Entwickler-Macs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_installed_layout(Path(tmp))
+            if hasattr(os, "geteuid") and os.geteuid() == 0:
+                try:
+                    for path in [root, *installed_layout_files(root)]:
+                        os.chown(path, NON_ROOT_UID, NON_ROOT_UID)
+                except OSError as exc:      # z. B. Benutzernamensraum ohne diese Kennung
+                    self.skipTest(f"Eigentümer lässt sich nicht ändern: {exc}")
+            if any(p.stat().st_uid == 0 for p in installed_layout_files(root)):
+                self.skipTest("Dateien gehören root und lassen sich keinem anderen Benutzer übertragen")
+            sample = [OUT / "LabelWerk-zd421t-203dpi.ppd"]
+
+            # cupstestppd verlangt root als Eigentümer (cupstestppd.c: fileinfo.st_uid != 0) …
+            result = gen.run_cupstestppd(sample, extra_args=("-R", str(root)))[0]
+            self.assertFalse(result.passed)
+            ownership, other = split_ownership_failures(result.errors, root)
+            self.assertEqual(other, [], result.errors)
+            reported = {Path(BAD_PERMISSIONS.match(line).group("path")).name for line in ownership}
+            self.assertTrue({"rastertolabelwerk", "commandtolabelwerk"} <= reported, ownership)
+
+            # … aber falsche Rechte bleiben ein Fehler, auch wenn der Eigentümer nicht root ist.
+            program = root / FILTER_PROGRAMS[0]
+            program.chmod(0o775)
+            result = gen.run_cupstestppd(sample, extra_args=("-R", str(root)))[0]
+            ownership, other = split_ownership_failures(result.errors, root)
+            self.assertEqual(len(other), 1, result.errors)
+            self.assertRegex(other[0], r'Bad permissions on cupsFilter file ".*rastertolabelwerk"')
+            program.chmod(0o755)
+
+            # Ebenso fehlende Dateien und Meldungen zu Pfaden außerhalb des Wurzelverzeichnisses.
+            foreign = '**FAIL**  Bad permissions on cupsFilter file "/usr/lib/cups/filter/x".'
+            ownership, other = split_ownership_failures(
+                [foreign, '**FAIL**  Missing cupsFilter file "/x".'], root)
+            self.assertEqual((ownership, len(other)), ([], 2))
+
+    def test_cupstestppd_ignores_system_language(self):
+        """Regression: ``run_cupstestppd`` wertet englische Meldungen aus und muss daher auch bei
+        deutscher Systemsprache (``cupstestppd`` meldet dann „BESTANDEN“) zuverlässig urteilen."""
+        stem = "LabelWerk-zd421t-203dpi"
+        with mock.patch.dict(os.environ, GERMAN_LOCALE):
+            passed = gen.run_cupstestppd([OUT / f"{stem}.ppd"])[0]
+            with tempfile.TemporaryDirectory() as tmp:
+                source = PPDS[stem].data.decode("utf-8")
+                broken = Path(tmp) / "LabelWerk-broken-203dpi.ppd"
+                broken.write_text(source.replace("*DefaultlwDarkness: Default\n", ""), encoding="utf-8")
+                failed = gen.run_cupstestppd([broken])[0]
+        self.assertTrue(passed.passed, passed.errors)
+        self.assertTrue(passed.warnings)
+        for warning in passed.warnings:
+            self.assertRegex(warning, SIZE_WARNING)
+        self.assertFalse(failed.passed)
+        self.assertTrue(any("**FAIL**" in e and "lwDarkness" in e for e in failed.errors), failed.errors)
 
     def test_verbose_output_lists_all_options(self):
         stem = "LabelWerk-zd421t-203dpi"
         proc = subprocess.run(["cupstestppd", "-I", "filters", "-vv", str(OUT / f"{stem}.ppd")],
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+                              env=gen.cups_environment(gen.CUPSTESTPPD_LANGUAGE))
         text = proc.stdout.decode("utf-8", "replace")
         self.assertEqual(proc.returncode, 0, text)
         for keyword, option in PPDS[stem].options.items():
@@ -1028,12 +1248,16 @@ class LibCupsParseTests(unittest.TestCase):
             cls._tmp.cleanup()
             raise unittest.SkipTest("kein C-Compiler oder keine libcups-Entwicklungsdateien")
         cls.reports = {}
-        env = {k: v for k, v in os.environ.items() if k not in ("LC_ALL", "LC_MESSAGES", "LANGUAGE")}
-        env["LANG"] = "de_DE.UTF-8"
+        # LANG allein genügt nur unter Linux; die libcups von macOS braucht zusätzlich SOFTWARE.
+        env = gen.cups_environment("de_DE.UTF-8")
         for stem in PPDS:
-            proc = subprocess.run([str(cls.binary), str(OUT / f"{stem}.ppd"), "Custom.50x30mm"],
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
-            cls.reports[stem] = (proc.returncode, proc.stdout.decode("utf-8"))
+            cls.reports[stem] = cls.run_ppdcheck(stem, env)
+
+    @classmethod
+    def run_ppdcheck(cls, stem: str, env: Mapping[str, str]) -> Tuple[int, str]:
+        proc = subprocess.run([str(cls.binary), str(OUT / f"{stem}.ppd"), "Custom.50x30mm"],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=dict(env))
+        return proc.returncode, proc.stdout.decode("utf-8")
 
     @classmethod
     def tearDownClass(cls):
@@ -1097,6 +1321,20 @@ class LibCupsParseTests(unittest.TestCase):
                 params = {r[1]: r[2] for r in self.records(text, "LPARAM")}
                 self.assertEqual(params["Width"], "Breite")
                 self.assertEqual(params["Height"], "Höhe")
+
+    def test_ppd_localize_ignores_user_locale(self):
+        """Regression: Die deutsche Sprache für ``ppdLocalize`` setzt sich gegen eine englische
+        Benutzerumgebung durch (``LC_ALL``/``LC_MESSAGES``/``LANGUAGE``; unter macOS zählt ohne
+        ``SOFTWARE`` sonst ``AppleLanguages`` statt ``LANG``)."""
+        stem = "LabelWerk-zd421t-203dpi"
+        english = dict(os.environ, LANG="en_US.UTF-8", LC_ALL="C", LC_MESSAGES="en_US.UTF-8", LANGUAGE="en")
+        rc, text = self.run_ppdcheck(stem, gen.cups_environment("de_DE.UTF-8", english))
+        self.assertEqual(rc, 0, text[-2000:])
+        locale = self.records(text, "LOCALE")
+        self.assertTrue(locale and locale[0][0].startswith("de"), locale)
+        labels = dict(self.records(text, "LOPTION"))
+        self.assertEqual(labels["lwDarkness"], PPDS[stem].translations[("de", "Translation", "lwDarkness")])
+        self.assertNotEqual(labels["lwDarkness"], PPDS[stem].options["lwDarkness"].text)
 
     def test_raster_header_matches_label_dots(self):
         """``cupsRasterInterpretPPD`` liefert je Format Auflösung, 8-Bit-Graustufen (cupsColorSpace 18)

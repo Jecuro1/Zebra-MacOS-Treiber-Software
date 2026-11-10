@@ -15,6 +15,14 @@
 #
 # Unterstützt .pkg, .dmg, .zip und .app (wird für die Einreichung mit ditto gezippt; das Ticket
 # wird anschließend an die .app geheftet).
+#
+# Gatekeeper-Prüfung je Typ (wie in Apples Dokumentation „Resolving common notarization issues“):
+#   .pkg  spctl --assess --type install
+#   .app  spctl --assess --type execute
+#   .dmg  spctl --assess --type open --context context:primary-signature
+#         (ohne den Kontext lehnt spctl Disk-Images stets mit „Insufficient Context“ ab; geprüft
+#         wird die Signatur des Images selbst – es muss deshalb signiert sein)
+#   .zip  keine (Archive lassen sich weder anheften noch prüfen)
 
 set -euo pipefail
 
@@ -137,14 +145,15 @@ for file in "${FILES[@]}"; do
 
     upload="${file}"
     staple_target="${file}"
-    assess_type=""
+    # Argumente für spctl (leer = keine Gatekeeper-Prüfung), siehe Kopf dieses Skripts.
+    assess_args=()
     case "${file}" in
-        *.pkg) assess_type="install" ;;
-        *.dmg) assess_type="open" ;;
+        *.pkg) assess_args=(--type install) ;;
+        *.dmg) assess_args=(--type open --context context:primary-signature) ;;
         *.app)
             upload="${WORK}/${name%.app}.zip"
             lw_run ditto -c -k --sequesterRsrc --keepParent "${file}" "${upload}"
-            assess_type="execute"
+            assess_args=(--type execute)
             ;;
         *.zip)
             staple_target=""
@@ -166,6 +175,11 @@ for file in "${FILES[@]}"; do
                     lw_die "${name} ist nur ad hoc signiert – DEVELOPER_ID_APP setzen und Scripts/build_app.sh erneut ausführen."
                 fi
                 ;;
+            *.dmg)
+                # Gatekeeper prüft bei Disk-Images die Signatur des Images (primary-signature).
+                codesign --verify --strict "${file}" >/dev/null 2>&1 \
+                    || lw_die "${name} ist nicht (gültig) signiert – vor dem Einreichen mit codesign --sign \"Developer ID Application: …\" --timestamp signieren."
+                ;;
         esac
     fi
 
@@ -173,6 +187,13 @@ for file in "${FILES[@]}"; do
     lw_info "Einreichen und auf das Ergebnis warten (bis ${TIMEOUT}) …"
     if [[ "${LW_DRY_RUN}" == "1" ]]; then
         notary submit "${upload}" ${AUTH[@]+"${AUTH[@]}"} --wait --timeout "${TIMEOUT}" --output-format json
+        if [[ "${STAPLE}" == "1" && -n "${staple_target}" ]]; then
+            lw_run xcrun stapler staple "${staple_target}"
+            lw_run xcrun stapler validate "${staple_target}"
+        fi
+        if [[ ${#assess_args[@]} -gt 0 ]]; then
+            lw_print_command spctl --assess "${assess_args[@]}" --verbose=2 "${staple_target:-${file}}"
+        fi
         continue
     fi
     set +e
@@ -202,8 +223,9 @@ for file in "${FILES[@]}"; do
         lw_run xcrun stapler validate "${staple_target}"
         lw_ok "Ticket angeheftet"
     fi
-    if [[ -n "${assess_type}" ]]; then
-        if spctl --assess --type "${assess_type}" --verbose=2 "${staple_target:-${file}}" 2>&1 | sed 's/^/    /'; then
+    if [[ ${#assess_args[@]} -gt 0 ]]; then
+        lw_print_command spctl --assess "${assess_args[@]}" --verbose=2 "${staple_target:-${file}}"
+        if spctl --assess "${assess_args[@]}" --verbose=2 "${staple_target:-${file}}" 2>&1 | sed 's/^/    /'; then
             lw_ok "Gatekeeper akzeptiert ${name}"
         else
             lw_die "Gatekeeper lehnt ${name} trotz Notarisierung ab."

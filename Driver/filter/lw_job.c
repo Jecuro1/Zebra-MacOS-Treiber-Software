@@ -428,8 +428,16 @@ bool lw_job_finish(lw_job *job, bool canceled)
     if (job->finished)
         return true;
     job->finished = true;
-    if (!job->begun && !lw_job_begin(job))
-        return false;
+    if (!job->begun) {
+        /* Abbruch, bevor irgendetwas geschrieben wurde: weder Auftragskopf (Startbefehle, ~SD,
+         * ~TA und vor allem ~JC, das eine Kalibrierung mit Etikettenvorschub auslöst) noch
+         * Endbefehle senden – Endbefehle gehören nur zu einem geschriebenen Kopf. Ohne Kopf gibt
+         * es auch keine zurückgehaltene Seite und keine Zwischendatei. */
+        if (canceled)
+            return true;
+        if (!lw_job_begin(job))
+            return false;
+    }
 
     bool ok = true;
     if (job->have_pending) {

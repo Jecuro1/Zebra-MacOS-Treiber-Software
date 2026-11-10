@@ -7,26 +7,63 @@ import Foundation
 /// * JSON-Form (Link-OS): `{}{"name":null}` liest, `{}{"name":"wert"}` setzt; die Antwort ist
 ///   ein JSON-Objekt.
 ///
-/// Namen und Werte dürfen keine Zeilenumbrüche enthalten (sie würden den Befehl beenden) und
-/// werden daher bereinigt. Werte mit Anführungszeichen (`"`) lassen sich nur über
-/// ``jsonSet(_:)`` sicher setzen.
+/// Bereinigung und Anführungszeichen in ``getvar(_:)``, ``setvar(_:_:)`` und ``do(_:_:)``:
+///
+/// * Steuerzeichen (Zeilenumbrüche, Tabulatoren, `DEL` …) würden den Befehl beenden und werden
+///   aus Namen und Werten **immer** entfernt – in beiden Syntaxformen.
+/// * Ein `"` lässt sich in der klassischen Syntax nicht darstellen: Sie kennt keine Maskierung,
+///   der Drucker beendet den Wert am inneren `"` und übernähme still einen abgeschnittenen Wert
+///   (z. B. bei einer WLAN-Passphrase). Enthält Name oder Wert ein `"`, liefern die Funktionen
+///   deshalb die gleichwertige, JSON-maskierte Link-OS-Form (`{}{"name":null}` bzw.
+///   `{}{"name":"wert"}`, ohne Zeilenende). ``requiresJSON(_:_:)`` sagt vorab, ob das der Fall
+///   ist – wichtig für den Aufrufer, weil der Drucker dann **mit einem JSON-Objekt antwortet**
+///   (auch auf das Setzen: neuer bzw. bei Fehlschlag alter Wert) statt mit `"wert"` bzw. gar nicht.
+///   Drucker ohne Link-OS führen die JSON-Form nicht als SGD-Befehl aus; dort ist ein `"`
+///   grundsätzlich nicht übertragbar – gespeichert wird dann nichts statt eines verfälschten Werts.
 public enum SGD {
 
     // MARK: - Befehle
 
     /// `! U1 getvar "name"\r\n`
+    ///
+    /// Enthält der Name ein `"`, wird stattdessen `{}{"name":null}` erzeugt (siehe Typ-Dokumentation).
     public static func getvar(_ name: String) -> String {
-        "! U1 getvar \(quote(name))\r\n"
+        let name = sanitized(name)
+        if requiresJSON(name) { return jsonGet([name]) }
+        return "! U1 getvar \(quote(name))\r\n"
     }
 
     /// `! U1 setvar "name" "wert"\r\n`
+    ///
+    /// Enthält Name oder Wert ein `"`, wird stattdessen `{}{"name":"wert"}` erzeugt
+    /// (JSON-maskiert, ohne Zeilenende; siehe Typ-Dokumentation). Steuerzeichen werden in beiden
+    /// Formen entfernt.
     public static func setvar(_ name: String, _ value: String) -> String {
-        "! U1 setvar \(quote(name)) \(quote(value))\r\n"
+        let name = sanitized(name)
+        let value = sanitized(value)
+        if requiresJSON(name, value) { return jsonSet([(name: name, value: value)]) }
+        return "! U1 setvar \(quote(name)) \(quote(value))\r\n"
     }
 
     /// `! U1 do "name" "wert"\r\n` (ohne Wert: `""`).
+    ///
+    /// Enthält Name oder Wert ein `"`, wird stattdessen `{}{"name":"wert"}` erzeugt. Zebra
+    /// dokumentiert die JSON-Form nur für `getvar`/`setvar`; Link-OS behandelt sie als `setvar`.
+    /// Reine `do`-Variablen führt der Drucker in dieser Form unter Umständen nicht aus – das ist
+    /// gewollt: Ein nicht ausgeführter Befehl ist sicherer als einer mit verfälschtem Wert (bei
+    /// `file.delete` würde ein gekürzter Name sonst eine andere Datei treffen).
     public static func `do`(_ name: String, _ value: String = "") -> String {
-        "! U1 do \(quote(name)) \(quote(value))\r\n"
+        let name = sanitized(name)
+        let value = sanitized(value)
+        if requiresJSON(name, value) { return jsonSet([(name: name, value: value)]) }
+        return "! U1 do \(quote(name)) \(quote(value))\r\n"
+    }
+
+    /// `true`, wenn Name oder Wert ein `"` enthalten und ``getvar(_:)``, ``setvar(_:_:)`` bzw.
+    /// ``do(_:_:)`` deshalb die JSON-Form erzeugen. Der Drucker antwortet dann mit einem
+    /// JSON-Objekt (auszuwerten mit `SGDResponseParser.parseJSON`), auch auf `setvar`.
+    public static func requiresJSON(_ name: String, _ value: String = "") -> Bool {
+        name.unicodeScalars.contains("\"") || value.unicodeScalars.contains("\"")
     }
 
     /// JSON-Abfrage mehrerer Variablen: `{}{"a":null,"b":null}` (Reihenfolge wie übergeben,
@@ -260,13 +297,20 @@ public enum SGD {
 
     // MARK: - Hilfen
 
-    /// Setzt einen Namen/Wert in Anführungszeichen; Zeilenumbrüche und Steuerzeichen werden entfernt.
-    static func quote(_ text: String) -> String {
-        var out = "\""
+    /// Entfernt Zeilenumbrüche und alle übrigen Steuerzeichen (C0 und `DEL`), die einen
+    /// SGD-Befehl vorzeitig beenden würden.
+    static func sanitized(_ text: String) -> String {
+        var out = ""
         for scalar in text.unicodeScalars where scalar.value >= 0x20 && scalar.value != 0x7F {
             out.unicodeScalars.append(scalar)
         }
-        return out + "\""
+        return out
+    }
+
+    /// Setzt einen Namen/Wert für die klassische Syntax in Anführungszeichen; Steuerzeichen werden
+    /// entfernt. Darf nur für Text ohne `"` verwendet werden (siehe ``requiresJSON(_:_:)``).
+    static func quote(_ text: String) -> String {
+        "\"" + sanitized(text) + "\""
     }
 
     /// JSON-Zeichenkette mit Anführungszeichen und Maskierung (RFC 8259).

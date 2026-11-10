@@ -6,15 +6,28 @@ import Testing
 struct SNMPTests {
     /// Baut eine SNMPv1-`GetResponse` passend zu `request` (gleiche Request-ID).
     static func response(to request: Data, values: [String: String], community: String = "public") -> Data? {
+        guard let id = requestID(of: request) else { return nil }
+        return makeResponse(requestID: id, values: values, community: community)
+    }
+
+    /// Request-ID eines SNMP-`GetRequest`.
+    static func requestID(of request: Data) -> Int64? {
         let bytes = [UInt8](request)
         guard let message = SNMPProbe.readTLV(bytes, at: 0),
               let version = SNMPProbe.readTLV(bytes, at: message.valueStart),
               let communityTLV = SNMPProbe.readTLV(bytes, at: version.end),
               let pdu = SNMPProbe.readTLV(bytes, at: communityTLV.end),
-              let requestID = SNMPProbe.readTLV(bytes, at: pdu.valueStart),
-              let id = SNMPProbe.decodeInteger(Array(bytes[requestID.valueStart..<requestID.end]))
+              let requestID = SNMPProbe.readTLV(bytes, at: pdu.valueStart)
         else { return nil }
-        return makeResponse(requestID: id, values: values, community: community)
+        return SNMPProbe.decodeInteger(Array(bytes[requestID.valueStart..<requestID.end]))
+    }
+
+    /// `true`, wenn das `GetRequest` die OID `oid` abfragt.
+    static func request(_ request: Data, asksFor oid: String) -> Bool {
+        guard let encoded = SNMPProbe.encodeOID(oid) else { return false }
+        // OID-TLV (Tag 0x06, Länge, Inhalt) – eindeutig innerhalb der Varbind-Liste.
+        let needle = Data([0x06] + SNMPProbe.encodeLength(encoded.count) + encoded)
+        return request.range(of: needle) != nil
     }
 
     static func makeResponse(requestID: Int64, values: [String: String], community: String = "public", errorStatus: UInt8 = 0) -> Data {

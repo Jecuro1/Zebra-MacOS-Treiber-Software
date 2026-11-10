@@ -14,8 +14,15 @@ Geprüft werden – auf jedem System, also auch unter Linux in der CI –
   bzw. ihr Abbruch mit verständlicher Meldung außerhalb von macOS,
 * ``build_driver.sh --host``: vollständiger Treiberbaum nach ARCHITECTURE.md §10 (sofern Compiler,
   libcups und zlib vorhanden sind),
+* ``build_driver.sh``: das Zielverzeichnis wird nur gelöscht, wenn es neu, leer oder ein früherer
+  Treiberbaum ist,
 * ``uninstall.sh`` gegen ein Testwurzelverzeichnis (``--root``),
 * die Installer-Skripte (preinstall, postinstall) gegen ein Testvolume,
+* die CI-Skripte: jeder fehlschlagende Befehl lässt seinen Schritt scheitern (eigener Prozess je
+  Schritt), Optionen erreichen die Schrittprozesse, und ``ci_macos.sh`` deinstalliert nur nach
+  einer tatsächlich begonnenen Probeinstallation (simuliertes macOS mit Attrappen für ``uname``
+  und ``sudo``),
+* ``notarize.sh`` gegen Attrappen von ``xcrun``, ``spctl`` & Co. (Gatekeeper-Prüfung je Dateityp),
 * Info.plist, Berechtigungen, InfoPlist.strings, distribution.xml, Installer-Texte und Symbole,
 * ShellCheck für alle Skripte (falls installiert).
 """
@@ -87,6 +94,56 @@ def bash(script: str, env: Optional[Dict[str, str]] = None) -> subprocess.Comple
     """Führt Bash-Code mit eingebundenem common.sh aus."""
     prelude = f'set -euo pipefail\nsource "{COMMON}"\n'
     return run(["bash", "-c", prelude + script], env=env)
+
+
+def write_executable(path: Path, text: str) -> Path:
+    """Legt ein ausführbares Skript an (für Attrappen und Test-Repositorys)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    os.chmod(path, 0o755)
+    return path
+
+
+def make_sandbox_repo(directory: Path, *files: str) -> Path:
+    """Kopiert common.sh, config.env und die genannten Dateien in ein Test-Repository.
+
+    ``LW_REPO_ROOT`` der Skripte ist dann ``directory`` – Ausgaben (build/, dist/) landen dort und
+    nicht im echten Repository.
+    """
+    for relative in ("Installer/lib/common.sh", "Installer/config.env", *files):
+        target = directory / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO_ROOT / relative, target)
+    return directory
+
+
+def ci_env(path_prefix: Optional[Path] = None, **extra: str) -> Dict[str, str]:
+    """Umgebung für die CI-Skripte: ohne CI-Kennungen und Strenge-Schalter des Aufrufers."""
+    env = clean_env()
+    for key in ("CI", "GITHUB_ACTIONS", "GITHUB_PATH", "LW_STRICT_STRINGS", "LW_STRICT_E2E", "PYTHON",
+                "LW_E2E_PORT"):
+        env.pop(key, None)
+    env["PYTHON"] = sys.executable
+    if path_prefix is not None:
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env.get('PATH', '')}"
+    env.update(extra)
+    return env
+
+
+def fake_macos_tools(directory: Path) -> Path:
+    """Attrappen für ein simuliertes macOS: ``uname -s`` meldet Darwin, ``sudo`` protokolliert nur.
+
+    ``sudo`` führt nie etwas aus, sondern schreibt den Befehl nach ``$FAKE_SUDO_LOG``.
+    """
+    real_uname = shutil.which("uname") or "/usr/bin/uname"
+    write_executable(directory / "uname", f'''#!/bin/sh
+if [ "$1" = "-s" ]; then echo Darwin; else exec "{real_uname}" "$@"; fi
+''')
+    write_executable(directory / "sudo", '''#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_SUDO_LOG"
+exit 0
+''')
+    return directory
 
 
 def write_config(directory: Path, **values: str) -> Path:
@@ -327,11 +384,69 @@ class BuildScriptTests(unittest.TestCase):
         self.assertIn("Nicht unterstützter Dateityp", result.stderr)
 
     def test_build_driver_refuses_system_directories(self):
-        for target in ("/", "/Library", "/usr/local"):
+        targets = ["/", "//", "/Library", "/usr/local", "/Applications", "/Users", "/Users/jemand", "/Volumes/Daten",
+                   "/private/etc", "/opt", "/var", "/etc", "/home", str(Path.home()),
+                   str(Path.home() / "Library"), str(Path.home() / "Library" / "Printers"), str(REPO_ROOT),
+                   f"{REPO_ROOT}/", str(REPO_ROOT / "Scripts" / "..")]
+        for target in targets:
             with self.subTest(target=target):
-                result = run([str(SCRIPTS / "build_driver.sh"), "--dry-run", "--output", target])
-                self.assertEqual(result.returncode, 64)
+                result = run([str(SCRIPTS / "build_driver.sh"), "--dry-run", "--host", "--output", target])
+                self.assertEqual(result.returncode, 64, result.stderr)
                 self.assertIn("Ungeeignetes Zielverzeichnis", result.stderr)
+                self.assertNotIn("$ rm -rf", result.stderr)
+
+    def test_build_driver_refuses_directories_with_foreign_content(self):
+        # Regression: Das Ziel wird mit rm -rf geleert – nur eigene Treiberbäume dürfen weg.
+        with tempfile.TemporaryDirectory(prefix="lw-out-") as tmp:
+            base = Path(tmp)
+            cases = {
+                "datei": [("notizen.txt", "x")],
+                "versteckt": [(".git/HEAD", "ref")],
+                "fremde-ppd": [("Library/Printers/PPDs/Contents/Resources/Fremd.ppd.gz", "x")],
+                "fremder-treiber": [("Library/Printers/Fremd/x", "x")],
+                "fremde-library": [("Library/Preferences/a.plist", "x")],
+            }
+            for name, files in cases.items():
+                with self.subTest(case=name):
+                    target = base / name
+                    for relative, content in files:
+                        (target / relative).parent.mkdir(parents=True, exist_ok=True)
+                        (target / relative).write_text(content, encoding="utf-8")
+                    result = run([str(SCRIPTS / "build_driver.sh"), "--dry-run", "--host", "--output", str(target)])
+                    self.assertEqual(result.returncode, 64, result.stderr)
+                    self.assertIn("nicht von einem früheren Treiberbau", result.stderr)
+                    self.assertIn(files[0][0].split("/")[0], result.stderr)
+                    self.assertTrue((target / files[0][0]).exists())
+            # Ein Link oder eine Datei als Ziel wird ebenfalls abgelehnt.
+            (base / "link").symlink_to(base / "datei")
+            (base / "eine-datei").write_text("x", encoding="utf-8")
+            for target in (base / "link", base / "eine-datei"):
+                with self.subTest(target=target.name):
+                    result = run([str(SCRIPTS / "build_driver.sh"), "--dry-run", "--host", "--output", str(target)])
+                    self.assertEqual(result.returncode, 64, result.stderr)
+                    self.assertIn("Ungeeignetes Zielverzeichnis", result.stderr)
+
+    def test_build_driver_accepts_new_empty_and_previous_trees(self):
+        with tempfile.TemporaryDirectory(prefix="lw-out-") as tmp:
+            base = Path(tmp)
+            empty = base / "leer"
+            empty.mkdir()
+            previous = base / "vorher"
+            driver = previous / "Library" / "Printers" / "LabelWerk"
+            (driver / "Filter").mkdir(parents=True)
+            (driver / "Filter" / "rastertolabelwerk").write_text("x", encoding="utf-8")
+            (driver / ".DS_Store").write_text("x", encoding="utf-8")
+            resources = previous / "Library" / "Printers" / "PPDs" / "Contents" / "Resources"
+            resources.mkdir(parents=True)
+            (resources / "LabelWerk-zd421t-203dpi.ppd.gz").write_bytes(b"x")
+            # Nach „uninstall.sh --root“ bleiben leere Ordner übrig.
+            emptied = base / "geleert" / "Library" / "Printers" / "PPDs" / "Contents" / "Resources"
+            emptied.mkdir(parents=True)
+            for target in (base / "neu" / "driver-root", empty, previous, base / "geleert"):
+                with self.subTest(target=target.name):
+                    result = run([str(SCRIPTS / "build_driver.sh"), "--dry-run", "--host", "--output", str(target)])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(f"$ rm -rf {os.path.realpath(target)}", result.stderr)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -399,6 +514,23 @@ class DriverTreeTests(unittest.TestCase):
     def test_no_build_artifacts_left_next_to_output(self):
         self.assertEqual(self.result.returncode, 0)
         self.assertFalse((self.tmp / "driver-root.ppd-tmp").exists())
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), ["driver-root"])
+
+    def test_rebuild_into_previous_tree_and_refusal_of_foreign_files(self):
+        self.assertEqual(self.result.returncode, 0)
+        root = self.tmp / "rebuild-root"
+        argv = [str(SCRIPTS / "build_driver.sh"), "--host", "--no-sign", "--output", str(root)]
+        first = run(argv, timeout=900)
+        self.assertEqual(first.returncode, 0, first.stderr[-4000:])
+        second = run(argv, timeout=900)
+        self.assertEqual(second.returncode, 0, second.stderr[-4000:])
+        self.assertTrue((root / "Library" / "Printers" / "LabelWerk" / "VERSION").is_file())
+        foreign = root / "Library" / "Printers" / "PPDs" / "Contents" / "Resources" / "Fremd.ppd.gz"
+        foreign.write_bytes(b"x")
+        third = run(argv, timeout=900)
+        self.assertEqual(third.returncode, 64, third.stderr[-4000:])
+        self.assertTrue(foreign.exists(), "fremde Dateien dürfen nicht gelöscht werden")
+        self.assertTrue((root / "Library" / "Printers" / "LabelWerk" / "VERSION").is_file())
 
 
 # ------------------------------------------------------------------------------------------------
@@ -472,6 +604,20 @@ class UninstallTests(unittest.TestCase):
         self.assertFalse((self.root / "etc" / "cups" / "ppd" / "Versand.ppd").exists())
         self.assertTrue((self.root / "etc" / "cups" / "ppd" / "Laser.ppd").exists())
         self.assertTrue((self.root / "Applications" / "LabelWerk.app").exists())
+        # Regression: Der lwctl-Link zeigt in die behaltene App und muss mit ihr bleiben.
+        link = self.root / "usr" / "local" / "bin" / "lwctl"
+        self.assertTrue(link.is_symlink(), "--keep-app darf den lwctl-Link nicht entfernen")
+        self.assertEqual(os.readlink(link), "/Applications/LabelWerk.app/Contents/Helpers/lwctl")
+        self.assertFalse((self.root / "Library" / "Printers" / "LabelWerk").exists())
+        self.assertEqual(sorted(p.name for p in self.ppds.iterdir()), ["Fremd.ppd.gz"])
+
+    def test_keep_app_dry_run_does_not_list_app_or_link(self):
+        result = self.uninstall("--dry-run", "--keep-app")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = result.stdout + result.stderr
+        self.assertNotIn("usr/local/bin/lwctl", listed)
+        self.assertNotIn("LabelWerk.app", listed)
+        self.assertIn("Library/Printers/LabelWerk", listed)
 
     def test_nothing_installed(self):
         empty = Path(tempfile.mkdtemp(prefix="lw-empty-"))
@@ -606,6 +752,366 @@ class PackageScriptTests(unittest.TestCase):
         result = run([str(script), "pkg", "/", str(self.volume)])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.volume / "usr" / "local" / "bin" / "lwctl").exists())
+
+
+# ------------------------------------------------------------------------------------------------
+# CI-Skripte (Schritte als eigene Prozesse, Optionen, Probeinstallation)
+# ------------------------------------------------------------------------------------------------
+
+# Minimales CI-Skript nach dem Vertrag aus common.sh (lw_ci_run_step/lw_ci_exec_process).
+CI_PROBE_SCRIPT = r"""#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "${SCRIPT_DIR}/../Installer/lib/common.sh"
+LW_CI_SCRIPT="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+STEPS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        "${LW_CI_PROCESS_ARG}") shift; LW_CI_PROCESS_CALL=("$@"); break ;;
+        *) STEPS+=("$1"); shift ;;
+    esac
+done
+step_first_fails() { false; echo "NACH DEM FEHLER" >&2; true; }
+step_pipeline_fails() { false | cat; echo "NACH DER PIPELINE" >&2; }
+step_unset_variable() { echo "${NICHT_GESETZT}"; echo "NACH DER VARIABLEN" >&2; }
+step_die_code() { lw_die "absichtlich" 7; }
+step_ok() { echo "OK-SCHRITT" >&2; }
+step_args() { printf 'ARG<%s>\n' "$@" >&2; }
+not_a_step() { echo "DARF NICHT LAUFEN" >&2; }
+if [[ ${#LW_CI_PROCESS_CALL[@]} -gt 0 ]]; then
+    lw_ci_exec_process "${LW_CI_PROCESS_CALL[@]}"
+    exit 0
+fi
+for step in "${STEPS[@]}"; do
+    if [[ "${step}" == "args" ]]; then
+        set -- "a b" "" "c"
+    else
+        set --
+    fi
+    # Bewusst im Bedingungskontext – genau dort ging set -e früher verloren.
+    if lw_ci_run_step "${step}" "step_${step}" "$@"; then
+        echo "ERGEBNIS ${step}=0"
+    else
+        echo "ERGEBNIS ${step}=$?"
+    fi
+done
+"""
+
+
+class CIStepTests(unittest.TestCase):
+    """lw_ci_run_step: Jeder fehlschlagende Befehl lässt den Schritt scheitern."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-ci-"))
+        self.repo = make_sandbox_repo(self.tmp / "repo", "Scripts/ci_linux.sh")
+        self.probe = write_executable(self.repo / "Scripts" / "ci_probe.sh", CI_PROBE_SCRIPT)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def results(self, *steps: str) -> Dict[str, int]:
+        result = run([str(self.probe), *steps], env=ci_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.output = result.stderr
+        return {line.split()[1].split("=")[0]: int(line.split("=")[1])
+                for line in result.stdout.splitlines() if line.startswith("ERGEBNIS ")}
+
+    def test_failure_before_successful_last_command_fails_step(self):
+        # Regression: Im if/!-Kontext galt set -e auch in der Subshell nicht mehr – ein Schritt
+        # scheiterte nur, wenn sein letzter Befehl scheiterte.
+        results = self.results("first_fails", "pipeline_fails", "unset_variable", "ok")
+        self.assertEqual(results["first_fails"], 1)
+        self.assertNotEqual(results["pipeline_fails"], 0)
+        self.assertNotEqual(results["unset_variable"], 0)
+        self.assertEqual(results["ok"], 0)
+        for marker in ("NACH DEM FEHLER", "NACH DER PIPELINE", "NACH DER VARIABLEN"):
+            self.assertNotIn(marker, self.output)
+        self.assertIn("Schritt „first_fails“ fehlgeschlagen (Exitcode 1", self.output)
+        self.assertIn("Schritt „ok“ erfolgreich", self.output)
+
+    def test_exit_code_and_arguments_are_passed_through(self):
+        results = self.results("die_code", "args")
+        self.assertEqual(results["die_code"], 7)
+        self.assertEqual(results["args"], 0)
+        self.assertIn("ARG<a b>\nARG<>\nARG<c>", self.output)
+
+    def test_only_step_functions_can_be_started(self):
+        for function in ("not_a_step", "rm", "step_gibt_es_nicht"):
+            with self.subTest(function=function):
+                result = run([str(self.probe), "--lw-ci-run-function", function, "-rf", str(self.tmp)],
+                             env=ci_env())
+                self.assertEqual(result.returncode, 64, result.stderr)
+                self.assertNotIn("DARF NICHT LAUFEN", result.stderr)
+                self.assertTrue(self.repo.exists())
+
+    def test_exec_process_refuses_conditional_context(self):
+        result = bash('step_x() { false; echo "WEITER" >&2; }\n'
+                      'if lw_ci_exec_process step_x; then echo "erfolgreich"; fi\n', env=ci_env())
+        self.assertEqual(result.returncode, 70, result.stderr)
+        self.assertIn("unwirksam", result.stderr)
+        self.assertNotIn("WEITER", result.stderr)
+
+    def test_run_step_requires_script_path(self):
+        result = bash('step_x() { :; }\nlw_ci_run_step x step_x\n', env=ci_env())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("LW_CI_SCRIPT", result.stderr)
+
+
+class CILinuxScriptTests(unittest.TestCase):
+    """Scripts/ci_linux.sh in einem Test-Repository mit Attrappen der geprüften Werkzeuge."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-ci-linux-"))
+        self.repo = make_sandbox_repo(self.tmp / "repo", "Scripts/ci_linux.sh")
+        self.script = self.repo / "Scripts" / "ci_linux.sh"
+        # Der Generator scheitert (wie generate_ppds.py --check bei einem cupstestppd-Befund),
+        # die danach laufenden Generator-Tests gelingen.
+        write_executable(self.repo / "Driver" / "ppd" / "generate_ppds.py",
+                         'import sys\nprint("GENERATOR: --check fehlgeschlagen", file=sys.stderr)\nsys.exit(1)\n')
+        write_executable(self.repo / "Driver" / "ppd" / "tests" / "test_generate.py",
+                         'import sys\nprint("GENERATOR-TESTS LIEFEN", file=sys.stderr)\n')
+        write_executable(self.repo / "Scripts" / "extract_strings.py",
+                         'import sys\nprint("12 Schlüssel offen", file=sys.stderr)\nsys.exit(1)\n')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def ci(self, *args: str, **env: str) -> subprocess.CompletedProcess:
+        return run([str(self.script), *args], env=ci_env(**env), cwd=self.repo)
+
+    def test_failing_check_is_not_masked_by_later_commands(self):
+        # Regression: „test-ppd“ meldete Erfolg, weil nach dem scheiternden Generator noch die
+        # Generator-Tests liefen (und gelangen).
+        result = self.ci("test-ppd")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("GENERATOR: --check fehlgeschlagen", result.stderr)
+        self.assertNotIn("GENERATOR-TESTS LIEFEN", result.stderr)
+        self.assertIn("Schritt „test-ppd“ fehlgeschlagen", result.stderr)
+        self.assertIn("Fehlgeschlagen: test-ppd", result.stderr)
+        self.assertNotIn("Alle Schritte erfolgreich", result.stderr)
+
+    def test_strict_strings_reaches_step_process(self):
+        result = self.ci("strings")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Lokalisierung unvollständig", result.stderr)
+        for args, env in ((("--strict-strings", "strings"), {}), (("strings",), {"LW_STRICT_STRINGS": "1"})):
+            with self.subTest(args=args, env=env):
+                result = self.ci(*args, **env)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("Schritt „strings“ fehlgeschlagen", result.stderr)
+
+    def test_keep_going_collects_failures(self):
+        result = self.ci("--keep-going", "--strict-strings", "test-ppd", "strings")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Fehlgeschlagen: test-ppd strings", result.stderr)
+        result = self.ci("--strict-strings", "test-ppd", "strings")
+        self.assertIn("Fehlgeschlagen: test-ppd", result.stderr)
+        self.assertNotIn("Schritt „strings“", result.stderr)
+
+    def test_internal_option_is_not_a_step(self):
+        result = self.ci("--lw-ci-run-function")
+        self.assertEqual(result.returncode, 64, result.stderr)
+
+
+@unittest.skipIf(IS_MACOS, "simuliert macOS mit Attrappen – auf echtem macOS nicht ausführen")
+class CIMacOSInstallTestTests(unittest.TestCase):
+    """ci_macos.sh auf simuliertem macOS: Deinstalliert wird nur nach begonnener Installation."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-ci-macos-"))
+        self.repo = make_sandbox_repo(self.tmp / "repo", "Scripts/ci_macos.sh", "Scripts/uninstall.sh")
+        self.script = self.repo / "Scripts" / "ci_macos.sh"
+        self.bin = fake_macos_tools(self.tmp / "bin")
+        self.sudo_log = self.tmp / "sudo.log"
+        version = re.search(r"(?m)^VERSION=(.*)$", (INSTALLER / "config.env").read_text(encoding="utf-8")).group(1)
+        self.pkg = self.repo / "dist" / f"LabelWerk-{version.strip()}.pkg"
+        self.marker = self.repo / "build" / "ci" / "install-test.started"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def ci(self, *args: str) -> subprocess.CompletedProcess:
+        return run([str(self.script), *args], env=ci_env(self.bin, FAKE_SUDO_LOG=str(self.sudo_log)), cwd=self.repo)
+
+    def sudo_calls(self) -> List[str]:
+        if not self.sudo_log.exists():
+            return []
+        return self.sudo_log.read_text(encoding="utf-8").splitlines()
+
+    def test_refused_install_test_does_not_uninstall(self):
+        # Regression: Auch die verweigerte Probeinstallation löste „sudo uninstall.sh“ aus und hätte
+        # eine echte LabelWerk-Installation entfernt.
+        self.pkg.parent.mkdir(parents=True)
+        self.pkg.write_bytes(b"xar!")
+        result = self.ci("install-test")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("installiert Software systemweit", result.stderr)
+        self.assertNotIn("uninstall-test", result.stderr)
+        self.assertEqual(self.sudo_calls(), [])
+
+    def test_missing_package_does_not_uninstall(self):
+        result = self.ci("--allow-system-changes", "install-test")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Paket fehlt", result.stderr)
+        self.assertNotIn("uninstall-test", result.stderr)
+        self.assertEqual(self.sudo_calls(), [])
+        self.assertFalse(self.marker.exists())
+
+    def test_started_install_is_cleaned_up_after_failure(self):
+        self.pkg.parent.mkdir(parents=True)
+        self.pkg.write_bytes(b"xar!")
+        result = self.ci("--allow-system-changes", "install-test")
+        # Die Prüfungen nach dem (simulierten) Installer scheitern – aufgeräumt wird trotzdem.
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Schritt „install-test“ fehlgeschlagen", result.stderr)
+        self.assertIn("Schritt „uninstall-test“", result.stderr)
+        calls = self.sudo_calls()
+        self.assertEqual(len(calls), 2, calls)
+        self.assertTrue(calls[0].startswith(f"installer -pkg {self.pkg} -target /"), calls)
+        self.assertRegex(calls[1], r"uninstall\.sh --yes --remove-queues$")
+        self.assertFalse(self.marker.exists(), "die Markierung wird nach dem Aufräumen entfernt")
+
+    def test_stale_marker_does_not_trigger_uninstall(self):
+        write_executable(self.repo / "Scripts" / "generate_catalog_swift.py", "")
+        self.marker.parent.mkdir(parents=True)
+        self.marker.write_text("alt\n", encoding="utf-8")
+        result = self.ci("catalog")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("uninstall-test", result.stderr)
+        self.assertEqual(self.sudo_calls(), [])
+        self.assertFalse(self.marker.exists())
+
+    def test_uninstall_step_requires_permission(self):
+        result = run([str(self.script), "--lw-ci-run-function", "step_uninstall_test"],
+                     env=ci_env(self.bin, FAKE_SUDO_LOG=str(self.sudo_log)), cwd=self.repo)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("installiert Software systemweit", result.stderr)
+        self.assertEqual(self.sudo_calls(), [])
+
+    def test_step_failures_are_not_masked(self):
+        # Wie unter Linux: Ein früher Fehler im Schritt (hier der Generator) lässt ihn scheitern.
+        write_executable(self.repo / "Driver" / "ppd" / "generate_ppds.py", "import sys\nsys.exit(3)\n")
+        write_executable(self.repo / "Driver" / "ppd" / "tests" / "test_generate.py",
+                         'print("GENERATOR-TESTS LIEFEN")\n')
+        result = self.ci("test-ppd")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("Schritt „test-ppd“ fehlgeschlagen (Exitcode 3", result.stderr)
+        self.assertNotIn("GENERATOR-TESTS LIEFEN", result.stdout + result.stderr)
+
+
+# ------------------------------------------------------------------------------------------------
+# Notarisierung (simuliertes macOS)
+# ------------------------------------------------------------------------------------------------
+
+
+@unittest.skipIf(IS_MACOS, "simuliert macOS mit Attrappen – auf echtem macOS nicht ausführen")
+class NotarizeSimulationTests(unittest.TestCase):
+    """notarize.sh gegen Attrappen von xcrun, plutil, spctl, codesign und pkgutil.
+
+    Die spctl-Attrappe verhält sich wie Gatekeeper: Ein Disk-Image ohne
+    ``--context context:primary-signature`` wird mit „Insufficient Context“ abgelehnt.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-notarize-"))
+        self.bin = fake_macos_tools(self.tmp / "bin")
+        self.log = self.tmp / "tools.log"
+        python = sys.executable
+        write_executable(self.bin / "xcrun", f"""#!/bin/sh
+printf 'xcrun %s\\n' "$*" >> "$FAKE_TOOLS_LOG"
+if [ "$1 $2" = "notarytool submit" ]; then echo '{{"id": "abc-123", "status": "Accepted"}}'; fi
+exit 0
+""")
+        write_executable(self.bin / "plutil", f"""#!{python}
+import json, sys
+args = sys.argv[1:]
+key, path = args[args.index("-extract") + 1], args[-1]
+with open(path, encoding="utf-8") as handle:
+    value = json.load(handle).get(key)
+if value is None:
+    sys.exit(1)
+print(value)
+""")
+        write_executable(self.bin / "spctl", f"""#!{python}
+import os, sys
+args = sys.argv[1:]
+with open(os.environ["FAKE_TOOLS_LOG"], "a", encoding="utf-8") as log:
+    log.write("spctl " + " ".join(args) + "\\n")
+target = args[-1]
+if target.endswith(".dmg") and "context:primary-signature" not in args:
+    print(target + ": rejected\\nsource=Insufficient Context", file=sys.stderr)
+    sys.exit(3)
+print(target + ": accepted\\nsource=Notarized Developer ID", file=sys.stderr)
+""")
+        write_executable(self.bin / "codesign", """#!/bin/sh
+printf 'codesign %s\\n' "$*" >> "$FAKE_TOOLS_LOG"
+case "$1" in
+    --verify) exit "${FAKE_CODESIGN_VERIFY:-0}" ;;
+    -dv) echo "Authority=Developer ID Application: Test (ABCDE12345)" >&2 ;;
+esac
+exit 0
+""")
+        write_executable(self.bin / "pkgutil", "#!/bin/sh\nexit 0\n")
+        write_executable(self.bin / "ditto", '#!/bin/sh\nfor last; do :; done\n: > "$last"\n')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def notarize(self, *files: Path, **env: str) -> subprocess.CompletedProcess:
+        environment = ci_env(self.bin, FAKE_TOOLS_LOG=str(self.log), FAKE_SUDO_LOG=str(self.tmp / "sudo.log"),
+                             NOTARY_KEYCHAIN_PROFILE="labelwerk-test", TMPDIR=str(self.tmp), **env)
+        return run([str(SCRIPTS / "notarize.sh"), *map(str, files)], env=environment)
+
+    def logged(self, tool: str) -> List[str]:
+        if not self.log.exists():
+            return []
+        return [line for line in self.log.read_text(encoding="utf-8").splitlines() if line.startswith(tool + " ")]
+
+    def test_disk_image_is_assessed_with_primary_signature_context(self):
+        # Regression: spctl --type open ohne Kontext lehnt jedes Disk-Image ab („Insufficient
+        # Context“) – das Skript brach nach erfolgreicher Notarisierung ab.
+        image = self.tmp / "LabelWerk-1.0.0.dmg"
+        image.write_bytes(b"koly")
+        result = self.notarize(image)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Gatekeeper akzeptiert LabelWerk-1.0.0.dmg", result.stderr)
+        self.assertEqual(self.logged("spctl"),
+                         [f"spctl --assess --type open --context context:primary-signature --verbose=2 {image}"])
+        self.assertIn(f"xcrun stapler staple {image}", self.logged("xcrun"))
+
+    def test_package_and_app_use_their_assessment_types(self):
+        package = self.tmp / "LabelWerk-1.0.0.pkg"
+        package.write_bytes(b"xar!")
+        app = self.tmp / "LabelWerk.app"
+        (app / "Contents").mkdir(parents=True)
+        result = self.notarize(package, app)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.logged("spctl"), [
+            f"spctl --assess --type install --verbose=2 {package}",
+            f"spctl --assess --type execute --verbose=2 {app}",
+        ])
+
+    def test_zip_is_not_assessed(self):
+        archive = self.tmp / "LabelWerk.zip"
+        archive.write_bytes(b"PK")
+        result = self.notarize(archive)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.logged("spctl"), [])
+        self.assertFalse(any("stapler" in line for line in self.logged("xcrun")))
+
+    def test_unsigned_disk_image_is_rejected_before_submission(self):
+        image = self.tmp / "unsigniert.dmg"
+        image.write_bytes(b"koly")
+        result = self.notarize(image, FAKE_CODESIGN_VERIFY="1")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("nicht (gültig) signiert", result.stderr)
+        self.assertFalse(any("notarytool submit" in line for line in self.logged("xcrun")))
+
+    def test_dry_run_shows_assessment(self):
+        result = run([str(SCRIPTS / "notarize.sh"), "--dry-run", "x.dmg", "y.pkg"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("spctl --assess --type open --context context:primary-signature --verbose=2", result.stderr)
+        self.assertIn("spctl --assess --type install --verbose=2", result.stderr)
 
 
 # ------------------------------------------------------------------------------------------------

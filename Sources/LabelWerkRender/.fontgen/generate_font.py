@@ -28,11 +28,15 @@ Binärformat (Little Endian) vor der zlib-Kompression::
 
 Aufruf (aus dem Paketverzeichnis)::
 
-    python3 Sources/LabelWerkRender/FontGen/generate_font.py \\
+    python3 Sources/LabelWerkRender/.fontgen/generate_font.py \\
         [--font-dir /usr/share/fonts/truetype/dejavu] \\
         [--output Sources/LabelWerkRender/Rasterizer/BitmapFontData.swift]
 
 Benötigt Pillow (getestet mit Pillow 13). Die Ausgabe ist deterministisch.
+
+Das Verzeichnis ``.fontgen`` beginnt mit einem Punkt: SwiftPM überspringt versteckte
+Verzeichnisse, meldet diese Python-Datei daher nicht als unbehandelte Datei des Ziels
+LabelWerkRender (``Package.swift`` bleibt unverändert).
 """
 
 from __future__ import annotations
@@ -205,7 +209,7 @@ def main() -> int:
 
     notice = "\n".join(("// " + line).rstrip() for line in LICENSE_NOTICE.splitlines())
     source = (
-        "// Automatisch erzeugt von Sources/LabelWerkRender/FontGen/generate_font.py –\n"
+        "// Automatisch erzeugt von Sources/LabelWerkRender/.fontgen/generate_font.py –\n"
         "// nicht von Hand bearbeiten.\n"
         "//\n"
         "// Die Bitmap-Glyphen wurden aus den DejaVu-Schriften (Sans, Sans Bold, Sans Mono) gerendert.\n"

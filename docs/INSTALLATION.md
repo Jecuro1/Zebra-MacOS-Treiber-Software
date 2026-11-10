@@ -184,7 +184,7 @@ sudo bash /Library/Printers/LabelWerk/uninstall.sh --remove-queues    # zusätzl
 | Option | Bedeutung |
 |---|---|
 | `--remove-queues` | auch alle Warteschlangen entfernen, die LabelWerk-PPDs verwenden (ohne die Option bleiben sie bestehen, drucken aber nicht mehr) |
-| `--keep-app` | die App behalten und nur den Treiber entfernen |
+| `--keep-app` | die App (samt `lwctl`-Link in `/usr/local/bin`) behalten und nur den Treiber entfernen |
 | `--purge-user-data` | zusätzlich Einstellungen und Daten des Benutzers löschen (`~/Library/Application Support/LabelWerk`, Einstellungen, Caches) |
 | `-y`, `--yes` | ohne Rückfrage |
 | `-n`, `--dry-run` | nur anzeigen, was entfernt würde |

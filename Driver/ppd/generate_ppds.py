@@ -50,7 +50,7 @@ import sys
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # ---------------------------------------------------------------------------------------------
 # Pfade & feste Werte
@@ -69,6 +69,16 @@ DEFAULT_OUTPUT = SCRIPT_DIR / "out"
 DEFAULT_FILE_VERSION = "1.0.0"
 #: ``*cupsVersion`` – Mindestversion der CUPS-Erweiterungen (macOS 14 liefert CUPS 2.3).
 CUPS_VERSION = "2.3"
+#: Wert der Umgebungsvariablen ``SOFTWARE`` beim Aufruf von libcups-Programmen. Die libcups von
+#: macOS beachtet ``LANG`` nur, wenn ``SOFTWARE`` gesetzt ist (wie in der Umgebung, die cupsd
+#: seinen Filtern mitgibt); sonst gilt die Sprachwahl des Benutzers (``AppleLanguages``).
+CUPS_SOFTWARE = "CUPS/" + CUPS_VERSION
+#: Locale-Variablen, die ``LANG`` überstimmen und für libcups-Programme entfernt werden.
+LOCALE_OVERRIDE_VARIABLES = ("LC_ALL", "LC_MESSAGES", "LC_CTYPE", "LANGUAGE")
+#: Sprache, in der ``cupstestppd`` laufen muss: ``run_cupstestppd`` erkennt ``**FAIL**``, ``WARN``
+#: und das Urteil ``PASS`` an den englischen Meldungen – mit deutscher Systemsprache meldet
+#: ``cupstestppd`` sonst etwa „BESTANDEN“ und jede Prüfung gälte als fehlgeschlagen.
+CUPSTESTPPD_LANGUAGE = "en_US.UTF-8"
 
 FILTER_DIR = "/Library/Printers/LabelWerk/Filter"
 #: ``*cupsFilter``-Zeilen exakt nach ARCHITECTURE.md §10.
@@ -439,6 +449,18 @@ def ascii_text(text: str) -> str:
     return sanitize_text(to_ascii(text))
 
 
+def check_attribute_value(keyword: str, value: str) -> str:
+    """Prüft den Wert eines Hauptschlüsselworts ``*keyword: "value"``: reines ASCII, ohne
+    Anführungszeichen und Zeilenumbrüche. Liefert den Wert unverändert zurück."""
+    if '"' in value or "\n" in value or "\r" in value:
+        raise GenerationError(f"Ungültiges Zeichen im Wert von *{keyword}: {value!r}")
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise GenerationError(f"Nicht-ASCII im Wert von *{keyword}: {value!r}") from exc
+    return value
+
+
 def check_keyword(keyword: str) -> str:
     """Prüft ein PPD-Options- oder Auswahl-Schlüsselwort (ASCII 33–126 ohne ``:`` und ``/``)."""
     if not keyword or len(keyword) > PPD_MAX_KEYWORD:
@@ -780,6 +802,31 @@ class Target:
             return bool(self.effective_print_modes)
         return True
 
+    def validate(self) -> None:
+        """Prüft alle aus dem Katalog abgeleiteten Texte dieser PPD, bevor etwas ausgegeben wird.
+
+        ``build_targets`` ruft das für jedes Ziel auf. Datenfehler – etwa ein Modellname, der
+        sich nicht in ASCII umwandeln lässt (``Zebra 斑马``), ein IEEE-1284-Name mit
+        Anführungszeichen oder ein Format ohne Namen – führen so in jedem Modus (auch
+        ``--list``) früh und einheitlich zu einem ``CatalogError`` (Exit-Status 2) statt erst
+        beim Schreiben oder als Traceback.
+        """
+        try:
+            check_attribute_value("NickName", self.nick_name)
+            check_attribute_value("ShortNickName", self.short_nick_name)
+            check_attribute_value("ModelName", self.model_name)
+            for product in self.products:            # enthält ``(<display_name>)``
+                check_attribute_value("Product", product)
+            if self.device_id is not None:
+                check_attribute_value("1284DeviceID", self.device_id)
+        except GenerationError as exc:
+            raise CatalogError(f"{self.stem}: {exc}") from exc
+        for page in self.page_sizes:
+            try:
+                _ = (page.text_en, page.text_de)
+            except GenerationError as exc:
+                raise CatalogError(f"{self.stem}: Format „{page.stock.id}“: {exc}") from exc
+
 
 def select_ieee1284_model(entries: Sequence[str], dpi: int) -> Optional[str]:
     """Wählt den ``MDL:``-Wert für eine Auflösung.
@@ -854,7 +901,10 @@ def page_sizes_for(catalog: Catalog, print_width_mm: float, max_label_length_mm:
 
 
 def build_targets(catalog: Catalog) -> List[Target]:
-    """Alle PPD-Ziele in kanonischer Reihenfolge (Katalogreihenfolge, dann generisch)."""
+    """Alle PPD-Ziele in kanonischer Reihenfolge (Katalogreihenfolge, dann generisch).
+
+    Jedes Ziel wird mit ``Target.validate`` geprüft; Datenfehler lösen ``CatalogError`` aus.
+    """
     targets: List[Target] = []
     for index, model in enumerate(catalog.models):
         default_stock = catalog.stock(model.default_stock)
@@ -880,6 +930,8 @@ def build_targets(catalog: Catalog) -> List[Target]:
             ))
     for index, (language, dpi) in enumerate(GENERIC_TARGETS):
         targets.append(build_generic_target(catalog, language, dpi, GENERIC_MODEL_NUMBER_BASE + index + 1))
+    for target in targets:
+        target.validate()
     assign_pc_file_names(targets)
     return targets
 
@@ -1104,13 +1156,7 @@ class PPDWriter:
 
     def attr(self, keyword: str, value: str) -> None:
         """``*keyword: "value"`` (Wert ASCII, ohne Anführungszeichen)."""
-        if '"' in value or "\n" in value:
-            raise GenerationError(f"Ungültiges Zeichen im Wert von *{keyword}: {value!r}")
-        try:
-            value.encode("ascii")
-        except UnicodeEncodeError as exc:
-            raise GenerationError(f"Nicht-ASCII im Wert von *{keyword}: {value!r}") from exc
-        self._lines.append(f'*{keyword}: "{value}"')
+        self._lines.append(f'*{keyword}: "{check_attribute_value(keyword, value)}"')
 
     def translation(self, language: str, keyword: str, spec: str, text: str) -> None:
         """``*ll.keyword spec/Text: ""`` – Übersetzung in UTF-8."""
@@ -1416,19 +1462,40 @@ def find_cupstestppd() -> Optional[str]:
     return shutil.which("cupstestppd")
 
 
+def cups_environment(language: str, base: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    """Umgebung, in der libcups-Programme Meldungen und PPD-Übersetzungen in ``language`` liefern.
+
+    Ausgehend von ``base`` (Standard: ``os.environ``) werden die Variablen entfernt, die ``LANG``
+    überstimmen (``LOCALE_OVERRIDE_VARIABLES``), ``LANG`` wird gesetzt und zusätzlich
+    ``SOFTWARE``: Die libcups von macOS (``cupsLangGet``/``appleLangDefault`` in
+    ``cups/language.c``) liest ``LANG`` nur bei gesetztem ``SOFTWARE`` und nimmt sonst die
+    Systemsprache des Benutzers. Unter Linux wertet libcups ``LANG`` direkt aus; ``SOFTWARE``
+    ist dort wirkungslos.
+    """
+    source = os.environ if base is None else base
+    env = {k: v for k, v in source.items() if k not in LOCALE_OVERRIDE_VARIABLES}
+    env["LANG"] = language
+    env["SOFTWARE"] = CUPS_SOFTWARE
+    return env
+
+
 def run_cupstestppd(paths: Sequence[Path], executable: Optional[str] = None,
                     extra_args: Sequence[str] = ("-I", "filters")) -> List[CheckResult]:
     """Prüft PPDs mit ``cupstestppd`` (Standard: ``-I filters``, weil die Filterprogramme unter
     ``/Library/Printers/LabelWerk`` auf dem Build-Rechner fehlen). Jede andere Beanstandung
     zählt als Fehler; Warnungen werden mitgeliefert.
+
+    ``cupstestppd`` läuft unabhängig von der Systemsprache englisch (``CUPSTESTPPD_LANGUAGE``),
+    weil Fehler, Warnungen und das Urteil an den englischen Meldungen erkannt werden.
     """
+    env = cups_environment(CUPSTESTPPD_LANGUAGE)
     executable = executable or find_cupstestppd()
     if executable is None:
         raise FileNotFoundError("cupstestppd")
     results: List[CheckResult] = []
     for path in paths:
         proc = subprocess.run([executable, *extra_args, str(path)], stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, check=False)
+                              stderr=subprocess.STDOUT, env=env, check=False)
         output = proc.stdout.decode("utf-8", "replace")
         lines = output.splitlines()
         errors = [line.strip() for line in lines if "**FAIL**" in line]
@@ -1495,7 +1562,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         selected = targets
 
     if args.list:
-        print_target_list(selected)
+        try:
+            print_target_list(selected)
+        except (CatalogError, GenerationError) as exc:   # von build_targets bereits geprüft
+            print(f"Fehler: {exc}", file=sys.stderr)
+            return 2
         return 0
 
     try:

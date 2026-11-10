@@ -585,10 +585,15 @@ public enum ZPL {
     /// `~PS` – Druck fortsetzen.
     public static func resume() -> ZPLCommand { ZPLCommand(.tilde, "PS") }
 
-    /// `~JA` – alle Aufträge abbrechen.
+    /// `~JA` – alle Aufträge abbrechen: verwirft alle Formate im Empfangspuffer und bricht
+    /// laufende Stapel ab; das Etikett, das gerade gedruckt wird, wird noch fertiggestellt.
+    /// Das ist der Befehl, um einen laufenden Druck zu stoppen.
     public static func cancelAll() -> ZPLCommand { ZPLCommand(.tilde, "JA") }
 
-    /// `~JX` – aktuellen Auftrag abbrechen.
+    /// `~JX` – teilweise empfangenes Format verwerfen („Cancel Current Partially Input Format“):
+    /// bricht nur ein Format ab, das gerade noch zum Drucker übertragen wird. Formate, die bereits
+    /// gedruckt werden, und später gesendete Formate bleiben unberührt – einen laufenden Druck
+    /// stoppt ``cancelAll()``.
     public static func cancelCurrent() -> ZPLCommand { ZPLCommand(.tilde, "JX") }
 
     /// `~JR` – Neustart (Power-On-Reset).

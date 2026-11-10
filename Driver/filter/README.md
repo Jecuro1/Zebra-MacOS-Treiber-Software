@@ -102,7 +102,9 @@ werden mit einer klaren `ERROR:`-Meldung abgelehnt (Exitcode 1).
 * `PAGE: <seite> <menge>` je ausgegebenem Etikett (für die Seitenabrechnung von CUPS).
 * `SIGTERM`: Eine vollständig gelesene Seite wird noch ausgegeben, danach endet der Filter mit
   Exitcode 0 (keine weiteren Seiten, keine Sortierwiederholungen). ZPL-Formate werden nie
-  unvollständig geschrieben.
+  unvollständig geschrieben. Ein Abbruch vor der ersten Seite – auch bevor der Rasterdatenstrom
+  beginnt – erzeugt keinerlei Ausgabe: weder Auftragskopf (Startbefehle, `~SD`, `~TA`, `~JC`,
+  also keine Kalibrierung) noch Endbefehle; Meldung `INFO:`, Exitcode 0.
 * Seiten ohne Fläche werden übersprungen. libcups (≥ 2.3) beendet den Datenstrom an einem
   Seitenkopf mit Höhe 0 oder unstimmiger Zeilenlänge; vorher gelesene Seiten werden gedruckt.
 

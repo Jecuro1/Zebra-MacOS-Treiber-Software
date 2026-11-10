@@ -5,7 +5,7 @@ import Testing
 /// SF Symbols, die in SF Symbols 5 (macOS 14) sicher vorhanden sind.
 private let knownSFSymbols: Set<String> = [
     "list.bullet.rectangle.portrait", "network", "ruler", "waveform.path.ecg", "arrow.down.to.line",
-    "pause.circle", "play.circle", "xmark.bin", "stop.circle", "power", "arrow.counterclockwise.circle",
+    "pause.circle", "play.circle", "xmark.bin", "xmark.circle", "power", "arrow.counterclockwise.circle",
     "wifi.exclamationmark", "square.and.arrow.down", "checkmark.seal", "folder", "doc.text", "playpause",
     "wrench.and.screwdriver",
 ]
@@ -44,6 +44,23 @@ struct PrinterActionTests {
         #expect(grouped.count == PrinterAction.allCases.count)
         #expect(Set(grouped) == Set(PrinterAction.allCases))
         #expect(PrinterAction.Group.allCases.allSatisfy { !$0.displayName.isEmpty && $0.id == $0.rawValue })
+    }
+
+    @Test("~JX wird nicht als Abbruch des laufenden Drucks beschrieben")
+    func cancelCurrentDescribesJX() {
+        // Regression: ~JX verwirft laut ZPL-II-Handbuch nur ein teilweise empfangenes Format und
+        // berührt laufende Drucke nicht – der Text versprach früher „Aktuellen Auftrag abbrechen“.
+        let action = PrinterAction.cancelCurrent
+        #expect(String(decoding: action.payload(language: .zpl) ?? Data(), as: UTF8.self) == "~JX\n")
+        #expect(action.displayName == "Unvollständiges Format verwerfen")
+        #expect(action.detail.contains("teilweise empfangenes Format"))
+        #expect(!action.displayName.contains("Auftrag abbrechen"))
+        #expect(!action.detail.contains("gerade gedruckt"))
+        // Der Hinweis nennt die Aktion, die einen laufenden Druck tatsächlich stoppt (~JA).
+        #expect(action.detail.contains("„\(PrinterAction.cancelAll.displayName)“"))
+        #expect(String(decoding: PrinterAction.cancelAll.payload(language: .zpl) ?? Data(), as: UTF8.self) == "~JA\n")
+        #expect(PrinterAction.cancelAll.detail.contains("laufenden Druck"))
+        #expect(action.systemImage != "stop.circle")
     }
 
     @Test("Codable-Rundreise")

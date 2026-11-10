@@ -19,6 +19,49 @@ struct SGDTests {
         #expect(SGD.getvar("x\ny") == "! U1 getvar \"xy\"\r\n")
     }
 
+    @Test("Anführungszeichen: JSON-Form statt abgeschnittener klassischer Befehle")
+    func quotesSwitchToJSON() throws {
+        // Regression: früher entstand `! U1 setvar "device.friendly_name" "a"b"` – der Drucker
+        // hätte still nur `a` gespeichert.
+        #expect(SGD.setvar("device.friendly_name", "a\"b") == "{}{\"device.friendly_name\":\"a\\\"b\"}")
+        #expect(SGD.do("file.delete", "E:A\"B.ZPL") == "{}{\"file.delete\":\"E:A\\\"B.ZPL\"}")
+        #expect(SGD.getvar("we\"ird") == "{}{\"we\\\"ird\":null}")
+
+        // Kein klassischer Befehl darf mehr als die vier bzw. zwei Begrenzungs-Anführungszeichen enthalten.
+        for command in [SGD.setvar("wlan.essid", "\""), SGD.setvar("a\"", "b"), SGD.do("x", "\"\""),
+                        SGD.getvar("\"")] {
+            #expect(command.hasPrefix("{}{"), "\(command)")
+            #expect(!command.hasSuffix("\r\n"))
+        }
+
+        // Steuerzeichen werden auch in der JSON-Form entfernt, das `"` bleibt erhalten.
+        let psk = "Pass\"wort\r\n\tmit\u{7F}Ä😀"
+        let command = SGD.setvar(SGD.Variable.wlanPSK, psk)
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(command.dropFirst(2).utf8)) as? [String: String])
+        #expect(object == [SGD.Variable.wlanPSK: "Pass\"wortmitÄ😀"])
+
+        // Ohne `"` bleibt es bei der klassischen Syntax.
+        #expect(SGD.setvar("wlan.wpa.psk", "geheim'123\\") == "! U1 setvar \"wlan.wpa.psk\" \"geheim'123\\\"\r\n")
+        #expect(SGD.do("device.reset") == "! U1 do \"device.reset\" \"\"\r\n")
+    }
+
+    @Test("requiresJSON stimmt mit der erzeugten Form überein")
+    func requiresJSON() {
+        #expect(!SGD.requiresJSON("device.friendly_name"))
+        #expect(!SGD.requiresJSON("device.friendly_name", "Lager 1 – Büro"))
+        #expect(SGD.requiresJSON("device.friendly_name", "a\"b"))
+        #expect(SGD.requiresJSON("a\"b"))
+        #expect(SGD.requiresJSON("a\"b", ""))
+        let samples: [(String, String)] = [("print.tone", "15"), ("wlan.essid", "My \"Net\""), ("x\"y", "z"),
+                                           ("device.reset", ""), ("a", "\r\n")]
+        for (name, value) in samples {
+            let json = SGD.requiresJSON(name, value)
+            #expect(SGD.setvar(name, value).hasPrefix("{}{") == json, "setvar \(name)")
+            #expect(SGD.do(name, value).hasPrefix("{}{") == json, "do \(name)")
+            #expect(SGD.getvar(name).hasPrefix("{}{") == SGD.requiresJSON(name), "getvar \(name)")
+        }
+    }
+
     @Test("JSON-Abfrage")
     func jsonGet() throws {
         #expect(SGD.jsonGet(["a", "b"]) == "{}{\"a\":null,\"b\":null}")

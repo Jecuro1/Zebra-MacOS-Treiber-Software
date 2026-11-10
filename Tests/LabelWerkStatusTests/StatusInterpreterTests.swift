@@ -297,4 +297,89 @@ struct StatusInterpreterTests {
         let expected = [PrinterState.ready, .printing, .warning].contains(state)
         #expect(PrinterStatusSnapshot(state: state).isReady == expected)
     }
+
+
+    // MARK: Review-Regressionen
+
+    @Test("Unbekannte ~HQES-Fehlerbits → Fehler, nie „Bereit“", arguments: [
+        PrinterErrorFlags(rawValue: 0x0004_0000),           // Gruppe 1, oberhalb der bekannten Bits
+        PrinterErrorFlags(rawValue: 0x8000_0000),           // höchstes Bit in Gruppe 1
+        PrinterErrorFlags(group2: 0x1, group1: 0),           // Gruppe 2
+        PrinterErrorFlags(group2: 0x1, group1: 0x0002_0000), // unbekannt + Pause → Fehler hat Vorrang
+    ])
+    func unknownErrorBits(flags: PrinterErrorFlags) {
+        let s = snapshot(nil, HostQueryStatus(errors: flags))
+        #expect(s.state == .error)
+        #expect(!s.isReady)
+        #expect(s.queryStatus?.errors.unknownFlags.isEmpty == false)
+        // Keine fachfremde Meldung: höchstens die Pause-Info des bekannten Pause-Bits.
+        #expect(s.alerts.allSatisfy { $0.kind == .paused })
+        // Auch mit bereitem ~HS bleibt der Zustand „Fehler“.
+        #expect(snapshot(HostStatus(), HostQueryStatus(errors: flags)).state == .error)
+    }
+
+    @Test("Unbekannte Fehlerbits aus der Druckerantwort (End-to-End)")
+    func unknownErrorBitsFromResponse() throws {
+        let query = try HostQueryParser.parse(TestSupport.data("ERRORS: 1 00000000 00040000\r\nWARNINGS: 0 00000000 00000000"))
+        let s = snapshot(nil, query)
+        #expect(s.state == .error)
+        #expect(!s.isReady)
+        #expect(query.errors.displayNames == ["Unbekannter Fehler 0x40000"])
+        let group2 = try HostQueryParser.parse(TestSupport.data("ERRORS: 1 00000001 00000000"))
+        #expect(snapshot(nil, group2).state == .error)
+    }
+
+    @Test("Bekannte und unbekannte Fehlerbits zusammen")
+    func knownAndUnknownErrorBits() {
+        let s = snapshot(nil, HostQueryStatus(errors: PrinterErrorFlags(rawValue: 0x0004_0001)))
+        #expect(s.state == .error)
+        #expect(s.alerts.map(\.kind) == [.mediaOut])
+        // Unbekannte Warnbits und Kiosk-Sensoren bleiben ohne Einfluss auf den Fehlerzustand.
+        let warningsOnly = snapshot(HostStatus(), HostQueryStatus(warnings: PrinterWarningFlags(rawValue: 0x1_0000_0FF0)))
+        #expect(warningsOnly.state == .ready)
+    }
+
+    @Test("Nur SGD-Kennzahlen ohne ~HS/~HQES → unbekannt")
+    func sgdMetricsAloneAreUnknown() {
+        let s = snapshot(nil, nil, sgd: ["power.percent_full": "80", "odometer.total_label_count": "5"])
+        #expect(s.state == .unknown)
+        #expect(!s.isReady)
+        #expect(s.alerts.isEmpty)
+        // Die Kennzahlen werden trotzdem ausgewertet.
+        #expect(s.batteryPercent == 80)
+        #expect(s.labelsPrinted == 5)
+        let allMetrics = snapshot(nil, nil, sgd: [
+            "odometer.total_print_length": "7,342 INCHES", "head.temperature": "31 C",
+            "device.friendly_name": "Lager-01",
+        ])
+        #expect(allMetrics.state == .unknown)
+        #expect(allMetrics.headTemperatureC == 31)
+    }
+
+    @Test("SGD-Statuswerte mit Platzhalter zählen nicht als Statusquelle", arguments: [
+        ["head.latch": "?"],
+        ["media.status": ""],
+        ["head.latch": "\"?\""],
+        ["media.status": "null"],
+        ["head.latch": " UNKNOWN ", "media.status": "n/a"],
+        ["head.latch": "\"\"", "power.percent_full": "80"],
+    ])
+    func sgdPlaceholdersAreUnknown(sgd: [String: String]) {
+        #expect(!StatusInterpreter.hasSGDStatus(sgd))
+        let s = snapshot(nil, nil, sgd: sgd)
+        #expect(s.state == .unknown)
+        #expect(!s.isReady)
+    }
+
+    @Test("Echte SGD-Statuswerte zählen als Statusquelle", arguments: [
+        (["head.latch": "ok"], PrinterState.ready),
+        (["media.status": "\"ok\""], .ready),
+        (["head.latch": "ok", "power.percent_full": "80"], .ready),
+        (["head.latch": "open"], .error),
+        (["media.status": "out", "head.latch": "?"], .error),
+    ])
+    func sgdStatusValues(sgd: [String: String], expected: PrinterState) {
+        #expect(StatusInterpreter.hasSGDStatus(sgd))
+        #expect(snapshot(nil, nil, sgd: sgd).state == expected)
+    }
 }

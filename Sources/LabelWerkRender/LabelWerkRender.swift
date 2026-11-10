@@ -17,7 +17,9 @@
 //   Formate (^DF/^XF/^FN), Serialisierung (^SN/^SF), Uhrzeitfelder (^FC).
 // * `LabelElement` & Co. – öffentliche Displayliste für Vorschau (App), Designer und Tests.
 // * `SoftwareRasterizer` – pixelgenaue Rasterung mit eingebetteten Bitmap-Schriften
-//   (aus DejaVu Sans/Sans Bold/Sans Mono, siehe FontGen/generate_font.py).
+//   (aus DejaVu Sans/Sans Bold/Sans Mono, erzeugt von `.fontgen/generate_font.py`; das
+//   Verzeichnis beginnt mit einem Punkt, damit SwiftPM die Python-Datei nicht als
+//   unbehandelte Zieldatei meldet).
 // * `ZPLCommandReference` – deutschsprachige Befehlsreferenz für Terminal und Editor.
 //
 // Das Modul nutzt nur Foundation sowie LabelWerkCore, LabelWerkImaging und LabelWerkBarcode

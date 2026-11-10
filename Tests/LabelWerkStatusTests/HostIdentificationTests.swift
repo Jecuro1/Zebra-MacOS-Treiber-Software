@@ -127,4 +127,60 @@ struct HostIdentificationTests {
         let id = HostIdentification(model: "ZD421-203dpi", firmware: "V84.20.18Z", dotsPerMM: 8, memoryKB: 8192)
         #expect(id.responseText == Fixtures.hostIdentificationZD421)
     }
+
+
+    // MARK: Fremdzeilen im Empfangspuffer (Review-Regression)
+
+    static let zd421 = HostIdentification(model: "ZD421-203dpi", firmware: "V84.20.18Z", dotsPerMM: 8, memoryKB: 8192)
+
+    @Test("Liegengebliebene ~HS-Antwort vor der ~HI-Kennung wird übergangen", arguments: [
+        // Beispiel aus dem Review: eine ~HS-Zeile vor der Kennung.
+        "\u{2}030,1,0,1245,000,0,0,0,000,0,0,0\u{3}\r\n\u{2}ZD421-203dpi,V84.20.18Z,8,8192KB\u{3}",
+        // Vollständige dreizeilige ~HS-Antwort davor.
+        Fixtures.hostStatusReady + Fixtures.hostIdentificationZD421,
+        // Nur Zeile 3 (Passwort, Flag) eines abgebrochenen ~HS.
+        "\u{2}1234,0\u{3}\r\n" + Fixtures.hostIdentificationZD421,
+        // ~HI vor einer nachfolgenden ~HS-Antwort.
+        Fixtures.hostIdentificationZD421 + "\r\n" + Fixtures.hostStatusPrinting,
+        // Fremde Kommazeile mit Buchstaben (z. B. SGD-Echo) ist weniger plausibel als die Kennung.
+        "\"ok\",\"open\"\r\n" + Fixtures.hostIdentificationZD421,
+    ])
+    func skipsStaleHostStatus(text: String) throws {
+        #expect(try HostIdentificationParser.parse(TestSupport.data(text)) == Self.zd421)
+    }
+
+    @Test("Reine ~HS-Antwort ergibt keine Schein-Kennung")
+    func hostStatusAloneIsNoIdentification() {
+        for text in [Fixtures.hostStatusReady, Fixtures.hostStatusMobile, "\u{2}1234,0\u{3}\r\n"] {
+            let error = TestSupport.parseError { try HostIdentificationParser.parse(TestSupport.data(text)) }
+            #expect(error == .unrecognizedFormat("Keine ~HI-Kennung gefunden"), "\(text.debugDescription)")
+        }
+    }
+
+    @Test("~HS-Reste vor einer kommalosen EPL-Kennung")
+    func staleHostStatusBeforeEPL() throws {
+        let id = try HostIdentificationParser.parse(TestSupport.data(Fixtures.hostStatusReady + "UKQ1935HLU  V4.70.1A\r\n"))
+        #expect(id.model == "UKQ1935HLU")
+        #expect(id.firmware == "V4.70.1A")
+    }
+
+    @Test("Plausibilität von Kommazeilen", arguments: [
+        ("ZD421-203dpi,V84.20.18Z,8,8192KB", 3),
+        ("2844,V4.29,8,512KB", 2),
+        (",V84.20.18Z,8", 2),
+        ("ZD421,V84,abc,8192KB", 1),
+        ("030,1,0,1245,000,0,0,0,000,0,0,0", 0),
+        ("001,0,0,0,1,2,6,0,00000000,1,000", 0),
+        ("1234,0", 0),
+        (",abc", 0),
+    ])
+    func plausibility(line: String, score: Int) {
+        #expect(HostIdentificationParser.plausibility(ofCommaLine: line) == score)
+    }
+
+    @Test("Bei gleicher Plausibilität gewinnt die erste Zeile")
+    func firstOfEqualScoreWins() throws {
+        let text = "ZD421-203dpi,V84.20.18Z,8,8192KB\r\nZT410-300dpi,V75.19.15Z,12,8176KB,C\r\n"
+        #expect(try HostIdentificationParser.parse(TestSupport.data(text)) == Self.zd421)
+    }
 }

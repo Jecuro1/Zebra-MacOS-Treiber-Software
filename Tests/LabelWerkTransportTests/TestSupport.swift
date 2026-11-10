@@ -296,3 +296,72 @@ func measure<T>(_ body: () async throws -> T) async rethrows -> (value: T, elaps
 
 /// Typische `~HI`-Antwort eines ZD421.
 let sampleHostIdentification = Data("\u{2}ZD421-203dpi,V84.20.18Z,8,8192KB\u{3}\r\n".utf8)
+
+/// Haltepunkt für Nebenläufigkeitstests: Ein Task meldet mit `pass()` seine Ankunft und wartet,
+/// bis der Test ihn mit `release()` weiterlaufen lässt. Der Test kann mit `waitForArrival()`
+/// abwarten, bis der Task den Haltepunkt erreicht hat.
+final class TestCheckpoint: @unchecked Sendable {
+    private let lock = NSLock()
+    private var arrived = false
+    private var released = false
+    private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
+    private var passWaiters: [CheckedContinuation<Void, Never>] = []
+
+    private func synchronized<R>(_ body: () -> R) -> R {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+
+    /// Meldet die Ankunft und wartet auf `release()`.
+    func pass() async {
+        let woken: [CheckedContinuation<Void, Never>] = synchronized {
+            arrived = true
+            let waiters = arrivalWaiters
+            arrivalWaiters.removeAll()
+            return waiters
+        }
+        for waiter in woken { waiter.resume() }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow: Bool = synchronized {
+                if released { return true }
+                passWaiters.append(continuation)
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    /// Wartet, bis ein Task `pass()` erreicht hat.
+    func waitForArrival() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow: Bool = synchronized {
+                if arrived { return true }
+                arrivalWaiters.append(continuation)
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    /// Lässt alle wartenden (und künftigen) `pass()`-Aufrufe weiterlaufen.
+    func release() {
+        let woken: [CheckedContinuation<Void, Never>] = synchronized {
+            released = true
+            let waiters = passWaiters
+            passWaiters.removeAll()
+            return waiters
+        }
+        for waiter in woken { waiter.resume() }
+    }
+}
+
+/// Wartet (höchstens `timeout`), bis `condition` erfüllt ist; liefert, ob sie erfüllt wurde.
+func eventually(timeout: Duration = .seconds(3), _ condition: () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while !condition() {
+        if ContinuousClock.now >= deadline { return false }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return true
+}

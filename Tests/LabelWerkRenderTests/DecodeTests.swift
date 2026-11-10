@@ -3,9 +3,11 @@ import Testing
 import LabelWerkImaging
 @testable import LabelWerkRender
 
-/// Unabhängige Prüfung: Gerasterte Etiketten werden mit zxing-cpp gelesen. Läuft nur, wenn der
-/// Python-Interpreter der Entwicklungsumgebung (mit zxing-cpp und Pillow) vorhanden ist.
-@Suite("Rückleser (zxing-cpp)", .enabled(if: TestSupport.hasZXing))
+/// Unabhängige Prüfung: Gerasterte Etiketten werden mit zxing-cpp gelesen. Läuft nur, wenn ein
+/// Python-Interpreter mit zxing-cpp und Pillow gefunden wird (`LABELWERK_ZXING_PYTHON` oder
+/// `python3` im `PATH`, siehe `TestSupport.pythonPath`); sonst wird die Suite mit Begründung
+/// übersprungen.
+@Suite("Rückleser (zxing-cpp)", .enabled(if: TestSupport.hasZXing, TestSupport.zxingSkipReason))
 struct DecodeTests {
 
     private func decode(_ zpl: String, sourceLocation: SourceLocation = #_sourceLocation) throws -> [String: String] {
@@ -22,6 +24,9 @@ struct DecodeTests {
             ("^BQN,2,3^FDHM,AHELLO WORLD 123", "HELLO WORLD 123"),
             ("^BQN,2,2^FDLA,0123456789012345678901234567890123456789", "0123456789012345678901234567890123456789"),
             ("^BQN,2,5^FDMA,Grüße aus München – 25 €", "Grüße aus München – 25 €"),
+            // Manuelle Eingabe mit mehreren Segmenten (Beispiel des ZPL II Programming Guide).
+            ("^BQN,2,5^FDLM,N0123456789,A12AABB,B0006qrcode", "012345678912AABBqrcode"),
+            ("^BQN,2,5^FDHM,B0013Grüße, Welt,N42", "Grüße, Welt42"),
         ]
         for (command, expected) in cases {
             let decoded = try decode("^XA^CI28^PW600^LL600^FO60,60" + command + "^FS^XZ")

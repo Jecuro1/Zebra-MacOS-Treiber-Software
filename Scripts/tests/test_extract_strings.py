@@ -103,6 +103,45 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("Interpolation", errors[0].message)
 
+    def test_tr_inside_interpolation_is_extracted(self):
+        # Regression: tr() in einer String-Interpolation wurde mit dem ganzen Literal übersprungen.
+        source = textwrap.dedent('''
+            Text("\\(tr("Drucker")): \\(count)")
+            Text(verbatim: "\\(tr("Etiketten %d", count)) – ok")
+            Text(tr("Direkt"))
+            Text("\\(flag ? tr("Ja") : "\\(tr("Nein")) \\(x)")")
+            Text(#"\\#(tr("Roh"))"#)
+            Text("""
+                \\(tr("Mehrzeilig innen"))
+                """)
+        ''')
+        result = scan(source)
+        self.assertEqual(sorted(result.keys),
+                         sorted(["Drucker", "Etiketten %d", "Direkt", "Ja", "Nein", "Roh", "Mehrzeilig innen"]))
+        self.assertTrue(result.keys["Etiketten %d"].has_arguments)
+        self.assertFalse(result.keys["Drucker"].has_arguments)
+        self.assertEqual(result.keys["Drucker"].line, 2)
+        self.assertEqual(result.keys["Nein"].line, 5)
+        self.assertEqual(result.keys["Mehrzeilig innen"].line, 8)
+        self.assertEqual(result.literal_calls, 7)
+        self.assertEqual([d for d in result.diagnostics if d.is_error], [])
+
+    def test_dynamic_tr_inside_interpolation_is_counted(self):
+        result = scan('Text(verbatim: "\\(name): \\(tr(alert.title))")')
+        self.assertEqual(result.keys, {})
+        self.assertEqual(result.dynamic_calls, 1)
+
+    def test_interpolation_scan_respects_comments_and_raw_strings(self):
+        source = ('Text("\\(f(/* tr("Kommentar") */ 1))")\n'
+                  'Text(#"\\(tr("Keine Interpolation"))"#)\n'
+                  'Text("\\(a) \\("tr(\\"Nur Text\\")")")')
+        self.assertEqual(keys(source), [])
+
+    def test_tr_inside_interpolation_of_invalid_key_is_still_extracted(self):
+        result = scan('tr("Hallo \\(tr("Welt"))")')
+        self.assertEqual(list(result.keys), ["Welt"])
+        self.assertTrue(any(d.is_error and "Interpolation" in d.message for d in result.diagnostics))
+
     def test_comments_are_ignored(self):
         source = textwrap.dedent('''
             // tr("Zeilenkommentar")
@@ -496,6 +535,22 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Interpolation", err)
         self.assertEqual(self.main()[0], 1)
+
+    def test_tr_inside_interpolation_reaches_both_tables(self):
+        # Regression: ein tr() in einer Interpolation fehlte in beiden .strings-Dateien, und
+        # --check bemerkte es nicht.
+        self.assertEqual(self.main()[0], 0)
+        self.translate({"Hallo": "Hello", "%d Etiketten": "%d labels"})
+        self.assertEqual(self.main("--check", "--strict")[0], 0)
+        self.write_source('Text("\\(tr("Drucker")): \\(count)")\n', name="Nested.swift")
+        code, _, err = self.main("--check")
+        self.assertEqual(code, 1)
+        self.assertIn("'Drucker'", err)
+        self.assertEqual(self.main()[0], 0)
+        de = {e.key for e in es.read_strings_file(self.resources / "de.lproj" / "Localizable.strings")}
+        en = {e.key: e for e in es.read_strings_file(self.en_path())}
+        self.assertIn("Drucker", de)
+        self.assertTrue(en["Drucker"].todo)
 
     def test_obsolete_entries_are_pruned_on_request(self):
         self.main()

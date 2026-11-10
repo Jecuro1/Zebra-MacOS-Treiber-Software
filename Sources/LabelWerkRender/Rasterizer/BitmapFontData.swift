@@ -1,4 +1,4 @@
-// Automatisch erzeugt von Sources/LabelWerkRender/FontGen/generate_font.py –
+// Automatisch erzeugt von Sources/LabelWerkRender/.fontgen/generate_font.py –
 // nicht von Hand bearbeiten.
 //
 // Die Bitmap-Glyphen wurden aus den DejaVu-Schriften (Sans, Sans Bold, Sans Mono) gerendert.

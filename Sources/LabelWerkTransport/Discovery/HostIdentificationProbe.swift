@@ -50,6 +50,10 @@ enum HostIdentificationProbe {
     }
 
     /// Öffnet kurz eine TCP-Verbindung, sendet `~HI` und wertet die Antwort aus.
+    ///
+    /// `~HI` ist druckbarer Text: Nur an Geräte senden, die bereits als Zebra erkannt sind (bzw.
+    /// nach ausdrücklicher Freigabe durch den Benutzer) – ein fremder Drucker würde ihn ausdrucken.
+    /// Die Entscheidung trifft `PrinterDiscovery.mayProbeWithHostIdentification(isZebra:options:)`.
     static func probe(host: String, port: Int, connectTimeout: Duration, responseTimeout: Duration) async -> Identification? {
         let connection = TCPConnection(host: host, port: port, connectTimeout: connectTimeout, writeTimeout: .seconds(2))
         do {

@@ -15,6 +15,8 @@
  * Meldungen an CUPS auf stderr: "INFO:", "WARNING:", "ERROR:", "DEBUG:", "PAGE: n m".
  * SIGTERM (Auftrag abgebrochen): die aktuelle Seite wird – wenn vollständig gelesen – noch
  * ausgegeben, danach endet der Filter regulär (keine weiteren Seiten, keine Sortierwiederholungen).
+ * Kommt der Abbruch vor der ersten Seite (auch bevor der Datenstrom überhaupt beginnt), schreibt
+ * der Filter gar nichts – keinen Auftragskopf (also auch kein ~JC) und keine Endbefehle.
  * Exitcode: 0 = Erfolg (auch nach Abbruch), 1 = Fehler.
  */
 
@@ -298,12 +300,19 @@ int main(int argc, char *argv[])
     }
     cups_raster_t *ras = cupsRasterOpen(fd, CUPS_RASTER_READ);
     if (ras == NULL) {
-        lw_log(&log, LW_LOG_ERROR, "Der Rasterdatenstrom konnte nicht geöffnet werden.");
+        /* Abbruch vor dem Synchronisationswort: CUPS beendet auch den vorgelagerten Filter, der
+         * die Pipe dann ohne Daten schließt. Das ist kein Fehler des Datenstroms – es wurde
+         * nichts gesendet, und wie bei jedem Abbruch endet der Filter mit Exitcode 0. */
+        const bool canceled_early = g_canceled != 0;
+        if (canceled_early)
+            lw_log(&log, LW_LOG_INFO, "Auftrag abgebrochen – 0 Etikett(en) wurden gesendet.");
+        else
+            lw_log(&log, LW_LOG_ERROR, "Der Rasterdatenstrom konnte nicht geöffnet werden.");
         if (fd != 0)
             close(fd);
         lw_settings_free(&settings);
         lw_cups_options_close(&opts);
-        return 1;
+        return canceled_early ? 0 : 1;
     }
 
     /* --- Auftrag -------------------------------------------------------------------------- */

@@ -97,7 +97,8 @@ make strings-check                                  # = --check --strict (CI-Sch
 ```
 
 `extract_strings.py` durchsucht `Sources/LabelWerkApp/**/*.swift` (Kommentare, Raw-, Mehrzeilen-
-und Escape-Literale werden korrekt behandelt), nimmt zusätzlich die Texte aus Kernmodulen auf, die
+und Escape-Literale werden korrekt behandelt; `tr("…")` innerhalb einer String-Interpolation wie
+`Text("\(tr("Drucker")): \(n)")` wird mit erfasst), nimmt zusätzlich die Texte aus Kernmodulen auf, die
 die App dynamisch übersetzt (`displayName` der Aufzählungen, `PrinterAction.displayName/detail`,
 Titel und Lösungsschritte aus `PrinterAlert`), schreibt `de.lproj/Localizable.strings` (Schlüssel =
 Wert) und führt `en.lproj/Localizable.strings` zusammen:
@@ -183,10 +184,10 @@ Die Datei wird nicht mit `source` ausgeführt, sondern geparst und validiert
 
 | Skript | Aufgabe | Wichtige Optionen |
 |---|---|---|
-| `Scripts/build_driver.sh` | Universal-Filter (`make -C Driver/filter universal`), PPDs (`generate_ppds.py --gzip`), Symbol, `VERSION`, `uninstall.sh` in den Aufbau von ARCHITECTURE.md §10; Rechte setzen; Filter signieren | `--output`, `--host` (Testaufbau für das eigene System, auch Linux), `--no-sign`, `--dry-run` |
+| `Scripts/build_driver.sh` | Universal-Filter (`make -C Driver/filter universal`), PPDs (`generate_ppds.py --gzip`), Symbol, `VERSION`, `uninstall.sh` in den Aufbau von ARCHITECTURE.md §10; Rechte setzen; Filter signieren | `--output` (wird vorher gelöscht und muss deshalb neu, leer oder ein früherer Treiberbaum sein; System-, Benutzer- und Repository-Ordner werden abgelehnt), `--host` (Testaufbau für das eigene System, auch Linux), `--no-sign`, `--dry-run` |
 | `Scripts/build_app.sh` | `swift build -c release --arch arm64 --arch x86_64` für `LabelWerk` und `lwctl`; Bundle mit `Info.plist`, `AppIcon.icns`, `*.lproj`, `Helpers/lwctl`, `Resources/Driver`; dSYM sichern, Symbole entfernen; von innen nach außen signieren | `--debug`, `--skip-driver`, `--skip-build`, `--output`, `--dry-run` |
 | `Scripts/make_pkg.sh` | Komponenten App (`/Applications`, nicht verschiebbar), Treiber (`/`, mit pre-/postinstall), lwctl (ohne Nutzlast); `productbuild` mit `Installer/pkg/distribution.xml` und deutsch/englischer Oberfläche; Inhalt prüfen; SHA-256 | `--skip-build`, `--unsigned`, `--output`, `--dry-run` |
-| `Scripts/notarize.sh` | `xcrun notarytool submit --wait`, bei Ablehnung Prüfprotokoll, `stapler staple`, Gatekeeper-Prüfung | `--no-staple`, `--timeout`, `--dry-run`; Dateien `.pkg`, `.dmg`, `.zip`, `.app` |
+| `Scripts/notarize.sh` | `xcrun notarytool submit --wait`, bei Ablehnung Prüfprotokoll, `stapler staple`, Gatekeeper-Prüfung (`spctl --type install`/`execute`, bei `.dmg` `--type open --context context:primary-signature` – Disk-Images müssen dafür selbst signiert sein) | `--no-staple`, `--timeout`, `--dry-run`; Dateien `.pkg`, `.dmg`, `.zip`, `.app` |
 | `Scripts/uninstall.sh` | Deinstallation (wird als `/Library/Printers/LabelWerk/uninstall.sh` mitinstalliert) | `--remove-queues`, `--keep-app`, `--purge-user-data`, `--yes`, `--dry-run`, `--root` |
 
 Alle Skripte sind Bash mit `set -euo pipefail`, ShellCheck-sauber, geben deutsche Meldungen aus und
@@ -268,7 +269,7 @@ auf; jeder Workflow-Schritt entspricht einem Skriptschritt und lässt sich lokal
 | Job | Auslöser | Inhalt |
 |---|---|---|
 | `linux` (ubuntu-24.04) | jeder Push, jeder Pull Request, manuell | Swift 6.4.2 von swift.org (zwischengespeichert), Lint, Katalog, `swift build`/`swift test`, Filtertests, PPDs + `cupstestppd`, Werkzeug-Tests, Treiberbaum und Probeläufe der macOS-Skripte; Lokalisierung als Warnschritt |
-| `macos` (macos-15, neuestes stabiles Xcode) | nur manuell (`workflow_dispatch`) und bei Pushes auf `main` und `claude/**` – macOS-Minuten sind knapp | Swift-Tests inkl. App, Universal-Filter + Tests, App-Bundle (ad hoc signiert), unsigniertes Paket, Paketprüfung, Probeinstallation mit Testdruck über CUPS und Deinstallation; Artefakte: App (ZIP, dSYM) und Paket |
+| `macos` (macos-15, neuestes stabiles Xcode) | nur manuell (`workflow_dispatch`), bei Pushes auf `main` und für Versions-Tags `v*` – macOS-Minuten sind knapp | Swift-Tests inkl. App, Universal-Filter + Tests, App-Bundle (ad hoc signiert), unsigniertes Paket, Paketprüfung, Probeinstallation mit Testdruck über CUPS und Deinstallation; Artefakte: App (ZIP, dSYM) und Paket |
 
 ```bash
 Scripts/ci_linux.sh                         # alle Schritte
@@ -278,9 +279,19 @@ Scripts/ci_macos.sh test-driver app pkg verify-pkg
 Scripts/ci_macos.sh --allow-system-changes install-test e2e-print   # installiert systemweit!
 ```
 
+Jeder Schritt läuft als eigener Bash-Prozess des CI-Skripts (`lw_ci_run_step` in
+`Installer/lib/common.sh`): Bash setzt `set -e` in Funktionen außer Kraft, die in einem
+Bedingungskontext (`if`, `!`, `||`) laufen – selbst in Subshells. Erst der eigene Prozess sorgt
+dafür, dass *jeder* fehlschlagende Befehl seinen Schritt scheitern lässt, nicht nur der letzte.
+Optionen wie `--strict-strings` erhält jeder Schrittprozess erneut; Variablen, die ein Schritt
+setzt, wirken nicht über ihn hinaus (exportierte wie `PATH` aus `--install-deps` schon).
+
 Der macOS-Schritt `install-test` installiert das Paket auf dem CI-Rechner, prüft Besitzer und
 Rechte, legt mit unserer PPD eine Warteschlange an (`cupsd` prüft dabei Filterpfad und Rechte) und
-deinstalliert am Ende des Aufrufs immer wieder. `e2e-print` druckt ein PDF über CUPS,
+deinstalliert am Ende des Aufrufs wieder – auch nach Fehlern, aber nur, wenn der Installer
+tatsächlich gestartet wurde. Wird der Schritt verweigert (ohne `CI=true` bzw.
+`--allow-system-changes`) oder fehlt das Paket, bleibt eine vorhandene LabelWerk-Installation
+unangetastet. `e2e-print` druckt ein PDF über CUPS,
 `cgpdftoraster` und `rastertolabelwerk` an einen lokalen TCP-„Drucker“ und prüft das empfangene ZPL;
 weil das von der CUPS-Konfiguration des Rechners abhängt, ist ein Fehlschlag dort nur eine Warnung
 (`--strict-e2e` macht ihn zum Fehler).

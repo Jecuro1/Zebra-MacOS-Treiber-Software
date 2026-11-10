@@ -57,7 +57,7 @@ Entfernt ${APP_NAME}: CUPS-Treiber (Filter, PPD-Dateien, Druckersymbol), die App
 Optionen:
   --remove-queues     auch alle Druckerwarteschlangen entfernen, die LabelWerk-PPDs verwenden
                       (ohne diese Option bleiben sie bestehen, drucken aber nicht mehr)
-  --keep-app          die App behalten und nur den Treiber entfernen
+  --keep-app          die App (samt lwctl-Link) behalten und nur den Treiber entfernen
   --purge-user-data   zusätzlich Einstellungen und Daten des aufrufenden Benutzers löschen
                       (~/Library/Application Support/${APP_NAME}, Einstellungen, Caches)
   -y, --yes           ohne Rückfrage ausführen
@@ -142,13 +142,15 @@ if [[ ${#TARGETS[@]} -gt 0 ]]; then
         esac
     done
 fi
+# Der lwctl-Link zeigt in die App (Contents/Helpers/lwctl) und gehört zu ihr: Mit --keep-app
+# bleibt er bestehen – ebenso wie die Belege der App- und CLI-Komponente (siehe unten).
 if [[ "${KEEP_APP}" != "1" ]]; then
     add_target "${APP_PATH}"
-fi
-if [[ -L "${CLI_LINK}" ]]; then
-    case "$(readlink "${CLI_LINK}")" in
-        */Contents/Helpers/lwctl) add_target "${CLI_LINK}" ;;
-    esac
+    if [[ -L "${CLI_LINK}" ]]; then
+        case "$(readlink "${CLI_LINK}")" in
+            */Contents/Helpers/lwctl) add_target "${CLI_LINK}" ;;
+        esac
+    fi
 fi
 
 # Warteschlangen, deren PPD von LabelWerk stammt (Attribut *lwModel oder Filterpfad).

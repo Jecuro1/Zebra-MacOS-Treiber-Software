@@ -1,7 +1,7 @@
 import Foundation
 import LabelWerkImaging
 
-/// Eine eingebettete 1-Bit-Masterschrift (siehe `FontGen/generate_font.py`).
+/// Eine eingebettete 1-Bit-Masterschrift (siehe `Sources/LabelWerkRender/.fontgen/generate_font.py`).
 ///
 /// Die Glyphen liegen in Masterpixeln vor (Geviert `emSize` ≈ 44 px, Versalhöhe ≈ 32 px) und
 /// werden beim Rastern auf die Zielgröße skaliert. Die Daten werden beim ersten Zugriff einmalig

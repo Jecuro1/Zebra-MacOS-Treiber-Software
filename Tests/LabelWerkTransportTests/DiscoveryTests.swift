@@ -161,11 +161,14 @@ struct PrinterDiscoveryTests {
         return options
     }
 
-    @Test("Netzwerksuche über vorgegebene Hosts endet vor dem Timeout")
+    @Test("Netzwerksuche über vorgegebene Hosts endet vor dem Timeout (~HI ohne SNMP nur nach Freigabe)")
     func networkOnly() async throws {
         let server = try Self.makeZebraServer()
         defer { server.stop() }
-        let discovery = PrinterDiscovery(options: try Self.networkOptions(port: server.port, hosts: ["127.0.0.1", "127.0.0.1"]))
+        var options = try Self.networkOptions(port: server.port, hosts: ["127.0.0.1", "127.0.0.1"])
+        // Kein SNMP-Dienst: ~HI nur, weil ausdrücklich freigegeben (Hosts sind bekanntermaßen Zebras).
+        options.probeUnidentifiedDevicesWithHostIdentification = true
+        let discovery = PrinterDiscovery(options: options)
 
         let (printers, elapsed) = await measure { () async -> [DiscoveredPrinter] in
             var result: [DiscoveredPrinter] = []
@@ -247,6 +250,145 @@ struct PrinterDiscoveryTests {
         #expect(results[0].details["sysDescr"] == "Zebra Technologies ZTC ZD421-203dpi ZPL")
         #expect(results[0].details["identifiedBy"] == "snmp+hi")
         #expect(receivedHI.value == true)
+    }
+
+    /// Gerät mit offenem Port, das alles Empfangene protokolliert (fremder Drucker ohne SNMP).
+    final class ForeignDevice: @unchecked Sendable {
+        let received = LockedValue(Data())
+        let finishedHandlers = LockedValue(0)
+        private(set) var server: TestTCPServer!
+
+        init() throws {
+            let received = self.received
+            let finished = self.finishedHandlers
+            server = try TestTCPServer { client in
+                // Alles bis zum Verbindungsende bzw. höchstens 2 s lang mitschneiden.
+                let data = client.receive(count: Int.max, timeout: 2)
+                received.withLock { $0.append(data) }
+                finished.withLock { $0 += 1 }
+            }
+        }
+
+        var port: Int { server.port }
+
+        /// Alle Bytes aller angenommenen Verbindungen. Wartet auf mindestens `minimumConnections`
+        /// Verbindungen, lässt etwaigen weiteren (z. B. einer `~HI`-Sonde) Zeit zur Annahme und
+        /// wartet dann, bis alle ausgewertet sind.
+        func allReceived(minimumConnections: Int = 1) async -> Data {
+            _ = await eventually(timeout: .seconds(5)) { server.acceptedCount >= minimumConnections }
+            try? await Task.sleep(for: .milliseconds(250))
+            _ = await eventually(timeout: .seconds(5)) { finishedHandlers.value >= server.acceptedCount }
+            return received.value
+        }
+
+        func stop() { server.stop() }
+    }
+
+    @Test("Standard: Geräte ohne SNMP-Antwort erhalten keinerlei Daten (kein ~HI)")
+    func noUnsolicitedDataToSNMPSilentDevices() async throws {
+        let device = try ForeignDevice()
+        defer { device.stop() }
+        // Standardoptionen; nur Ziel und ein SNMP-Port ohne Dienst werden vorgegeben.
+        var options = PrinterDiscovery.Options()
+        options.networkHosts = ["127.0.0.1"]
+        options.networkPorts = [device.port]
+        options.snmpPort = try TestTCPServer.unusedPort()
+        #expect(options.useHostIdentification)
+        #expect(!options.probeUnidentifiedDevicesWithHostIdentification)
+
+        var results: [DiscoveredPrinter] = []
+        for await printer in PrinterDiscovery(options: options).discover(sources: [.network], timeout: .seconds(8)) {
+            results.append(printer)
+        }
+        let received = await device.allReceived()
+        #expect(received.isEmpty, "Unaufgefordert gesendet: \(String(decoding: received, as: UTF8.self).debugDescription)")
+        #expect(device.server.acceptedCount == 1) // nur die Portprüfung der Netzwerksuche
+
+        // Weiterhin als nicht identifiziertes Gerät aufgeführt (Standard), ohne Modell.
+        try #require(results.count == 1)
+        #expect(results[0].descriptor == .tcp(host: "127.0.0.1", port: device.port))
+        #expect(results[0].name == "127.0.0.1")
+        #expect(results[0].modelHint == nil)
+        #expect(results[0].details["identifiedBy"] == nil)
+    }
+
+    @Test("SNMP-Antwort ohne sysDescr (z. B. noSuchName) zählt nicht als Identifikation")
+    func snmpWithoutDescriptionSendsNothing() async throws {
+        let device = try ForeignDevice()
+        defer { device.stop() }
+        // Agent antwortet stets mit Fehlerstatus noSuchName (2) → keine Werte.
+        let agent = try TestUDPResponder { request in
+            SNMPTests.requestID(of: request).map { SNMPTests.makeResponse(requestID: $0, values: [:], errorStatus: 2) }
+        }
+        defer { agent.stop() }
+        var options = PrinterDiscovery.Options()
+        options.networkHosts = ["127.0.0.1"]
+        options.networkPorts = [device.port]
+        options.snmpPort = agent.port
+
+        var results: [DiscoveredPrinter] = []
+        for await printer in PrinterDiscovery(options: options).discover(sources: [.network], timeout: .seconds(8)) {
+            results.append(printer)
+        }
+        #expect(await device.allReceived().isEmpty)
+        #expect(results.count == 1)
+        #expect(results.first?.modelHint == nil)
+    }
+
+    @Test("SNMPv1-Agent ohne sysName: sysDescr wird einzeln nachgefragt, danach ~HI")
+    func snmpRetriesDescriptionAlone() async throws {
+        let receivedHI = LockedValue(false)
+        let server = try TestTCPServer { client in
+            let request = client.receive(until: Data("~HI".utf8), timeout: 3)
+            if String(decoding: request, as: UTF8.self).contains("~HI") {
+                receivedHI.set(true)
+                client.send(sampleHostIdentification)
+            }
+        }
+        defer { server.stop() }
+        // Unbekannte OID sysName → SNMPv1 beantwortet die ganze Anfrage mit noSuchName (2).
+        let askedOIDs = LockedValue<[[String]]>([])
+        let agent = try TestUDPResponder { request in
+            guard let id = SNMPTests.requestID(of: request) else { return nil }
+            let asksName = SNMPTests.request(request, asksFor: SNMPProbe.sysNameOID)
+            let asksDescription = SNMPTests.request(request, asksFor: SNMPProbe.sysDescrOID)
+            askedOIDs.withLock {
+                $0.append((asksDescription ? [SNMPProbe.sysDescrOID] : []) + (asksName ? [SNMPProbe.sysNameOID] : []))
+            }
+            if asksName { return SNMPTests.makeResponse(requestID: id, values: [:], errorStatus: 2) }
+            return SNMPTests.makeResponse(requestID: id, values: [SNMPProbe.sysDescrOID: "ZTC ZT410-300dpi ZPL"])
+        }
+        defer { agent.stop() }
+        var options = try Self.networkOptions(port: server.port, hosts: ["127.0.0.1"])
+        options.snmpPort = agent.port
+        var results: [DiscoveredPrinter] = []
+        for await printer in PrinterDiscovery(options: options).discover(sources: [.network], timeout: .seconds(8)) {
+            results.append(printer)
+        }
+        try #require(results.count == 1)
+        #expect(results[0].details["sysDescr"] == "ZTC ZT410-300dpi ZPL")
+        #expect(results[0].details["identifiedBy"] == "snmp+hi")
+        #expect(results[0].modelHint == "ZD421-203dpi") // ~HI ist genauer als sysDescr
+        #expect(receivedHI.value)
+        let asked = askedOIDs.value
+        #expect(asked.first == [SNMPProbe.sysDescrOID, SNMPProbe.sysNameOID])
+        #expect(asked.contains([SNMPProbe.sysDescrOID]))
+    }
+
+    @Test("~HI-Freigabe: nur positiv als Zebra erkannte Geräte, außer ausdrücklich erlaubt")
+    func hostIdentificationPolicy() {
+        var options = PrinterDiscovery.Options()
+        #expect(PrinterDiscovery.mayProbeWithHostIdentification(isZebra: true, options: options))
+        #expect(!PrinterDiscovery.mayProbeWithHostIdentification(isZebra: false, options: options))
+        #expect(!PrinterDiscovery.mayProbeWithHostIdentification(isZebra: nil, options: options))
+
+        options.probeUnidentifiedDevicesWithHostIdentification = true
+        #expect(PrinterDiscovery.mayProbeWithHostIdentification(isZebra: nil, options: options))
+        #expect(!PrinterDiscovery.mayProbeWithHostIdentification(isZebra: false, options: options))
+
+        options.useHostIdentification = false
+        #expect(!PrinterDiscovery.mayProbeWithHostIdentification(isZebra: true, options: options))
+        #expect(!PrinterDiscovery.mayProbeWithHostIdentification(isZebra: nil, options: options))
     }
 
     @Test("Nicht identifizierbare Geräte: einstellbar")

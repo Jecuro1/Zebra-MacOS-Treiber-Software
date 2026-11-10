@@ -201,4 +201,156 @@ struct HostQueryTests {
         #expect(try HostQueryParser.parse(wide.responseData) == wide)
         #expect(HostQueryStatus().responseText.contains("ERRORS:         0 00000000 00000000"))
     }
+
+
+    // MARK: Abgeschnittene bzw. widersprüchliche Flagzeilen (Review-Regression)
+
+    /// Fehlerdaten wie im Review: innerhalb der ERRORS-Zeile abgeschnittene Antworten dürfen
+    /// nicht als „keine Fehler“ (und damit „Bereit“) durchgehen.
+    @Test("Innerhalb der ERRORS-Zeile abgeschnitten → invalidField statt „keine Fehler“", arguments: [
+        "\u{2}\r\n  PRINTER STATUS\r\n   ERRORS:         1 00000000 0000000",
+        "\u{2}\r\n  PRINTER STATUS\r\n   ERRORS:         1 00000000 000",
+        "\u{2}\r\n  PRINTER STATUS\r\n   ERRORS:         1 0000",
+        "\u{2}\r\n  PRINTER STATUS\r\n   ERRORS:         1 00000000",
+        "\u{2}\r\n  PRINTER STATUS\r\n   ERRORS:         1 00000000 0",
+    ])
+    func rejectsTruncatedErrorsLine(text: String) {
+        let error = TestSupport.parseError { try HostQueryParser.parse(TestSupport.data(text)) }
+        guard case .invalidField(let name, _) = error else {
+            Issue.record("invalidField erwartet, erhalten: \(String(describing: error))")
+            return
+        }
+        #expect(name == "ERRORS")
+    }
+
+    @Test("Innerhalb der WARNINGS-Zeile abgeschnitten → invalidField", arguments: [
+        "ERRORS: 1 00000000 00000005\r\nWARNINGS: 1 00000000 0000000",
+        "ERRORS: 1 00000000 00000005\r\nWARNINGS: 1 00000000",
+        "ERRORS: 1 00000000 00000005\r\nWARNINGS: 0 0000",
+    ])
+    func rejectsTruncatedWarningsLine(text: String) {
+        let error = TestSupport.parseError { try HostQueryParser.parse(TestSupport.data(text)) }
+        guard case .invalidField(let name, _) = error else {
+            Issue.record("invalidField erwartet, erhalten: \(String(describing: error))")
+            return
+        }
+        #expect(name == "WARNINGS")
+    }
+
+    @Test("Gruppen müssen genau acht Hexstellen haben", arguments: [
+        "ERRORS: 0 00000000 0000",
+        "ERRORS: 00000000 0005",
+        "ERRORS: 0005",
+        "ERRORS: 1 5",
+        "ERRORS: 1 0 5",
+        "ERRORS: 1 0000000 000000005",
+    ])
+    func requiresEightDigitGroups(text: String) {
+        let error = TestSupport.parseError { try HostQueryParser.parse(TestSupport.data(text)) }
+        guard case .invalidField(let name, _) = error else {
+            Issue.record("invalidField erwartet, erhalten: \(String(describing: error))")
+            return
+        }
+        #expect(name == "ERRORS")
+    }
+
+    @Test("Kennziffer 1 ohne gesetztes Bit ist widersprüchlich")
+    func indicatorWithoutBits() {
+        let errors = TestSupport.parseError {
+            try HostQueryParser.parse(TestSupport.data("ERRORS: 1 00000000 00000000\r\nWARNINGS: 0 00000000 00000000\r\n"))
+        }
+        #expect(errors == .invalidField(name: "ERRORS", value: "1 00000000 00000000"))
+        let warnings = TestSupport.parseError {
+            try HostQueryParser.parse(TestSupport.data("ERRORS: 0 00000000 00000000\r\nWARNINGS: 1 00000000 00000000\r\n"))
+        }
+        #expect(warnings == .invalidField(name: "WARNINGS", value: "1 00000000 00000000"))
+    }
+
+    @Test("Kennziffer muss 0 oder 1 sein")
+    func indicatorMustBeBinary() {
+        for text in ["ERRORS: 5 00000000 00000001", "ERRORS: A 00000000 00000001", "ERRORS: 2"] {
+            let error = TestSupport.parseError { try HostQueryParser.parse(TestSupport.data(text)) }
+            #expect(error == .invalidField(name: "ERRORS", value: String(text.dropFirst("ERRORS: ".count))), "\(text)")
+        }
+        // Eine Zeile mit anderer Einzelzeichen-Kennung ist keine unbeschriftete Flagzeile.
+        #expect(!HostQueryParser.isCanonicalFlagLine(["5", "00000000", "00000001"]))
+        #expect(HostQueryParser.isCanonicalFlagLine(["1", "00000000", "00000001"]))
+        #expect(HostQueryParser.isCanonicalFlagLine(["00000000", "00000001"]))
+        #expect(!HostQueryParser.isCanonicalFlagLine(["1", "00000000", "0000001"]))
+    }
+
+    @Test("Gesetzte Bits gelten auch bei Kennziffer 0")
+    func bitsWinOverIndicatorZero() throws {
+        let status = try HostQueryParser.parse(TestSupport.data("ERRORS: 0 00000000 00000004\r\nWARNINGS: 0 00000000 00000000\r\n"))
+        #expect(status.errors == .headOpen)
+    }
+
+    @Test("Unbeschriftete Flagzeilen: Widerspruch wird gemeldet, ungenutzte Zeilen stören nicht")
+    func unlabeledContradiction() throws {
+        let contradictory = TestSupport.parseError {
+            try HostQueryParser.parse(TestSupport.data(": 1 00000000 00000000\r\n: 1 00000000 00000008\r\n"))
+        }
+        // Würde die erste Zeile übersprungen, gälte die Warnzeile (Medium fast leer) als Fehlerzeile.
+        #expect(contradictory == .invalidField(name: "ERRORS", value: "1 00000000 00000000"))
+        // Beschriftete Zeilen vorhanden → zusätzliche unbeschriftete Zeilen werden nicht ausgewertet.
+        let text = "X: 1 00000000 00000000\r\n" + Fixtures.hostQueryGuide
+        let status = try HostQueryParser.parse(TestSupport.data(text))
+        #expect(status.errors == [.mediaOut, .headOpen])
+        #expect(status.warnings == .cleanPrinthead)
+    }
+
+    /// Jede Kürzung einer Antwort mit Fehlern liefert entweder einen Parserfehler oder exakt die
+    /// richtigen Fehlerbits – nie eine stille Teilmenge oder „keine Fehler“.
+    @Test("Jede Kürzung: Fehler exakt oder Parserfehler, nie „Bereit“", arguments: [
+        HostQueryStatus(errors: [.mediaOut, .headOpen], warnings: .cleanPrinthead),
+        HostQueryStatus(errors: .headOpen, warnings: []),
+        HostQueryStatus(errors: [.ribbonOut, .paperFeedError], warnings: [.paperNearEnd, .needCalibration]),
+        HostQueryStatus(errors: PrinterErrorFlags(rawValue: 0x8000_0001), warnings: .replacePrinthead),
+    ])
+    func everyTruncationIsSafe(status: HostQueryStatus) {
+        let bytes = Array(status.responseData)
+        for length in 0...bytes.count {
+            let data = Data(bytes[0..<length])
+            let parsed: HostQueryStatus
+            do {
+                parsed = try HostQueryParser.parse(data)
+            } catch is StatusParseError {
+                continue
+            } catch {
+                Issue.record("Fremder Fehler: \(error)")
+                continue
+            }
+            let text = String(decoding: data, as: UTF8.self)
+            #expect(parsed.errors == status.errors, "Kürzung auf \(length) Bytes: \(text.debugDescription)")
+            #expect(parsed.warnings == status.warnings || parsed.warnings.isEmpty,
+                    "Kürzung auf \(length) Bytes: \(text.debugDescription)")
+            // Alle Argumente enthalten druckverhindernde Fehler.
+            #expect(!StatusInterpreter.snapshot(hostStatus: nil, query: parsed).isReady)
+        }
+    }
+
+    /// Mit belegter Gruppe 2 bleibt eine Mehrdeutigkeit: „1 0000000A“ kann eine vollständige
+    /// einstellige Gruppe 1 oder die vor Gruppe 1 abgeschnittene Gruppe 2 sein. Auch dann wird
+    /// aber nie „keine Fehler“ gemeldet.
+    @Test("Kürzung bei belegter Gruppe 2: nie „keine Fehler“")
+    func truncationWithGroup2() {
+        let status = HostQueryStatus(errors: PrinterErrorFlags(group2: 0xA, group1: 0x4), warnings: [])
+        let bytes = Array(status.responseData)
+        for length in 0...bytes.count {
+            guard let parsed = try? HostQueryParser.parse(Data(bytes[0..<length])) else { continue }
+            #expect(!parsed.errors.isEmpty, "Kürzung auf \(length) Bytes")
+            #expect(!StatusInterpreter.snapshot(hostStatus: nil, query: parsed).isReady)
+        }
+    }
+
+    @Test("Bekannte und unbekannte Bits")
+    func knownAndUnknownFlags() {
+        #expect(PrinterErrorFlags.knownMask.rawValue == 0x3FFFF)
+        #expect(PrinterWarningFlags.knownMask.rawValue == 0xFFF)
+        let errors = PrinterErrorFlags(rawValue: 0x1_0004_0005)
+        #expect(errors.unknownFlags.rawValue == 0x1_0004_0000)
+        #expect(errors.displayNames == ["Medium leer", "Druckkopf offen", "Unbekannter Fehler 0x100040000"])
+        #expect(PrinterErrorFlags([.mediaOut, .paused]).unknownFlags.isEmpty)
+        #expect(PrinterWarningFlags(rawValue: 0x1002).unknownFlags.rawValue == 0x1000)
+    }
 }

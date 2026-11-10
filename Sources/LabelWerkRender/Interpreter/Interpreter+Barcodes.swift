@@ -141,8 +141,8 @@ extension InterpreterEngine {
         let magnification = p.int(2, in: 1...10) ?? Self.defaultQRMagnification(dotsPerMM: dotsPerMM)
         let defaultLevel = p.character(3).flatMap { QRErrorCorrection(rawValue: String($0)) } ?? .quartile
         let mask = p.int(4, in: 0...7)
-        let parsed = QRFieldData.parse(data, defaultLevel: defaultLevel)
-        if let message = parsed.warning { warn("^BQ", message) }
+        let parsed = QRFieldData.parse(data, defaultLevel: defaultLevel, characterSet: printer.characterSet)
+        for message in parsed.warnings { warn("^BQ", message) }
         let matrix: BitMatrix
         do {
             if let mask {
@@ -170,18 +170,28 @@ extension InterpreterEngine {
     // MARK: Data Matrix
 
     /// `^BXo,h,s,c,r,f,g,a` – nur ECC 200.
+    ///
+    /// Die Qualitätsstufe s ist laut Firmware standardmäßig 0 (ECC 000, von vielen Scannern
+    /// nicht lesbar). Die Vorschau zeigt stets ECC 200 und weist auf jede Abweichung hin –
+    /// auch auf ein fehlendes s, weil der Drucker dann ein anderes Symbol druckt.
     private mutating func makeDataMatrix(_ p: ZPLParameters, data: String, placement: FieldPlacement,
                                          reverse: Bool) -> [LabelElement] {
         let orientation = p.orientation(0) ?? printer.defaultOrientation
-        if let quality = p.int(2), quality != 200 {
+        switch p.int(2) {
+        case 200?:
+            break
+        case let quality?:
             warn("^BX", "Qualitätsstufe ECC \(quality) wird als ECC 200 dargestellt.")
+        case nil:
+            warn("^BX", "Qualitätsstufe fehlt (Standard ECC 000) – als ECC 200 dargestellt. "
+                 + "Für ECC 200 den Parameter s = 200 angeben.")
         }
         let columns = p.int(3, in: 0...144) ?? 0
         let rows = p.int(4, in: 0...144) ?? 0
         let shape: DataMatrixShape = p.int(7) == 2 ? .rectangle : .square
         let escape = p.raw(6).flatMap { $0.first } ?? "~"
         let decoded = DataMatrixEscapes.decode(data, escape: escape)
-        if let message = decoded.warning { warn("^BX", message) }
+        for message in decoded.warnings { warn("^BX", message) }
         var matrix: BitMatrix
         do {
             matrix = try BarcodeEncoder.dataMatrix(bytes: decoded.bytes,
@@ -246,62 +256,194 @@ extension InterpreterEngine {
 
 // MARK: - QR-Felddaten
 
-/// Zerlegt `^BQ`-Felddaten: `<Fehlerkorrektur H|Q|M|L><Eingabemodus A|M>,<Daten>`.
+/// Zerlegt `^BQ`-Felddaten (ZPL II Programming Guide, `^BQ`, „Considerations for ^FD“).
 ///
-/// Im manuellen Modus (`M`) folgt dem Komma ein Zeichenmodus: `N` (numerisch), `A`
-/// (alphanumerisch), `Bnnnn` (Bytes mit vierstelliger Länge) oder `K` (Kanji). Der Encoder wählt
-/// die Segmentierung selbst – der Inhalt bleibt identisch. Strukturierte Anhänge (`D…`) werden
-/// übersprungen.
+/// * Normalmodus: `<Fehlerkorrektur H|Q|M|L><Eingabemodus A|M>,<Daten>`.
+/// * Strukturierter Anhang („Mixed Mode“): vor dem Präfix steht
+///   `D<Symbolnummer 01–16><Symbolanzahl 02–16><Paritätsbyte hex>,`, z. B. `D03048F,LA,…`.
+/// * Eingabemodus `A` (automatisch): alles nach dem Komma sind die Daten (Kommas inklusive).
+/// * Eingabemodus `M` (manuell): ein oder mehrere durch Kommas getrennte Segmente
+///   `<Zeichenmodus><Daten>` mit `N` (numerisch), `A` (alphanumerisch), `K` (Kanji) oder
+///   `Bnnnn` (Bytes, `nnnn` = genaue Bytezahl gemäß `^CI`; ein Byte-Segment darf daher auch
+///   Kommas enthalten). Numerische und alphanumerische Daten können kein Komma enthalten, die
+///   Zerlegung ist also eindeutig. Beispiel: `LM,N0123456789,A12AABB,B0006qrcode` →
+///   „012345678912AABBqrcode“.
+///
+/// Die Segmentinhalte werden aneinandergehängt; der Encoder wählt die Segmentierung selbst
+/// (gleicher Inhalt, die Symbolversion kann von der Firmware abweichen). Der Verkettungskopf
+/// eines strukturierten Anhangs wird nicht kodiert – dafür entsteht ein Hinweis.
 enum QRFieldData {
-    struct Parsed {
-        var level: QRErrorCorrection
-        var payload: String
-        var warning: String?
+
+    /// Kopf eines strukturierten Anhangs (`D…`).
+    struct StructuredAppend: Hashable, Sendable {
+        /// Nummer dieses Symbols in der Folge (1…16).
+        var position: Int
+        /// Anzahl der Symbole der Folge (2…16).
+        var total: Int
+        /// Paritätsbyte über die Daten der gesamten Folge.
+        var parity: UInt8
     }
 
-    static func parse(_ data: String, defaultLevel: QRErrorCorrection) -> Parsed {
+    struct Parsed {
+        var level: QRErrorCorrection
+        /// Zu kodierender Inhalt (ohne Präfixe, Moduskennungen und Trennkommas).
+        var payload: String
+        var structuredAppend: StructuredAppend?
+        /// Hinweise in Reihenfolge des Auftretens (ohne Duplikate).
+        var warnings: [String]
+    }
+
+    /// Zeichen des alphanumerischen QR-Modus.
+    private static let alphanumericCharacters = Set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:")
+
+    static func parse(_ data: String, defaultLevel: QRErrorCorrection,
+                      characterSet: ZPLCharacterSet = .utf8) -> Parsed {
+        var warnings: [String] = []
+        func note(_ message: String) {
+            if !warnings.contains(message) { warnings.append(message) }
+        }
+
         var text = Substring(data)
-        // Strukturierter Anhang: "D" + Kennung + "," vor dem eigentlichen Präfix.
-        if text.first == "D", let comma = text.firstIndex(of: ","), text[text.index(after: comma)...].contains(",") {
+        var structuredAppend: StructuredAppend?
+        // Strukturierter Anhang: "D" + Kopf + "," vor einem gültigen Präfix.
+        if text.first == "D", let comma = text.firstIndex(of: ","),
+           prefix(of: text[text.index(after: comma)...]) != nil {
+            let header = text[text.index(after: text.startIndex)..<comma]
             text = text[text.index(after: comma)...]
-        }
-        let characters = Array(text.prefix(3))
-        guard characters.count == 3, characters[2] == ",",
-              let level = QRErrorCorrection(rawValue: String(characters[0]).uppercased()),
-              ["A", "M"].contains(String(characters[1]).uppercased()) else {
-            return Parsed(level: defaultLevel, payload: data,
-                          warning: "QR-Daten ohne gültiges Präfix (z. B. „QA,“) – gesamte Daten werden kodiert.")
-        }
-        var payload = String(text.dropFirst(3))
-        if String(characters[1]).uppercased() == "M", let mode = payload.first {
-            switch mode.uppercased() {
-            case "N", "A", "K":
-                payload.removeFirst()
-            case "B":
-                payload.removeFirst()
-                let digits = payload.prefix(4)
-                if digits.count == 4, let length = Int(digits) {
-                    payload.removeFirst(4)
-                    payload = String(payload.prefix(length))
-                }
-            default:
-                break
+            if let parsedHeader = parseStructuredAppend(header) {
+                structuredAppend = parsedHeader
+                note("Strukturierter Anhang (Symbol \(parsedHeader.position) von \(parsedHeader.total), Parität "
+                     + hex(parsedHeader.parity) + ") wird nicht kodiert – die Vorschau zeigt ein einzelnes "
+                     + "QR-Symbol ohne Verkettungskopf.")
+            } else {
+                note("Ungültiger Kopf „D\(header)“ für einen strukturierten Anhang (erwartet D + Symbolnummer "
+                     + "01–16 + Symbolanzahl 02–16 + Paritätsbyte hexadezimal) – ignoriert.")
             }
         }
-        return Parsed(level: level, payload: payload, warning: nil)
+        guard let mode = prefix(of: text) else {
+            return Parsed(level: defaultLevel, payload: data, structuredAppend: nil,
+                          warnings: ["QR-Daten ohne gültiges Präfix (z. B. „QA,“) – gesamte Daten werden kodiert."])
+        }
+        let body = text.dropFirst(3)
+        let payload = mode.manual ? manualPayload(Array(body), characterSet: characterSet, note: note) : String(body)
+        return Parsed(level: mode.level, payload: payload, structuredAppend: structuredAppend, warnings: warnings)
+    }
+
+    /// Präfix `<H|Q|M|L><A|M>,` → Fehlerkorrektur und „manuell?“; sonst `nil`.
+    private static func prefix(of text: Substring) -> (level: QRErrorCorrection, manual: Bool)? {
+        let characters = Array(text.prefix(3))
+        guard characters.count == 3, characters[2] == ",",
+              let level = QRErrorCorrection(rawValue: String(characters[0].asciiUppercased)) else { return nil }
+        switch characters[1].asciiUppercased {
+        case "A": return (level, false)
+        case "M": return (level, true)
+        default: return nil
+        }
+    }
+
+    /// Kopf `nnmmpp` (Symbolnummer, Symbolanzahl, Parität hex) eines strukturierten Anhangs.
+    private static func parseStructuredAppend(_ header: Substring) -> StructuredAppend? {
+        let characters = Array(header)
+        guard characters.count == 6,
+              let position = ZPLParameters.unsignedDecimal(characters[0..<2]),
+              let total = ZPLParameters.unsignedDecimal(characters[2..<4]),
+              characters[4...].allSatisfy({ $0.isASCII && $0.isHexDigit }),
+              let parity = UInt8(String(characters[4...]), radix: 16),
+              (2...16).contains(total), (1...total).contains(position) else { return nil }
+        return StructuredAppend(position: position, total: total, parity: parity)
+    }
+
+    /// Setzt die Segmente des manuellen Eingabemodus zusammen.
+    private static func manualPayload(_ characters: [Character], characterSet: ZPLCharacterSet,
+                                      note: (String) -> Void) -> String {
+        var payload = ""
+        var index = 0
+        while index < characters.count {
+            let mode = characters[index].asciiUppercased
+            switch mode {
+            case "N", "A", "K":
+                index += 1
+                let end = characters[index...].firstIndex(of: ",") ?? characters.count
+                let segment = characters[index..<end]
+                if mode == "N", !segment.allSatisfy({ $0.isASCII && $0.isNumber }) {
+                    note("Numerisches Segment (N) enthält andere Zeichen als Ziffern – die Daten werden trotzdem kodiert.")
+                } else if mode == "A", !segment.allSatisfy({ alphanumericCharacters.contains($0) }) {
+                    note("Alphanumerisches Segment (A) enthält Zeichen außerhalb von 0–9, A–Z, Leerzeichen und "
+                         + "$%*+-./: – die Daten werden trotzdem kodiert.")
+                }
+                payload.append(contentsOf: segment)
+                index = end
+            case "B":
+                index += 1
+                let countDigits = characters[index..<min(characters.count, index + 4)]
+                guard countDigits.count == 4, let expected = ZPLParameters.unsignedDecimal(countDigits) else {
+                    note("Byte-Segment ohne vierstellige Bytezahl (B0000…B9999) – die restlichen Daten werden "
+                         + "als Bytes kodiert.")
+                    payload.append(contentsOf: characters[index...])
+                    return payload
+                }
+                index += 4
+                var bytes = 0
+                while index < characters.count && bytes < expected {
+                    bytes += byteCount(of: characters[index], in: characterSet)
+                    payload.append(characters[index])
+                    index += 1
+                }
+                if bytes < expected {
+                    note("Byte-Segment kündigt \(expected) Bytes an, enthält aber nur \(bytes).")
+                } else if bytes > expected {
+                    note("Die Bytezahl \(expected) endet innerhalb eines Mehrbytezeichens – das Zeichen wird "
+                         + "vollständig kodiert.")
+                }
+            default:
+                note("Segment ohne gültigen Zeichenmodus (N, A, K oder Bnnnn) – die restlichen Daten werden "
+                     + "unverändert kodiert.")
+                payload.append(contentsOf: characters[index...])
+                return payload
+            }
+            // Nach einem Segment folgt ein Komma (nächstes Segment) oder das Datenende. Nur nach
+            // einem Byte-Segment kann etwas anderes folgen: Dessen Länge steht im Symbol, die
+            // überzähligen Zeichen gehören daher zu keinem Segment.
+            guard index < characters.count else { break }
+            guard characters[index] == "," else {
+                note("Nach dem Byte-Segment fehlt das trennende Komma – die restlichen Daten („"
+                     + String(characters[index...].prefix(20)) + "“) werden nicht kodiert.")
+                return payload
+            }
+            index += 1
+        }
+        return payload
+    }
+
+    /// Anzahl der Bytes, die ein Zeichen im Datenstrom belegt (Zeichensatz gemäß `^CI`).
+    static func byteCount(of character: Character, in characterSet: ZPLCharacterSet) -> Int {
+        switch characterSet {
+        case .utf8: return character.utf8.count
+        case .utf16BigEndian, .utf16LittleEndian: return character.utf16.count * 2
+        default: return character.unicodeScalars.count
+        }
+    }
+
+    private static func hex(_ value: UInt8) -> String {
+        let digits = Array("0123456789ABCDEF")
+        return String([digits[Int(value >> 4)], digits[Int(value & 0x0F)]])
     }
 }
 
 // MARK: - Data-Matrix-Escapesequenzen
 
 /// Escapesequenzen von `^BX` (Parameter g, Standard `~`): `~X` = Steuerzeichen (X − 64),
-/// `~dNNN` = Byte NNN dezimal, `~~` = Escapezeichen selbst. Funktionszeichen (`~1`…`~7`) werden
-/// nicht nachgebildet.
+/// `~dNNN` = Byte NNN dezimal (genau drei ASCII-Ziffern, 000–255), `~~` = Escapezeichen selbst.
+/// Funktionszeichen (`~1`…`~7`) werden nicht nachgebildet. Ungültige Sequenzen bleiben als
+/// Zeichen erhalten.
 enum DataMatrixEscapes {
-    static func decode(_ data: String, escape: Character) -> (bytes: [UInt8], warning: String?) {
+    static func decode(_ data: String, escape: Character) -> (bytes: [UInt8], warnings: [String]) {
         let characters = Array(data)
         var bytes: [UInt8] = []
-        var warning: String?
+        var warnings: [String] = []
+        func note(_ message: String) {
+            if !warnings.contains(message) { warnings.append(message) }
+        }
         var index = 0
         func append(_ character: Character) { bytes.append(contentsOf: Array(String(character).utf8)) }
         while index < characters.count {
@@ -316,21 +458,27 @@ enum DataMatrixEscapes {
                 append(escape)
                 index += 2
             } else if next == "d" || next == "D", index + 4 < characters.count,
-                      let value = Int(String(characters[(index + 2)...(index + 4)])), value <= 255 {
+                      let value = ZPLParameters.unsignedDecimal(characters[(index + 2)...(index + 4)]), value <= 255 {
                 bytes.append(UInt8(value))
                 index += 5
+            } else if next == "d" {
+                let sequence = String(characters[index..<min(characters.count, index + 5)])
+                note("Ungültige Escapesequenz „\(sequence)“ (erwartet \(escape)dNNN mit NNN = 000–255) – "
+                     + "die Zeichen werden unverändert kodiert.")
+                append(character)
+                index += 1
             } else if let ascii = next.asciiValue, (0x40...0x5F).contains(ascii) {
                 bytes.append(ascii - 0x40)
                 index += 2
             } else if let ascii = next.asciiValue, (0x31...0x37).contains(ascii) {
-                warning = "Data-Matrix-Funktionszeichen (\(escape)\(next)) werden nicht nachgebildet."
+                note("Data-Matrix-Funktionszeichen (\(escape)\(next)) werden nicht nachgebildet.")
                 index += 2
             } else {
                 append(character)
                 index += 1
             }
         }
-        return (bytes, warning)
+        return (bytes, warnings)
     }
 }
 

@@ -31,10 +31,11 @@ struct ZPLParameters {
         return value
     }
 
-    /// Erstes Zeichen in Großbuchstaben.
+    /// Erstes Zeichen; ASCII-Kleinbuchstaben werden zu Großbuchstaben, alle anderen Zeichen
+    /// bleiben unverändert (siehe `Character.asciiUppercased`).
     func character(_ index: Int) -> Character? {
         guard let value = string(index), let first = value.first else { return nil }
-        return Character(first.uppercased())
+        return first.asciiUppercased
     }
 
     func int(_ index: Int) -> Int? {
@@ -81,6 +82,22 @@ struct ZPLParameters {
         return values[index...].joined(separator: String(separator))
     }
 
+    /// Vorzeichenlose Dezimalzahl, die **ausschließlich** aus ASCII-Ziffern besteht
+    /// (z. B. die feste Bytezahl `nnnn` von `^BQ`-Byte-Segmenten oder `~dNNN` von `^BX`).
+    ///
+    /// Anders als `Int(_:)` werden Vorzeichen (`"-001"`), Leerzeichen und Nicht-ASCII-Ziffern
+    /// abgelehnt; bei mehr als 18 Ziffern gibt es `nil` (kein Überlauf).
+    static func unsignedDecimal<S: Sequence>(_ characters: S) -> Int? where S.Element == Character {
+        var value = 0
+        var digits = 0
+        for character in characters {
+            guard let ascii = character.asciiValue, ascii >= 0x30, ascii <= 0x39, digits < 18 else { return nil }
+            value = value * 10 + Int(ascii - 0x30)
+            digits += 1
+        }
+        return digits > 0 ? value : nil
+    }
+
     /// Liest eine ganze Zahl wie die Firmware (Vorzeichen + Ziffern, Rest ignoriert).
     static func parseInt(_ text: String) -> Int? {
         var negative = false
@@ -102,6 +119,27 @@ struct ZPLParameters {
         }
         guard digits > 0 else { return nil }
         return negative ? -value : value
+    }
+}
+
+extension Character {
+    /// Das Zeichen als ASCII-Großbuchstabe (`a`…`z` → `A`…`Z`); alle anderen Zeichen –
+    /// insbesondere Nicht-ASCII-Zeichen – bleiben unverändert.
+    ///
+    /// ZPL-Parameter, Schrift- und Modusbezeichner sind ASCII. `Character(c.uppercased())`
+    /// wäre hier falsch und gefährlich: Die Großschreibung mancher Zeichen besteht aus mehreren
+    /// Zeichen (ß → „SS“, ﬁ → „FI“, ŉ → „ʼN“), und der `Character`-Initialisierer bricht dann
+    /// das Programm ab.
+    var asciiUppercased: Character {
+        guard let ascii = asciiValue, ascii >= 0x61, ascii <= 0x7A else { return self }
+        return Character(Unicode.Scalar(ascii - 0x20))
+    }
+
+    /// Das Zeichen als ASCII-Kleinbuchstabe (`A`…`Z` → `a`…`z`); alle anderen Zeichen bleiben
+    /// unverändert (Gegenstück zu `asciiUppercased`).
+    var asciiLowercased: Character {
+        guard let ascii = asciiValue, ascii >= 0x41, ascii <= 0x5A else { return self }
+        return Character(Unicode.Scalar(ascii + 0x20))
     }
 }
 

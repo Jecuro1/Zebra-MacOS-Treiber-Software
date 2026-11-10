@@ -27,15 +27,18 @@ make -C Driver/ppd test                                # Tests
 |---|---|
 | `--output DIR`, `-o` | Ausgabeordner (Standard `Driver/ppd/out`, per `.gitignore` ausgeschlossen) |
 | `--gzip` | Dateien als `.ppd.gz` schreiben (reproduzierbar: ohne Zeitstempel und Dateinamen) |
-| `--check` | jede erzeugte Datei mit `cupstestppd -I filters` prüfen; jede Beanstandung → Exit-Status 1. Fehlt `cupstestppd`, wird die Prüfung mit Hinweis übersprungen |
+| `--check` | jede erzeugte Datei mit `cupstestppd -I filters` prüfen; jede Beanstandung → Exit-Status 1. Fehlt `cupstestppd`, wird die Prüfung mit Hinweis übersprungen. `cupstestppd` läuft unabhängig von der Systemsprache englisch |
 | `--model ID` | nur dieses Modell (Katalog-ID, Groß-/Kleinschreibung egal, oder `generic-zpl`/`generic-epl`/`generic-cpcl`) |
-| `--list` | Tabelle aller Ziele (Datei, Modell, dpi, Sprachen, NickName) |
+| `--list` | Tabelle aller Ziele (Datei, Modell, dpi, Sprachen, NickName); Katalogfehler wie beim Schreiben (Exit-Status 2) |
 | `--catalog PATH` | anderer Katalog (Standard `Catalog/models.json`) |
 | `--file-version V` | Wert für `*FileVersion` (Standard `1.0.0`; der Paketbau übergibt die Treiberversion) |
 | `--quiet`, `-q` | nur Fehler ausgeben |
 
 Exit-Status: `0` erfolgreich, `1` `cupstestppd` hat Fehler gefunden, `2` Katalog-, Aufruf- oder
-Schreibfehler.
+Schreibfehler. Katalogdaten, aus denen sich keine gültige PPD bilden lässt (z. B. ein Modellname
+ohne ASCII-Umschrift wie `斑马`, ein IEEE-1284-Name mit `"`, ein Format ohne Namen), werden schon
+beim Aufbau der Ziele erkannt – in jedem Modus, auch mit `--list`, mit derselben Meldung
+`Fehler: LabelWerk-<id>-<dpi>dpi: …`, bevor etwas geschrieben wird.
 
 Ein vollständiger Lauf entfernt veraltete `LabelWerk-*.ppd[.gz]` im Ausgabeordner (andere
 Dateien bleiben unberührt). Mit `--model` bleiben die übrigen Dateien erhalten und `index.json`
@@ -184,8 +187,11 @@ für ISO-Latin-1-Leser gültig (die App liest PPDs mit `.isoLatin1`).
 
 `--check` ruft `cupstestppd -I filters` für jede Datei auf. `-I filters` ist nötig, weil die
 Filterprogramme unter `/Library/Printers/LabelWerk` auf dem Build-Rechner fehlen; alle anderen
-Prüfungen (einschließlich der Übersetzungen) sind streng. Erwartete Warnungen – und die einzigen,
-die die Tests zulassen – sind Hinweise wie
+Prüfungen (einschließlich der Übersetzungen) sind streng. `cupstestppd` läuft dabei stets mit
+`LANG=en_US.UTF-8` und `SOFTWARE=CUPS/2.3` (ohne `LC_ALL`/`LC_MESSAGES`/`LC_CTYPE`/`LANGUAGE`),
+denn das Ergebnis wird an den englischen Meldungen erkannt – mit deutscher Systemsprache meldet
+`cupstestppd` sonst „BESTANDEN“, und die libcups von macOS beachtet `LANG` nur bei gesetztem
+`SOFTWARE`. Erwartete Warnungen – und die einzigen, die die Tests zulassen – sind Hinweise wie
 
 ```
 WARN    Size "w288h432" should be the Adobe standard name "4x6.Fullbleed".
@@ -210,12 +216,21 @@ python3 -m unittest discover -s Driver/ppd/tests -v     # oder: make -C Driver/p
   gelesen) und gegen `CUPSOptionName` in `PrintSettings.swift`;
 * vollständige deutsche Übersetzungen, ASCII-Grundtexte, Zeilenlängen, gzip-Modus
   (reproduzierbar), `index.json`, `--model`/`--list`/`--check`/`--file-version`, Katalogfehler;
-* mit `cupstestppd`: alle PPDs bestehen; strenge Prüfung ohne `-I filters` gegen ein
-  nachgebildetes Installationsverzeichnis (`-R`); `-vv` listet alle Optionen;
+* mit `cupstestppd`: alle PPDs bestehen (auch bei deutscher Systemsprache); strenge Prüfung
+  ohne `-I filters` gegen ein nachgebildetes Installationsverzeichnis (`-R`); `-vv` listet alle
+  Optionen;
 * mit C-Compiler und libcups (`tests/ppdcheck.c`): `ppdOpenFile` sieht dieselben Optionen,
-  Auswahlen und Standardwerte ohne Konflikte, `ppdLocalize` liefert mit `LANG=de_DE.UTF-8` die
-  deutschen Texte, `cupsRasterInterpretPPD` liefert je Format Auflösung, 8-Bit-Graustufen
-  (`cupsColorSpace 18`) und exakt die Punktmaße aus Swift; eigene Größen funktionieren.
+  Auswahlen und Standardwerte ohne Konflikte, `ppdLocalize` liefert mit `LANG=de_DE.UTF-8` und
+  `SOFTWARE` (macOS) die deutschen Texte – auch gegen eine englische Benutzerumgebung,
+  `cupsRasterInterpretPPD` liefert je Format Auflösung, 8-Bit-Graustufen (`cupsColorSpace 18`)
+  und exakt die Punktmaße aus Swift; eigene Größen funktionieren.
+
+Die Tests brauchen keine root-Rechte. `cupstestppd` verlangt ohne `-I filters`, dass Filter,
+Symbol und App root gehören (`st_uid == 0`); im nachgebildeten Wurzelverzeichnis gelingt das nur
+als root. Als root muss die strenge Prüfung daher vollständig bestehen, sonst sind allein
+„Bad permissions“-Meldungen zu Dateien zulässig, deren Rechte stimmen (0755 bzw. 0644) und die nur
+nicht root gehören – fehlende Dateien und falsche Rechte bleiben Fehler. Als root prüft ein
+weiterer Test genau diesen Fall, indem er die Dateien einem gewöhnlichen Benutzer überträgt.
 
 Tests, deren Werkzeuge fehlen (`cupstestppd`, Compiler, `libcups2-dev`), werden übersprungen.
 

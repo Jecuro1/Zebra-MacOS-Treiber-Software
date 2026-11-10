@@ -13,6 +13,9 @@
 #   Scripts/ci_linux.sh build test-swift      nur diese Schritte
 #   Scripts/ci_linux.sh --install-deps setup  Pakete (apt) und Swift-Toolchain installieren
 #
+# Jeder Schritt läuft als eigener Prozess dieses Skripts (siehe lw_ci_run_step in common.sh):
+# Jeder fehlschlagende Befehl beendet den Schritt, nicht erst ein fehlschlagender letzter Befehl.
+#
 # Umgebung: LW_JOBS (parallele Jobs), SWIFT_VERSION (Toolchain für --install-deps, Standard
 # 6.4.2), LW_SWIFT_HOME (Installationsort der Toolchain), LW_STRICT_STRINGS=1 (fehlende
 # Übersetzungen sind ein Fehler statt einer Warnung).
@@ -56,6 +59,13 @@ STEPS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        "${LW_CI_PROCESS_ARG}")
+            # Intern (lw_ci_run_step): nur diese Funktion in diesem Prozess ausführen.
+            shift
+            [[ $# -gt 0 ]] || lw_die "${LW_CI_PROCESS_ARG} erwartet einen Funktionsnamen." 64
+            LW_CI_PROCESS_CALL=("$@")
+            break
+            ;;
         --install-deps) INSTALL_DEPS=1; shift ;;
         --keep-going) KEEP_GOING=1; shift ;;
         --strict-strings) STRICT_STRINGS=1; shift ;;
@@ -74,6 +84,14 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ ${#STEPS[@]} -eq 0 ]]; then
     STEPS=("${ALL_STEPS[@]}")
+fi
+
+# Jeder Schritt läuft als eigener Prozess dieses Skripts (siehe lw_ci_run_step in common.sh) und
+# erhält dabei die Optionen, die sein Verhalten bestimmen.
+LW_CI_SCRIPT="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+LW_CI_PROCESS_OPTIONS=()
+if [[ "${STRICT_STRINGS}" == "1" ]]; then
+    LW_CI_PROCESS_OPTIONS+=(--strict-strings)
 fi
 
 cd "${LW_REPO_ROOT}"
@@ -347,10 +365,16 @@ step_strings() {
 
 # --- Ablauf ------------------------------------------------------------------------------------
 
+# Schrittprozess: nur die eine Funktion ausführen – auf oberster Ebene, damit `set -e` wirkt.
+if [[ ${#LW_CI_PROCESS_CALL[@]} -gt 0 ]]; then
+    lw_ci_exec_process "${LW_CI_PROCESS_CALL[@]}"
+    exit 0
+fi
+
 lw_step "LabelWerk CI (Linux) – Schritte: ${STEPS[*]}"
 mkdir -p "${CI_TMP}"
 if [[ "${INSTALL_DEPS}" == "1" ]]; then
-    # Nicht in einer Schritt-Subshell, damit der erweiterte PATH für alle Schritte gilt.
+    # Nicht in einem Schrittprozess, damit der erweiterte (exportierte) PATH für alle Schritte gilt.
     lw_ci_group "Abhängigkeiten installieren"
     install_packages
     install_swift "${SWIFT_VERSION}"

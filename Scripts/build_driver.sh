@@ -35,7 +35,8 @@ Baut Filter (Universal Binary), PPD-Dateien, Symbol und Versionsdatei des LabelW
 in einen Installationsbaum (Standard: build/driver-root).
 
 Optionen:
-  --output VERZ   Zielverzeichnis des Installationsbaums (wird neu angelegt)
+  --output VERZ   Zielverzeichnis des Installationsbaums (wird geleert und neu angelegt; muss
+                  neu, leer oder ein früherer Treiberbaum dieses Skripts sein)
   --host          Filter für das aktuelle System statt Universal Binary (Testaufbau, z. B. Linux)
   --no-sign       Filter nicht signieren (nur macOS relevant)
   --dry-run       Schritte nur anzeigen, nichts ausführen
@@ -67,17 +68,144 @@ done
 
 lw_load_config
 
-# Absoluter Zielpfad; Schutz vor versehentlichem Löschen von Systemverzeichnissen.
+# --- Zielverzeichnis -----------------------------------------------------------------------
+#
+# Das Ziel wird vor dem Bauen vollständig gelöscht (rm -rf). Damit dabei nie fremde Daten verloren
+# gehen, gilt eine Positivliste: Das Ziel darf noch nicht existieren, leer sein oder ausschließlich
+# einen Treiberbaum enthalten, wie ihn dieses Skript anlegt (siehe TREE_LAYOUT). Alles andere –
+# /Applications, /Users, ~/Library, das Repository selbst, ein Volume … – wird abgelehnt.
+
+# Erlaubte Einträge je Ordner eines Treiberbaums: „relativer Ordner|Muster …“. Unterhalb von
+# Library/Printers/LabelWerk ist alles erlaubt (das ist der Treiber selbst).
+TREE_LAYOUT=(
+    "|Library"
+    "Library|Printers"
+    "Library/Printers|LabelWerk PPDs"
+    "Library/Printers/PPDs|Contents"
+    "Library/Printers/PPDs/Contents|Resources"
+    "Library/Printers/PPDs/Contents/Resources|LabelWerk-*.ppd.gz LabelWerk-*.ppd"
+)
+# Erster Eintrag, der nicht zu einem Treiberbaum passt (für die Fehlermeldung).
+FOREIGN_ENTRY=""
+
+# Erfolgreich, wenn ein Ordner nur Einträge enthält, die auf eines der Muster passen (.DS_Store
+# des Finders ist überall erlaubt). Versteckte Einträge zählen mit.
+# $1: Ordner, $2: durch Leerzeichen getrennte Muster.
+only_expected_entries() {
+    local directory="$1"
+    local patterns="$2"
+    local entry name pattern matched
+    for entry in "${directory}"/* "${directory}"/.[!.]* "${directory}"/..?*; do
+        # Nicht passende Suchmuster bleiben wörtlich stehen.
+        [[ -e "${entry}" || -L "${entry}" ]] || continue
+        name="${entry##*/}"
+        [[ "${name}" == ".DS_Store" ]] && continue
+        matched=0
+        for pattern in ${patterns}; do
+            # Muster bewusst unmaskiert: Glob-Vergleich (LabelWerk-*.ppd.gz).
+            # shellcheck disable=SC2053
+            if [[ "${name}" == ${pattern} ]]; then
+                matched=1
+            fi
+        done
+        if [[ "${matched}" != "1" ]]; then
+            FOREIGN_ENTRY="${entry}"
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Erfolgreich, wenn das (vorhandene) Verzeichnis leer ist oder nur einen Treiberbaum enthält.
+is_driver_tree_or_empty() {
+    local root="$1"
+    local spec relative patterns directory
+    for spec in "${TREE_LAYOUT[@]}"; do
+        relative="${spec%%|*}"
+        patterns="${spec#*|}"
+        directory="${root}${relative:+/${relative}}"
+        if [[ -L "${directory}" ]]; then
+            FOREIGN_ENTRY="${directory}"
+            return 1
+        fi
+        # Fehlende Ordner sind in Ordnung (z. B. nach einem abgebrochenen Lauf).
+        [[ -e "${directory}" ]] || continue
+        if [[ ! -d "${directory}" ]]; then
+            FOREIGN_ENTRY="${directory}"
+            return 1
+        fi
+        only_expected_entries "${directory}" "${patterns}" || return 1
+    done
+    return 0
+}
+
+# Löst „.“, „..“ und symbolische Links im vorhandenen Teil eines absoluten Pfads auf; der noch
+# nicht vorhandene Rest bleibt unverändert. Der letzte Bestandteil selbst wird nicht aufgelöst
+# (ein Link als Ziel wird unten abgelehnt).
+resolve_parent() {
+    local path="$1"
+    local existing="${path%/*}"
+    local rest="/${path##*/}"
+    while [[ -n "${existing}" && ! -d "${existing}" ]]; do
+        rest="/${existing##*/}${rest}"
+        existing="${existing%/*}"
+    done
+    if [[ -z "${existing}" ]]; then
+        printf '%s' "${rest}"
+    else
+        printf '%s%s' "$(cd "${existing}" && pwd -P)" "${rest}"
+    fi
+}
+
+refuse_output() {
+    lw_die "Ungeeignetes Zielverzeichnis „${OUTPUT:-/}“ – $1" 64
+}
+
+# Absoluter, bereinigter Zielpfad.
 case "${OUTPUT}" in
     /*) ;;
     *) OUTPUT="$(pwd -P)/${OUTPUT}" ;;
 esac
-OUTPUT="${OUTPUT%/}"
-case "${OUTPUT}" in
-    ""|/|/Library|/Library/*|/System|/System/*|/usr|/usr/*|"${HOME}")
-        lw_die "Ungeeignetes Zielverzeichnis „${OUTPUT}“ – bitte ein eigenes Build-Verzeichnis angeben." 64
+while [[ "${OUTPUT}" == */ ]]; do
+    OUTPUT="${OUTPUT%/}"
+done
+if [[ -n "${OUTPUT}" ]]; then
+    OUTPUT="$(resolve_parent "${OUTPUT}")"
+fi
+case "${OUTPUT}/" in
+    */./*|*/../*|*//*)
+        refuse_output "enthält „.“, „..“ oder leere Bestandteile, die sich nicht auflösen lassen."
         ;;
 esac
+HOME_REAL="${HOME%/}"
+if [[ -d "${HOME_REAL}" ]]; then
+    HOME_REAL="$(cd "${HOME_REAL}" && pwd -P)"
+fi
+# Systembereiche sind auch als (noch) nicht vorhandenes Ziel tabu: alles unter /Library, /System,
+# /usr, /bin und /sbin, jeder Ordner direkt unter / sowie direkt unter /private, /Volumes, /Users
+# und /home (Systemordner, Volumes, Benutzerordner) und das eigene Benutzerverzeichnis.
+case "${OUTPUT}" in
+    /Library|/Library/*|/System|/System/*|/usr|/usr/*|/bin|/bin/*|/sbin|/sbin/*)
+        refuse_output "liegt in einem Systembereich; bitte ein eigenes Build-Verzeichnis angeben."
+        ;;
+esac
+case "${OUTPUT%/*}" in
+    ""|/private|/Volumes|/Users|/home)
+        refuse_output "ist ein System-, Volume- oder Benutzerordner; bitte ein eigenes Build-Verzeichnis angeben."
+        ;;
+esac
+case "${OUTPUT}" in
+    "${HOME_REAL}"|"${HOME_REAL}/Library"|"${HOME_REAL}/Library/"*|"${LW_REPO_ROOT}")
+        refuse_output "ist das Benutzer- bzw. Repository-Verzeichnis oder liegt in ~/Library; bitte ein eigenes Build-Verzeichnis angeben."
+        ;;
+esac
+if [[ -L "${OUTPUT}" ]]; then
+    refuse_output "ist ein symbolischer Link; bitte das eigentliche Verzeichnis angeben."
+elif [[ -e "${OUTPUT}" && ! -d "${OUTPUT}" ]]; then
+    refuse_output "ist kein Verzeichnis."
+elif [[ -d "${OUTPUT}" ]] && ! is_driver_tree_or_empty "${OUTPUT}"; then
+    refuse_output "es enthält Daten, die nicht von einem früheren Treiberbau stammen (z. B. „${FOREIGN_ENTRY}“). Das Ziel wird vor dem Bauen gelöscht; bitte ein neues oder leeres Verzeichnis angeben."
+fi
 
 FILTER_DIR_SRC="${LW_REPO_ROOT}/Driver/filter"
 PPD_GENERATOR="${LW_REPO_ROOT}/Driver/ppd/generate_ppds.py"
@@ -151,9 +279,16 @@ fi
 
 # --- PPD-Dateien ---------------------------------------------------------------------------
 lw_step "PPD-Dateien erzeugen"
-PPD_TMP="${OUTPUT}.ppd-tmp"
-lw_run rm -rf "${PPD_TMP}"
-lw_run mkdir -p "${PPD_TMP}"
+# Zwischenablage in einem eigenen temporären Ordner (nicht neben dem Ziel – dort könnte ein
+# gleichnamiger fremder Ordner liegen).
+if [[ "${LW_DRY_RUN}" == "1" ]]; then
+    PPD_TMP="${TMPDIR:-/tmp}"
+    PPD_TMP="${PPD_TMP%/}/labelwerk-ppd.XXXXXX"
+    lw_print_command mktemp -d "${PPD_TMP}"
+else
+    PPD_TMP="$(mktemp -d "${TMPDIR:-/tmp}/labelwerk-ppd.XXXXXX")"
+    trap 'rm -rf "${PPD_TMP}"' EXIT
+fi
 lw_run "${PYTHON}" "${PPD_GENERATOR}" --output "${PPD_TMP}" --gzip --file-version "${VERSION}" --quiet
 
 if [[ "${LW_DRY_RUN}" != "1" ]]; then

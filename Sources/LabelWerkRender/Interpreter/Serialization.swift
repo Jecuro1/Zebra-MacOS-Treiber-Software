@@ -101,11 +101,17 @@ enum Serializer {
         }
     }
 
-    private static func alphabetIndex(_ character: Character, in alphabet: [Character]) -> Int? {
+    /// Position eines Zeichens im Zählalphabet; `nil`, wenn es dort nicht vorkommt.
+    ///
+    /// Schrittweiten werden auch in der jeweils anderen ASCII-Schreibweise akzeptiert. Alle
+    /// Alphabete bestehen aus ASCII-Zeichen; andere Zeichen (z. B. ß, dessen Großschreibung
+    /// „SS“ zwei Zeichen lang ist) zählen daher nie und werden nicht umgewandelt.
+    static func alphabetIndex(_ character: Character, in alphabet: [Character]) -> Int? {
         if let index = alphabet.firstIndex(of: character) { return index }
-        // Schrittweiten werden auch in der jeweils anderen Schreibweise akzeptiert.
-        let swapped = Character(character.isUppercase ? character.lowercased() : character.uppercased())
-        return alphabet.firstIndex(of: swapped)
+        guard character.isASCII else { return nil }
+        let upper = character.asciiUppercased
+        let swapped = upper == character ? character.asciiLowercased : upper
+        return swapped == character ? nil : alphabet.firstIndex(of: swapped)
     }
 }
 

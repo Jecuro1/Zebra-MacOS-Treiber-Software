@@ -6,9 +6,14 @@ import Foundation
 ///   Network.framework, Linux: `avahi-browse`), aufgelöst auf IP-Adresse; nur Zebra-Geräte.
 /// * **usb** – IOKit, Hersteller-ID 0x0A5F (nur macOS).
 /// * **network** – Portsuche (9100) in den lokalen Subnetzen, danach Identifikation per SNMP
-///   (`sysDescr`/`sysName`, gefahrlos) und – falls SNMP schweigt oder Zebra meldet – per `~HI`.
-///   Geräte, die per SNMP eindeutig als Nicht-Zebra erkannt werden, erhalten **kein** `~HI`
-///   (fremde Drucker würden den Text sonst ausdrucken) und werden standardmäßig ausgeblendet.
+///   (`sysDescr`/`sysName`, gefahrlos). Nur Geräte, die SNMP **eindeutig als Zebra** meldet,
+///   erhalten zusätzlich `~HI` (Firmware, Auflösung, Speicher). Alle anderen Geräte bekommen
+///   standardmäßig **keinerlei Daten**: Fremde Drucker (JetDirect, PCL/PJL …) würden Text an
+///   Port 9100 als Seite ausdrucken – das gilt auch für Geräte, deren SNMP schweigt (abgeschaltet,
+///   andere Community, nur SNMPv3) oder keine `sysDescr` liefert. Solche Geräte werden als „nicht
+///   identifiziert“ aufgeführt (`includeUnidentifiedNetworkDevices`); per SNMP als Nicht-Zebra
+///   erkannte Geräte werden standardmäßig ausgeblendet. Wer `~HI` auch an nicht identifizierte
+///   Geräte senden will, schaltet `probeUnidentifiedDevicesWithHostIdentification` bewusst ein.
 /// * **cups** – eingerichtete CUPS-Warteschlangen, deren Treiber/URI auf Zebra hindeutet.
 /// * **bluetooth** – gekoppelte klassische Bluetooth-Geräte der Klasse „Drucker“ bzw. mit
 ///   Zebra-Namen (nur macOS).
@@ -34,11 +39,21 @@ public final class PrinterDiscovery: Sendable {
         /// SNMP-Abfrage (`sysDescr`, `sysName`) zur gefahrlosen Identifikation.
         public var useSNMP: Bool = true
         public var snmpPort: Int = 161
+        /// SNMP-Community für die Leseabfrage (Zebra-Werkseinstellung: „public“).
         public var snmpCommunity: String = "public"
         public var snmpTimeout: Duration = .milliseconds(700)
-        /// `~HI` senden, wenn SNMP nichts liefert oder Zebra meldet.
+        /// `~HI` an Geräte senden, die SNMP eindeutig als Zebra meldet (liefert Modell mit
+        /// Auflösung, Firmware und Speicher).
         public var useHostIdentification: Bool = true
         public var hostIdentificationTimeout: Duration = .milliseconds(1500)
+        /// `~HI` **auch** an Geräte senden, die sich per SNMP nicht identifizieren ließen
+        /// (kein SNMP, andere Community, keine `sysDescr`). Wirkt nur zusammen mit
+        /// `useHostIdentification`.
+        ///
+        /// Standard: `false`. **Vorsicht:** Fremde Drucker, die Rohdaten an Port 9100 annehmen
+        /// (praktisch alle Bürodrucker), drucken den Text `~HI` als Seite aus. Nur einschalten,
+        /// wenn die durchsuchten Hosts bekanntermaßen ausschließlich Zebra-Drucker sind.
+        public var probeUnidentifiedDevicesWithHostIdentification: Bool = false
         /// Geräte liefern, die per SNMP eindeutig als Nicht-Zebra erkannt wurden.
         public var includeNonZebraNetworkDevices: Bool = false
         /// Geräte mit offenem Port liefern, die sich nicht identifizieren ließen.
@@ -165,10 +180,7 @@ public final class PrinterDiscovery: Sendable {
         var isZebra: Bool?
 
         if options.identifyNetworkPrinters {
-            if options.useSNMP,
-               let values = await SNMPProbe.query(
-                   host: host, port: options.snmpPort, community: options.snmpCommunity, timeout: options.snmpTimeout
-               ) {
+            if options.useSNMP, let values = await querySNMPIdentity(host: host, options: options) {
                 if let description = values[SNMPProbe.sysDescrOID], !description.isEmpty {
                     details["sysDescr"] = description
                     let zebra = ZebraIdentifiers.looksLikeZebra(description)
@@ -181,7 +193,7 @@ public final class PrinterDiscovery: Sendable {
                     name = systemName
                 }
             }
-            if isZebra != false, options.useHostIdentification,
+            if mayProbeWithHostIdentification(isZebra: isZebra, options: options),
                let identification = await HostIdentificationProbe.probe(
                    host: host, port: port,
                    connectTimeout: max(options.connectTimeout, .milliseconds(800)),
@@ -213,6 +225,38 @@ public final class PrinterDiscovery: Sendable {
             source: .network,
             details: details
         )
+    }
+
+    /// Entscheidet, ob ein Gerät `~HI` erhalten darf.
+    ///
+    /// `~HI` ist druckbarer Text: Ein fremder Drucker an Port 9100 würde ihn als Seite ausgeben.
+    /// Deshalb nur an Geräte, die SNMP positiv als Zebra gemeldet hat – nicht identifizierte Geräte
+    /// nur nach ausdrücklicher Freigabe (`probeUnidentifiedDevicesWithHostIdentification`), per
+    /// SNMP als Nicht-Zebra erkannte nie.
+    static func mayProbeWithHostIdentification(isZebra: Bool?, options: Options) -> Bool {
+        guard options.useHostIdentification else { return false }
+        switch isZebra {
+        case .some(true): return true
+        case .some(false): return false
+        case .none: return options.probeUnidentifiedDevicesWithHostIdentification
+        }
+    }
+
+    /// Fragt `sysDescr` und `sysName` per SNMP ab.
+    ///
+    /// Bei SNMPv1 scheitert eine Anfrage mit mehreren OIDs vollständig (`noSuchName`, keine Werte),
+    /// sobald der Agent auch nur eine davon nicht kennt. Liefert die gemeinsame Abfrage deshalb gar
+    /// keine Werte, wird `sysDescr` – das für die Identifikation entscheidende Feld – einzeln erfragt.
+    static func querySNMPIdentity(host: String, options: Options) async -> [String: String]? {
+        guard let values = await SNMPProbe.query(
+            host: host, port: options.snmpPort, community: options.snmpCommunity,
+            oids: [SNMPProbe.sysDescrOID, SNMPProbe.sysNameOID], timeout: options.snmpTimeout
+        ) else { return nil }
+        guard values.isEmpty, !Task.isCancelled else { return values }
+        return await SNMPProbe.query(
+            host: host, port: options.snmpPort, community: options.snmpCommunity,
+            oids: [SNMPProbe.sysDescrOID], timeout: options.snmpTimeout
+        ) ?? values
     }
 
     /// „Zebra Technologies ZTC ZD421-203dpi ZPL“ → „ZTC ZD421-203dpi ZPL“.

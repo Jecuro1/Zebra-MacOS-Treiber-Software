@@ -5,7 +5,8 @@ Die App übersetzt Texte mit ``tr("Deutscher Text")`` bzw. ``tr("… %@ …", we
 ist zugleich der Schlüssel (Deutsch ist die Entwicklungssprache). Dieses Skript
 
 * durchsucht ``Sources/LabelWerkApp/**/*.swift`` nach ``tr("…")``-Aufrufen mit Literal-Schlüssel
-  (Kommentare und andere Strings werden korrekt übersprungen, Escape-Sequenzen ausgewertet),
+  (Kommentare werden übersprungen, Escape-Sequenzen ausgewertet; Aufrufe innerhalb von
+  String-Interpolationen wie ``Text("\\(tr("Drucker")): \\(n)")`` werden mit erfasst),
 * nimmt zusätzlich die Texte aus Kernmodulen auf, die die App dynamisch übersetzt – etwa
   ``tr(wert.displayName)``, ``tr(action.detail)`` oder ``tr(alert.title)`` (siehe
   ``DEFAULT_DYNAMIC_SOURCES``; abschaltbar mit ``--no-dynamic``),
@@ -160,6 +161,9 @@ class StringLiteral:
     multiline: bool = False
     raw: bool = False
     problems: List[str] = field(default_factory=list)
+    # Bereiche [Anfang, Ende) der interpolierten Ausdrücke \(…) im Quelltext (ohne Klammern) –
+    # darin können weitere tr()-Aufrufe stehen, z. B. "\(tr("Drucker")): \(n)".
+    interpolations: List[Tuple[int, int]] = field(default_factory=list)
 
 
 class SwiftScanner:
@@ -266,7 +270,9 @@ class SwiftScanner:
                 code = text[pos]
                 if code == "(":
                     literal.interpolated = True
-                    pos = self._skip_interpolation(pos + 1)
+                    expression_start = pos + 1
+                    pos = self._skip_interpolation(expression_start)
+                    literal.interpolations.append((expression_start, pos - 1))
                     parts.append("\ufffc")  # Platzhalter für den interpolierten Ausdruck
                     continue
                 simple = {"0": "\0", "\\": "\\", "t": "\t", "n": "\n", "r": "\r", '"': '"', "'": "'"}
@@ -339,10 +345,18 @@ class SwiftScanner:
         return self.text[back + 1:end]
 
     def scan_tr_calls(self, result: ScanResult) -> None:
+        self._scan_tr_range(0, len(self.text), result)
+
+    def _scan_interpolations(self, literal: StringLiteral, result: ScanResult) -> None:
+        """Sucht tr()-Aufrufe in den interpolierten Ausdrücken eines Literals (rekursiv)."""
+        for start, end in literal.interpolations:
+            self._scan_tr_range(start, end, result)
+
+    def _scan_tr_range(self, start: int, end: int, result: ScanResult) -> None:
+        """Sucht tr()-Aufrufe im Bereich [start, end) – auch in String-Interpolationen."""
         text = self.text
-        pos = 0
-        length = len(text)
-        while pos < length:
+        pos = start
+        while pos < end:
             char = text[pos]
             if text.startswith("//", pos):
                 pos = self._skip_line_comment(pos)
@@ -351,20 +365,22 @@ class SwiftScanner:
                 pos = self._skip_block_comment(pos)
                 continue
             if self.is_string_start(pos):
-                pos = self.read_string(pos).end
+                literal = self.read_string(pos)
+                self._scan_interpolations(literal, result)
+                pos = literal.end
                 continue
             if char in IDENT_CHARS:
-                end = pos
-                while end < length and text[end] in IDENT_CHARS:
-                    end += 1
-                word = text[pos:end]
+                word_end = pos
+                while word_end < end and text[word_end] in IDENT_CHARS:
+                    word_end += 1
+                word = text[pos:word_end]
                 previous = text[pos - 1] if pos > 0 else ""
                 if word == "tr" and previous not in IDENT_CHARS and previous != "." and previous != "`":
-                    after = self.skip_trivia(end)
-                    if after < length and text[after] == "(" and self._preceded_by(pos) != "func":
+                    after = self.skip_trivia(word_end)
+                    if after < end and text[after] == "(" and self._preceded_by(pos) != "func":
                         pos = self._handle_call(pos, after + 1, result)
                         continue
-                pos = end
+                pos = word_end
                 continue
             pos += 1
 
@@ -377,6 +393,8 @@ class SwiftScanner:
             return pos
         result.literal_calls += 1
         literal = self.read_string(pos)
+        # tr()-Aufrufe in Interpolationen des Schlüssels selbst (dieser ist dann ohnehin ungültig).
+        self._scan_interpolations(literal, result)
         after = self.skip_trivia(literal.end)
         follower = self.text[after] if after < len(self.text) else ""
         for problem in literal.problems:

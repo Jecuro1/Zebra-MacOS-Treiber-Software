@@ -397,34 +397,88 @@ enum POSIXSocket {
     }
 }
 
-/// Besitzt einen Socket-Deskriptor und schließt ihn genau einmal.
+/// Besitzt einen Socket-Deskriptor und gibt ihn genau einmal frei – erst, wenn ihn kein
+/// Systemaufruf mehr benutzt.
+///
+/// Hintergrund: Deskriptoren sind bloße Nummern, die der Kernel nach `close()` sofort neu vergibt
+/// (meist an den nächsten `socket()`-Aufruf im selben Prozess). Würde ein Lese- oder Schreibvorgang
+/// die Nummer noch nach der Freigabe benutzen, landeten Daten in einer fremden Verbindung bzw. würden
+/// deren Antworten verschluckt. Deshalb gilt:
+///
+/// * Der Deskriptor ist ausschließlich innerhalb von `withDescriptor(_:)` zugänglich. Prüfung auf
+///   „geschlossen“ und Anmeldung als Benutzer geschehen atomar unter derselben Sperre.
+/// * `close()` weist neue Benutzer ab (`TransportError.notOpen`) und weckt laufende `poll()`-,
+///   `send()`- und `recv()`-Aufrufe per `shutdown(SHUT_RDWR)` – die Nummer bleibt dabei gültig.
+/// * Freigegeben (`close(2)`) wird der Deskriptor von demjenigen, der die Benutzerzahl auf null
+///   bringt: sofort von `close()`, wenn niemand ihn benutzt, sonst vom letzten Benutzer.
 final class SocketHandle: @unchecked Sendable {
-    let fd: Int32
+    private let fd: Int32
     private let lock = NSLock()
-    private var closed = false
+    /// `close()` wurde aufgerufen; neue Benutzer werden abgewiesen.
+    private var closeRequested = false
+    /// Der Deskriptor wurde an das System zurückgegeben.
+    private var released = false
+    /// Zahl der gerade laufenden `withDescriptor(_:)`-Aufrufe.
+    private var activeUsers = 0
 
+    /// Übernimmt den Besitz von `fd`.
     init(fd: Int32) {
         self.fd = fd
     }
 
-    /// Weckt alle wartenden `poll()`-Aufrufe (beide Richtungen), ohne den Deskriptor freizugeben.
-    func shutdownBoth() {
-        lock.locked {
-            guard !closed else { return }
-            _ = shutdown(fd, Int32(SHUT_RDWR))
-        }
+    /// `true`, sobald `close()` aufgerufen wurde.
+    var isClosed: Bool {
+        lock.locked { closeRequested }
     }
 
-    /// Gibt den Deskriptor frei (idempotent).
-    func close() {
-        lock.locked {
-            guard !closed else { return }
-            closed = true
-            POSIXSocket.closeDescriptor(fd)
+    /// `true`, sobald der Deskriptor tatsächlich freigegeben ist (nach `close()` und dem Ende
+    /// aller laufenden Benutzungen).
+    var isReleased: Bool {
+        lock.locked { released }
+    }
+
+    /// Führt `body` mit dem Deskriptor aus. Während `body` läuft, wird der Deskriptor garantiert
+    /// nicht freigegeben – auch nicht durch ein paralleles `close()`.
+    ///
+    /// - Throws: `TransportError.notOpen`, wenn `close()` bereits aufgerufen wurde (`body` läuft
+    ///   dann nicht), sowie alle Fehler von `body`.
+    func withDescriptor<R>(_ body: (Int32) throws -> R) throws -> R {
+        try lock.locked {
+            guard !closeRequested else { throw TransportError.notOpen }
+            activeUsers += 1
         }
+        defer { endUse() }
+        return try body(fd)
+    }
+
+    /// Schließt den Socket: keine neuen Benutzer mehr, laufende werden geweckt; die Freigabe
+    /// erfolgt sofort oder durch den letzten Benutzer (idempotent).
+    func close() {
+        let releaseNow: Bool = lock.locked {
+            guard !closeRequested else { return false }
+            closeRequested = true
+            // Unter der Sperre und vor der Freigabe: Die Nummer gehört garantiert noch uns.
+            // Weckt wartende poll()-Aufrufe beider Richtungen und sendet FIN.
+            _ = shutdown(fd, Int32(SHUT_RDWR))
+            guard activeUsers == 0 else { return false }
+            released = true
+            return true
+        }
+        if releaseNow { POSIXSocket.closeDescriptor(fd) }
+    }
+
+    private func endUse() {
+        let releaseNow: Bool = lock.locked {
+            activeUsers -= 1
+            guard activeUsers == 0, closeRequested, !released else { return false }
+            released = true
+            return true
+        }
+        if releaseNow { POSIXSocket.closeDescriptor(fd) }
     }
 
     deinit {
-        if !closed { POSIXSocket.closeDescriptor(fd) }
+        // Ohne Referenzen kann es keine Benutzer mehr geben.
+        if !released { POSIXSocket.closeDescriptor(fd) }
     }
 }

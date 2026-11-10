@@ -61,8 +61,10 @@ public struct HostIdentification: Hashable, Sendable, Codable {
 /// Parser für `~HI`-Antworten.
 ///
 /// Toleriert Rahmung, Zeilenenden, Leerraum, Speicherangaben in KB/MB/GB, fehlende Felder
-/// (Auflösung wird dann aus „-203dpi“ im Modellnamen abgeleitet) sowie kommalose
-/// Kennungen älterer EPL-Firmware („UKQ1935HLU  V4.70.1A“).
+/// (Auflösung wird dann aus „-203dpi“ im Modellnamen abgeleitet), kommalose Kennungen älterer
+/// EPL-Firmware („UKQ1935HLU  V4.70.1A“) sowie Fremdzeilen im Empfangspuffer – etwa eine
+/// liegengebliebene `~HS`-Antwort („030,1,0,1245,…“) aus einer abgelaufenen Statusabfrage.
+/// Unter mehreren Kommazeilen wird die plausibelste gewählt (siehe ``identificationLine(in:)``).
 public enum HostIdentificationParser {
     public static func parse(_ data: Data) throws -> HostIdentification {
         try parse(text: StatusText.decode(data))
@@ -73,13 +75,39 @@ public enum HostIdentificationParser {
         let lines = StatusText.lines(text)
         guard !lines.isEmpty else { throw StatusParseError.emptyResponse }
 
-        if let line = lines.first(where: { $0.contains(",") }) {
+        if let line = identificationLine(in: lines) {
             return try parseCommaSeparated(line)
         }
-        for line in lines {
+        for line in lines where !line.contains(",") {
             if let identification = parseWhitespaceSeparated(line) { return identification }
         }
         throw StatusParseError.unrecognizedFormat("Keine ~HI-Kennung gefunden")
+    }
+
+    /// Wählt unter den Zeilen mit Komma die erste mit der höchsten Plausibilität
+    /// (``plausibility(ofCommaLine:)``); Zeilen ohne jedes ~HI-Merkmal werden übergangen.
+    ///
+    /// So werden vorangestellte Fremdzeilen – insbesondere `~HS`-Zeilen, deren Felder rein
+    /// numerisch sind – nicht als Kennung gedeutet. `nil`, wenn keine Kommazeile infrage kommt.
+    static func identificationLine(in lines: [String]) -> String? {
+        var best: (line: String, score: Int)?
+        for line in lines where line.contains(",") {
+            let score = plausibility(ofCommaLine: line)
+            if score > (best?.score ?? 0) { best = (line, score) }
+        }
+        return best?.line
+    }
+
+    /// Bewertet, wie sehr eine Kommazeile einer `~HI`-Kennung `Modell,Firmware,…` ähnelt:
+    /// 2 Punkte für ein versionsartiges Firmware-Feld (``isVersionToken(_:)``, z. B. `V84.20.18Z`),
+    /// 1 Punkt für ein Modellfeld mit mindestens einem Buchstaben (z. B. `ZD421-203dpi`).
+    /// `~HS`-Zeilen („030,1,0,…“, „1234,0“) erhalten 0 Punkte.
+    static func plausibility(ofCommaLine line: String) -> Int {
+        let fields = StatusText.fields(line)
+        var score = 0
+        if fields.count > 1, isVersionToken(fields[1]) { score += 2 }
+        if let model = fields.first, model.contains(where: { $0.isASCII && $0.isLetter }) { score += 1 }
+        return score
     }
 
     static func parseCommaSeparated(_ line: String) throws -> HostIdentification {

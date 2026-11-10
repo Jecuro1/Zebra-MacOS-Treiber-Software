@@ -1389,6 +1389,114 @@ static void test_job_copies(void)
     free_pages(empty, 2);
 }
 
+/* Wie der Filter: ohne vorheriges lw_job_begin – der Kopf entsteht erst mit der ersten Seite
+ * bzw. in lw_job_finish. Liefert die Rückgabe von lw_job_finish; `begun` meldet, ob der
+ * Auftragskopf geschrieben wurde. */
+static bool run_job_lazy(job_capture *cap, const lw_settings *s, int copies, lw_bitmap *pages, int count,
+                         bool cancel, bool *begun)
+{
+    capture_init(cap);
+    lw_job_config cfg = { s, 203, 0, -1, copies, true };
+    lw_job_hooks hooks = { capture_label, NULL, capture_canceled, cap, NULL };
+    lw_job job;
+    CHECK(lw_job_init(&job, &cfg, &cap->sink, &hooks));
+    for (int i = 0; i < count; i++)
+        CHECK(lw_job_add_page(&job, &pages[i], i + 1));
+    bool ok = lw_job_finish(&job, cancel);
+    if (begun != NULL)
+        *begun = job.begun;
+    /* Ein zweiter Aufruf ist wirkungslos – auch nach einem Abbruch ohne Kopf. */
+    size_t len = cap->out.len;
+    CHECK(lw_job_finish(&job, cancel));
+    CHECK_INT(cap->out.len, len);
+    lw_job_free(&job);
+    return ok;
+}
+
+/* Regression: ein Abbruch vor der ersten Seite schrieb trotzdem den Auftragskopf (mit ~JC also
+ * eine Kalibrierung samt Etikettenvorschub) und die Endbefehle. */
+static void test_job_cancel_early(void)
+{
+    lw_settings s;
+    lw_settings_init(&s);
+    s.darkness = 10;
+    s.tear_off = 10;
+    s.calibrate = true;
+    s.start_commands = "^XA^FXstart^XZ";
+    s.start_commands_len = strlen(s.start_commands);
+    s.end_commands = "~JR";
+    s.end_commands_len = 3;
+    job_capture cap;
+    bool begun = true;
+
+    /* ZPL: Abbruch ohne Seite → gar keine Ausgabe, auch kein Kopf. */
+    CHECK(run_job_lazy(&cap, &s, 3, NULL, 0, true, &begun));
+    CHECK(!begun);
+    CHECK_INT(cap.out.len, 0);
+    CHECK_INT(cap.labels, 0);
+    lw_buf_free(&cap.out);
+
+    /* Ohne Abbruch bleibt es beim Auftrag ohne Etiketten: Kopf und Endbefehle. */
+    CHECK(run_job_lazy(&cap, &s, 3, NULL, 0, false, &begun));
+    CHECK(begun);
+    CHECK_BUF_STR(cap.out, "^XA^FXstart^XZ\n~SD10\n~TA010\n~JC\n~JR\n");
+    CHECK_INT(cap.labels, 0);
+    lw_buf_free(&cap.out);
+
+    /* Kopf bereits geschrieben (erste Seite leer und übersprungen), dann Abbruch: die
+     * Endbefehle gehören zum geschriebenen Kopf und werden weiterhin angehängt. */
+    s.skip_blank = true;
+    lw_bitmap pages[2];
+    make_pages(pages, 1, 0);
+    CHECK(run_job_lazy(&cap, &s, 3, pages, 1, true, &begun));
+    CHECK(begun);
+    CHECK_BUF_STR(cap.out, "^XA^FXstart^XZ\n~SD10\n~TA010\n~JC\n~JR\n");
+    CHECK_INT(cap.labels, 0);
+    lw_buf_free(&cap.out);
+    free_pages(pages, 1);
+    s.skip_blank = false;
+
+    /* Abbruch mit zurückgehaltener erster Seite (Sortierung): Kopf, Seite einmal, Ende. */
+    s.compression = LW_COMPRESSION_HEX;
+    s.darkness = LW_UNSET;
+    s.tear_off = LW_UNSET;
+    s.calibrate = false;
+    s.start_commands = "S";
+    s.start_commands_len = 1;
+    make_pages(pages, 1, -1);
+    CHECK(run_job_lazy(&cap, &s, 3, pages, 1, true, &begun));
+    CHECK_BUF_STR(cap.out, "S\n^XA\n^PW16\n^LL3\n^LH0,0\n^PON\n^PMN\n^FO0,0^GFA,6,6,2,000080000000^FS\n"
+                           "^PQ1\n^XZ\n~JR\n");
+    CHECK_INT(cap.labels, 1);
+    CHECK_INT(cap.quantities[0], 1);
+    lw_buf_free(&cap.out);
+    free_pages(pages, 1);
+
+    /* EPL: Start-/Endbefehle ebenfalls nur, wenn der Auftrag begonnen hat. */
+    lw_settings_init(&s);
+    s.language = LW_LANGUAGE_EPL;
+    s.darkness = 10;
+    s.start_commands = "OD";
+    s.start_commands_len = 2;
+    s.end_commands = "ENDE";
+    s.end_commands_len = 4;
+    CHECK(run_job_lazy(&cap, &s, 1, NULL, 0, true, &begun));
+    CHECK(!begun);
+    CHECK_INT(cap.out.len, 0);
+    lw_buf_free(&cap.out);
+    CHECK(run_job_lazy(&cap, &s, 1, NULL, 0, false, &begun));
+    CHECK_BUF_STR(cap.out, "OD\nENDE\n");
+    lw_buf_free(&cap.out);
+
+    /* CPCL kennt keinen Kopf: Abbruch ohne Seite → leer. */
+    lw_settings_init(&s);
+    s.language = LW_LANGUAGE_CPCL;
+    s.darkness = 30;
+    CHECK(run_job_lazy(&cap, &s, 2, NULL, 0, true, &begun));
+    CHECK_INT(cap.out.len, 0);
+    lw_buf_free(&cap.out);
+}
+
 static void test_job_preprocess(void)
 {
     lw_settings s;
@@ -1502,6 +1610,7 @@ static const test_case tests[] = {
     { "job_epl", test_job_epl },
     { "job_cpcl", test_job_cpcl },
     { "job_copies", test_job_copies },
+    { "job_cancel_early", test_job_cancel_early },
     { "job_preprocess", test_job_preprocess },
     { "util", test_util },
 };

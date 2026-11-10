@@ -50,7 +50,9 @@ public enum SoftwareRasterizer {
                      glyphs: inout GlyphRenderer) {
         switch element {
         case .text(let text):
-            let layout = TextLayout(element: text, dotsPerMM: dotsPerMM)
+            // Eigene Auflösung des Elements (vom Interpreter gesetzt) vor der des Etiketts – so
+            // stimmen Rasterung und `LabelElement.boundingBox` stets überein.
+            let layout = TextLayout(element: text, dotsPerMM: max(1, text.dotsPerMM ?? dotsPerMM))
             // Akzente und Unterlängen dürfen über das Feldrechteck hinausragen.
             let margin = max(2, text.height / 2 + 2)
             let ink = IntRect(x: -margin, y: -margin, width: layout.width + 2 * margin,

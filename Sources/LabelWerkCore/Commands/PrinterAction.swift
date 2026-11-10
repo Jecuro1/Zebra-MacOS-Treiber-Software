@@ -79,7 +79,7 @@ public enum PrinterAction: String, CaseIterable, Codable, Sendable, Identifiable
         case .pause: return "Pausieren"
         case .resume: return "Fortsetzen"
         case .cancelAll: return "Alle Aufträge abbrechen"
-        case .cancelCurrent: return "Aktuellen Auftrag abbrechen"
+        case .cancelCurrent: return "Unvollständiges Format verwerfen"
         case .reset: return "Drucker neu starten"
         case .restoreFactoryDefaults: return "Werkseinstellungen wiederherstellen"
         case .restoreNetworkDefaults: return "Netzwerkeinstellungen zurücksetzen"
@@ -107,9 +107,11 @@ public enum PrinterAction: String, CaseIterable, Codable, Sendable, Identifiable
         case .resume:
             return "Setzt einen angehaltenen Druck fort."
         case .cancelAll:
-            return "Löscht alle Aufträge, die sich noch im Speicher des Druckers befinden."
+            return "Stoppt den laufenden Druck nach dem aktuellen Etikett und löscht alle Aufträge im Speicher des Druckers."
         case .cancelCurrent:
-            return "Bricht nur den Auftrag ab, der gerade gedruckt wird."
+            // ~JX wirkt laut ZPL-II-Handbuch nur auf ein Format, das noch übertragen wird – nicht
+            // auf laufende Drucke. Der Text muss das sagen und auf „Alle Aufträge abbrechen“ verweisen.
+            return "Verwirft ein nur teilweise empfangenes Format; einen laufenden Druck stoppt „Alle Aufträge abbrechen“."
         case .reset:
             return "Startet den Drucker neu, als würde er aus- und wieder eingeschaltet."
         case .restoreFactoryDefaults:
@@ -136,7 +138,7 @@ public enum PrinterAction: String, CaseIterable, Codable, Sendable, Identifiable
         case .pause: return "pause.circle"
         case .resume: return "play.circle"
         case .cancelAll: return "xmark.bin"
-        case .cancelCurrent: return "stop.circle"
+        case .cancelCurrent: return "xmark.circle"
         case .reset: return "power"
         case .restoreFactoryDefaults: return "arrow.counterclockwise.circle"
         case .restoreNetworkDefaults: return "wifi.exclamationmark"

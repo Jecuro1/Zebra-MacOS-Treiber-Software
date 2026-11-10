@@ -9,8 +9,14 @@ import Foundation
 /// * Alle blockierenden Systemaufrufe laufen auf zwei eigenen seriellen `DispatchQueue`s
 ///   (Lesen/Schreiben getrennt, damit ein wartender Lesevorgang das Senden nicht aufhält) –
 ///   nie auf dem kooperativen Thread-Pool von Swift Concurrency.
-/// * `close()` weckt laufende Lese-/Schreibvorgänge sofort per `shutdown()` und gibt den
-///   Deskriptor erst frei, wenn beide Queues ihn nicht mehr verwenden.
+/// * Der Deskriptor gehört einem `SocketHandle` und wird nur innerhalb der blockierenden Arbeit
+///   über `withDescriptor(_:)` benutzt. Ein `close()`, das zwischen dem Abholen des Sockets auf dem
+///   Actor und dem Start der Arbeit auf der Queue läuft, führt deshalb zu `.notOpen` – nie zu einem
+///   Systemaufruf auf einer bereits freigegebenen (und vom Kernel womöglich an eine andere
+///   Verbindung vergebenen) Deskriptornummer.
+/// * `close()` weckt laufende Lese-/Schreibvorgänge sofort per `shutdown()`; freigegeben wird der
+///   Deskriptor, sobald ihn kein Vorgang mehr benutzt. `close()` kehrt zurück, nachdem alle bis
+///   dahin eingereihten Vorgänge beendet sind.
 public actor TCPConnection: PrinterConnection {
     public nonisolated let descriptor: ConnectionDescriptor
     public nonisolated let host: String
@@ -25,6 +31,15 @@ public actor TCPConnection: PrinterConnection {
     private var peerClosed = false
     /// Wird bei jedem `close()` erhöht, damit ein parallel laufendes `open()` sein Ergebnis verwirft.
     private var generation: UInt64 = 0
+    /// Nur für Tests: wird in `read(timeout:)`/`write(_:)` nach dem Abholen des Sockets und vor dem
+    /// Einreihen der blockierenden Arbeit erwartet. Damit lässt sich genau die Lücke herstellen, in
+    /// der ein paralleles `close()` (und ein neues `open()` einer anderen Verbindung) laufen kann.
+    private var beforeBlockingIOHook: (@Sendable () async -> Void)?
+
+    /// Nur für Tests: setzt bzw. entfernt `beforeBlockingIOHook`.
+    func setBeforeBlockingIOHook(_ hook: (@Sendable () async -> Void)?) {
+        beforeBlockingIOHook = hook
+    }
 
     public init(
         host: String,
@@ -63,10 +78,14 @@ public actor TCPConnection: PrinterConnection {
             handle.close()
             throw TransportError.connectionFailed("Der Verbindungsaufbau wurde durch Schließen der Verbindung abgebrochen.")
         }
-        if socket != nil, !peerClosed {
-            // Ein paralleles open() war schneller – dessen Verbindung behalten.
-            handle.close()
-            return
+        if let previous = socket {
+            if !peerClosed {
+                // Ein paralleles open() war schneller – dessen Verbindung behalten.
+                handle.close()
+                return
+            }
+            // Die bisherige Verbindung wurde inzwischen von der Gegenstelle beendet: ersetzen.
+            previous.close()
         }
         socket = handle
         peerClosed = false
@@ -77,21 +96,27 @@ public actor TCPConnection: PrinterConnection {
         guard let handle = socket else { return }
         socket = nil
         peerClosed = false
-        handle.shutdownBoth()
-        // Erst freigeben, wenn keine Queue den Deskriptor mehr benutzt.
-        await BlockingIO.drain([writeQueue, readQueue])
+        // Neue Benutzungen abweisen und laufende per shutdown() wecken. Den Deskriptor gibt der
+        // letzte Benutzer frei (bzw. sofort, falls keiner aktiv ist) – nie, während er benutzt wird.
         handle.close()
+        // Erst zurückkehren, wenn alle bereits eingereihten Vorgänge beendet sind.
+        await BlockingIO.drain([writeQueue, readQueue])
     }
 
     public func write(_ data: Data) async throws {
         let handle = try currentSocket()
         guard !data.isEmpty else { return }
         let stall = writeTimeout
+        if let hook = beforeBlockingIOHook { await hook() }
         do {
             try await BlockingIO.run(on: writeQueue) { flag in
-                try POSIXSocket.sendAll(handle.fd, data, stallTimeout: stall, cancellation: flag)
+                // Prüfung „noch offen?“ und Systemaufrufe decken dieselbe Lebensdauer des Deskriptors ab.
+                try handle.withDescriptor { fd in
+                    try POSIXSocket.sendAll(fd, data, stallTimeout: stall, cancellation: flag)
+                }
             }
         } catch let error as TransportError {
+            // Lokal geschlossen, bevor oder während gesendet wurde?
             guard socket === handle else { throw TransportError.notOpen }
             if error == .closedByPeer { peerClosed = true }
             throw error
@@ -100,8 +125,17 @@ public actor TCPConnection: PrinterConnection {
 
     public func read(timeout: Duration) async throws -> Data {
         let handle = try currentSocket()
-        let outcome = try await BlockingIO.run(on: readQueue) { flag in
-            try POSIXSocket.receive(handle.fd, timeout: timeout, cancellation: flag)
+        if let hook = beforeBlockingIOHook { await hook() }
+        let outcome: POSIXSocket.ReceiveOutcome
+        do {
+            outcome = try await BlockingIO.run(on: readQueue) { flag in
+                try handle.withDescriptor { fd in
+                    try POSIXSocket.receive(fd, timeout: timeout, cancellation: flag)
+                }
+            }
+        } catch let error as TransportError {
+            guard socket === handle else { throw TransportError.notOpen }
+            throw error
         }
         // Lokal geschlossen, während gelesen wurde?
         guard socket === handle else { throw TransportError.notOpen }

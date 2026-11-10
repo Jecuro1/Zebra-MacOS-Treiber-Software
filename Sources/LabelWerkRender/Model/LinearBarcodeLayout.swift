@@ -1,50 +1,72 @@
 import Foundation
 import LabelWerkBarcode
 
-/// Geometrie eines linearen Barcodefelds in **ungedrehten Feldkoordinaten**.
+/// Geometrie eines linearen Barcodefelds in **ungedrehten Feldkoordinaten** (Ursprung = linke
+/// obere Ecke des ungedrehten Feldrechtecks `width × height`; auf dem Etikett liegt es gemäß
+/// `LinearBarcodeElement.origin` und `orientation`, siehe `LinearBarcodeElement.barsFrame`).
 ///
 /// * Klarschrift: Bitmap-Schrift A, vergrößert um die Modulbreite (Zelle 9m × 5m, Vorschub 6m),
 ///   mit einem Modul Abstand zu den Balken; zentriert unter (bzw. über) dem Symbol.
 /// * EAN-13, EAN-8, UPC-A, UPC-E (Klarschrift unten): Ziffern zwischen den Begrenzungszeichen,
 ///   außen stehende Ziffern links (EAN-13, UPC-A, UPC-E) bzw. rechts (UPC-A, UPC-E) in eigenen
 ///   Randzonen von 7 Modulen; Begrenzungsbalken werden um die halbe Schrifthöhe + Abstand verlängert.
+///   Die Balken beginnen dann bei `barsX = 7 × Modulbreite`.
 /// * Feldgröße = Randzonen + Symbolbreite × Balkenhöhe + Klarschriftzeile. Klarschrift, die
 ///   breiter als das Symbol ist, ragt zentriert seitlich über das Feld hinaus (`inkMinX`/`inkMaxX`).
-struct LinearBarcodeLayout {
+///
+/// Der `SoftwareRasterizer` zeichnet genau diese Geometrie; Vorschauen (z. B. die App) sollten sie
+/// ebenfalls verwenden, damit Vektor- und Bitmapdarstellung übereinstimmen.
+public struct LinearBarcodeLayout: Hashable, Sendable {
 
-    struct Bar {
-        let x: Int
-        let width: Int
-        let isGuard: Bool
+    /// Ein Balken.
+    public struct Bar: Hashable, Sendable {
+        /// Linke Kante in Feldkoordinaten.
+        public let x: Int
+        /// Breite in Punkten.
+        public let width: Int
+        /// Begrenzungs- bzw. Trennbalken (bei EAN/UPC nach unten verlängert).
+        public let isGuard: Bool
     }
 
-    struct TextRun {
-        let text: String
+    /// Ein Lauf der Klarschriftzeile (Schrift A × Modulbreite, siehe `textHeight` …).
+    public struct TextRun: Hashable, Sendable {
+        public let text: String
         /// Linke Kante des ersten Zeichens.
-        let x: Int
+        public let x: Int
         /// Oberkante der Schriftzelle.
-        let y: Int
+        public let y: Int
     }
 
-    let module: Int
-    let width: Int
-    let height: Int
-    let barsX: Int
-    let barsY: Int
-    let barsWidth: Int
-    let barHeight: Int
-    let guardExtension: Int
-    let bars: [Bar]
-    let texts: [TextRun]
-    /// Klarschriftschrift (A × Modulbreite).
-    let textHeight: Int
-    let textCellWidth: Int
-    let textAdvance: Int
+    /// Modulbreite in Punkten (1…100).
+    public let module: Int
+    /// Feldbreite (ungedreht) inklusive EAN/UPC-Randzonen.
+    public let width: Int
+    /// Feldhöhe (ungedreht): Balkenhöhe + gegebenenfalls Abstand und Klarschriftzeile.
+    public let height: Int
+    /// Linke Kante des ersten Balkens (7 Module bei EAN-13/UPC-A/UPC-E mit Klarschrift unten, sonst 0).
+    public let barsX: Int
+    /// Oberkante der Balken (bei Klarschrift oben: Schrifthöhe + Abstand, sonst 0).
+    public let barsY: Int
+    /// Breite des Symbols von der linken Kante des ersten bis zur rechten Kante des letzten Balkens.
+    public let barsWidth: Int
+    /// Höhe der Balken (ohne Verlängerung der Begrenzungsbalken).
+    public let barHeight: Int
+    /// Verlängerung der Begrenzungsbalken nach unten (EAN/UPC), sonst 0.
+    public let guardExtension: Int
+    public let bars: [Bar]
+    public let texts: [TextRun]
+    /// Zellhöhe der Klarschrift (9 × Modulbreite).
+    public let textHeight: Int
+    /// Zeichenbreite der Klarschrift (5 × Modulbreite).
+    public let textCellWidth: Int
+    /// Zeichenvorschub der Klarschrift (6 × Modulbreite).
+    public let textAdvance: Int
     /// Horizontale Ausdehnung inklusive überstehender Klarschrift.
-    let inkMinX: Int
-    let inkMaxX: Int
+    public let inkMinX: Int
+    public let inkMaxX: Int
 
-    init(_ element: LinearBarcodeElement) {
+    /// Berechnet die Geometrie eines Barcodeelements (dieselbe wie `LinearBarcodeElement.layout`).
+    public init(_ element: LinearBarcodeElement) {
         let module = min(100, max(1, element.moduleWidth))
         self.module = module
         let barHeight = max(1, element.height)

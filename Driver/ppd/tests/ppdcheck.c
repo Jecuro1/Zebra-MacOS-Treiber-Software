@@ -18,7 +18,10 @@
  *   LGROUP / LOPTION / LCHOICE / LCUSTOM / LPARAM        lokalisierte Texte (UTF-8)
  *   ERROR     <beschreibung>                             Abbruch (Exit-Status 2)
  *
- * Die Sprache für ppdLocalize kommt aus der Umgebung (LANG=de_DE.UTF-8).
+ * Die Sprache für ppdLocalize kommt aus der Umgebung: LANG=de_DE.UTF-8 und zusätzlich SOFTWARE
+ * (beliebiger Wert, z. B. CUPS/2.3) – die libcups von macOS beachtet LANG nur bei gesetztem
+ * SOFTWARE und nimmt sonst die Systemsprache des Benutzers (AppleLanguages). LC_ALL,
+ * LC_MESSAGES und LANGUAGE dürfen nicht gesetzt sein (siehe cups_environment in generate_ppds.py).
  *
  * Bauen:  cc -std=c99 -Wall -Wextra -Wno-deprecated-declarations ppdcheck.c -o ppdcheck -lcups
  * Aufruf: ppdcheck <datei.ppd[.gz]> [eigene-größe …]    z. B. Custom.100x150mm

@@ -27,8 +27,11 @@ public enum StatusInterpreter {
     /// Erstellt die Momentaufnahme.
     ///
     /// Zustandsregeln (in dieser Reihenfolge):
-    /// 1. keine Daten → `unknown`
-    /// 2. mindestens eine Meldung mit Schweregrad `error` → `error`
+    /// 1. keine Statusdaten → `unknown`. Statusdaten sind `~HS`, `~HQES` oder ein SGD-Statuswert
+    ///    (`head.latch`, `media.status`, siehe ``hasSGDStatus(_:)``); reine Kennzahlen wie Akku-
+    ///    oder Odometerstand sagen nichts über die Druckbereitschaft aus.
+    /// 2. mindestens eine Meldung mit Schweregrad `error` oder ein von `~HQES` gemeldetes, aber
+    ///    unbekanntes Fehlerbit (``PrinterErrorFlags/unknownFlags``) → `error`
     /// 3. pausiert (`~HS` Feld c, `~HQES` Pause-Bit) → `paused`
     /// 4. mindestens eine Warnung → `warning`
     /// 5. Restetiketten > 0 oder Formate im Empfangspuffer > 0 → `printing`
@@ -36,7 +39,8 @@ public enum StatusInterpreter {
     public static func snapshot(hostStatus: HostStatus?, query: HostQueryStatus?, sgd: [String: String] = [:],
                                 now: Date = Date()) -> PrinterStatusSnapshot {
         let alerts = self.alerts(hostStatus: hostStatus, query: query, sgd: sgd)
-        let state = self.state(alerts: alerts, hostStatus: hostStatus, query: query, hasSGD: !sgd.isEmpty)
+        let state = self.state(alerts: alerts, hostStatus: hostStatus, query: query,
+                               hasSGDStatus: hasSGDStatus(sgd))
         return PrinterStatusSnapshot(
             timestamp: now,
             state: state,
@@ -84,6 +88,12 @@ public enum StatusInterpreter {
     }
 
     /// Meldungen aus `~HQES`. Kiosk-Sensorbits erzeugen keine Meldungen.
+    ///
+    /// Unbekannte Fehlerbits (``PrinterErrorFlags/unknownFlags``) haben keine passende
+    /// ``AlertKind`` und erzeugen daher keine Meldung – eine fachfremde Meldungsart würde eine
+    /// falsche Diagnose samt falscher Handlungsanweisung anzeigen. Sie setzen den Gesamtzustand
+    /// aber auf `error` (siehe ``snapshot(hostStatus:query:sgd:now:)``); ihre Bezeichnung liefert
+    /// ``PrinterErrorFlags/displayNames`` („Unbekannter Fehler 0x…“).
     public static func alertKinds(for query: HostQueryStatus) -> Set<AlertKind> {
         let errorMapping: [(PrinterErrorFlags, AlertKind)] = [
             (.mediaOut, .mediaOut),
@@ -129,11 +139,32 @@ public enum StatusInterpreter {
         return kinds
     }
 
+    /// `true`, wenn die SGD-Werte eine auswertbare Statusangabe enthalten, also `head.latch` oder
+    /// `media.status` mit einem echten Wert (kein Platzhalter wie leer, `?`, `null`, `nil`, `unknown`, `n/a`).
+    ///
+    /// Nur dann zählen SGD-Werte ohne `~HS`/`~HQES` als Statusquelle; Kennzahlen wie
+    /// `power.percent_full` oder `odometer.total_label_count` allein ergeben `unknown`.
+    public static func hasSGDStatus(_ sgd: [String: String]) -> Bool {
+        [SGDKey.headLatch, SGDKey.mediaStatus].contains { key in
+            sgd[key].map(isStatusValue) ?? false
+        }
+    }
+
+    /// Platzhalter, mit denen Drucker bzw. Abfragen „kein Wert“ ausdrücken.
+    static let placeholderValues: Set<String> = ["", "?", "null", "nil", "unknown", "n/a"]
+
+    /// `true` für einen echten SGD-Statuswert (kein Platzhalter).
+    static func isStatusValue(_ raw: String) -> Bool {
+        !placeholderValues.contains(normalizedWord(raw))
+    }
+
     /// Gesamtzustand gemäß den Regeln in ``snapshot(hostStatus:query:sgd:now:)``.
     static func state(alerts: [PrinterAlert], hostStatus: HostStatus?, query: HostQueryStatus?,
-                      hasSGD: Bool) -> PrinterState {
-        if hostStatus == nil, query == nil, !hasSGD { return .unknown }
+                      hasSGDStatus: Bool) -> PrinterState {
+        if hostStatus == nil, query == nil, !hasSGDStatus { return .unknown }
         if alerts.contains(where: { $0.severity == .error }) { return .error }
+        // Der Drucker meldet einen Fehler, den keine Meldungsart abdeckt: niemals „bereit“.
+        if let query, !query.errors.unknownFlags.isEmpty { return .error }
         let paused = hostStatus?.paused == true
             || query?.errors.contains(.paused) == true
             || alerts.contains(where: { $0.kind == .paused })

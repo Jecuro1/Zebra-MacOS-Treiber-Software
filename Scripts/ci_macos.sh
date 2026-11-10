@@ -12,10 +12,15 @@
 #   Scripts/ci_macos.sh test-swift app pkg      nur diese Schritte
 #
 # Die Schritte „install-test“ und „e2e-print“ verändern das System (sudo installer, lpadmin) und
-# laufen deshalb nur auf CI-Rechnern (CI=true) oder mit --allow-system-changes. Nach
-# „install-test“ wird am Ende des Aufrufs immer deinstalliert (auch nach Fehlern). Ein
-# fehlgeschlagener Testdruck („e2e-print“) ist nur eine Warnung, weil er von der CUPS-Konfiguration
-# des Rechners abhängt – mit --strict-e2e ein Fehler.
+# laufen deshalb nur auf CI-Rechnern (CI=true) oder mit --allow-system-changes. Hat
+# „install-test“ den Installer tatsächlich gestartet, wird am Ende des Aufrufs immer deinstalliert
+# (auch nach Fehlern) – sonst nicht, damit eine verweigerte oder vorzeitig abgebrochene
+# Probeinstallation keine vorhandene LabelWerk-Installation entfernt. Ein fehlgeschlagener
+# Testdruck („e2e-print“) ist nur eine Warnung, weil er von der CUPS-Konfiguration des Rechners
+# abhängt – mit --strict-e2e ein Fehler.
+#
+# Jeder Schritt läuft als eigener Prozess dieses Skripts (siehe lw_ci_run_step in common.sh):
+# Jeder fehlschlagende Befehl beendet den Schritt.
 #
 # Umgebung: LW_JOBS (parallele Jobs), DEVELOPER_ID_APP/DEVELOPER_ID_INSTALLER (optional; ohne
 # Angabe ad hoc signierte App und unsigniertes Paket), LW_STRICT_STRINGS=1.
@@ -68,6 +73,13 @@ STEPS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        "${LW_CI_PROCESS_ARG}")
+            # Intern (lw_ci_run_step): nur diese Funktion in diesem Prozess ausführen.
+            shift
+            [[ $# -gt 0 ]] || lw_die "${LW_CI_PROCESS_ARG} erwartet einen Funktionsnamen." 64
+            LW_CI_PROCESS_CALL=("$@")
+            break
+            ;;
         --allow-system-changes) ALLOW_SYSTEM=true; shift ;;
         --keep-going) KEEP_GOING=1; shift ;;
         --strict-strings) STRICT_STRINGS=1; shift ;;
@@ -89,6 +101,19 @@ if [[ ${#STEPS[@]} -eq 0 ]]; then
     STEPS=("${DEFAULT_STEPS[@]}")
 fi
 
+# Optionen, die jeder Schrittprozess erneut erhält (siehe lw_ci_run_step in common.sh).
+LW_CI_SCRIPT="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+LW_CI_PROCESS_OPTIONS=()
+if [[ "${ALLOW_SYSTEM}" == "true" ]]; then
+    LW_CI_PROCESS_OPTIONS+=(--allow-system-changes)
+fi
+if [[ "${STRICT_STRINGS}" == "1" ]]; then
+    LW_CI_PROCESS_OPTIONS+=(--strict-strings)
+fi
+if [[ "${STRICT_E2E}" == "1" ]]; then
+    LW_CI_PROCESS_OPTIONS+=(--strict-e2e)
+fi
+
 lw_is_macos || lw_die "Scripts/ci_macos.sh läuft nur auf macOS – unter Linux Scripts/ci_linux.sh verwenden." 2
 
 cd "${LW_REPO_ROOT}"
@@ -102,6 +127,10 @@ TEST_QUEUE="LabelWerkCI"
 TEST_PORT="${LW_E2E_PORT:-19100}"
 INSTALLED_DRIVER="/Library/Printers/LabelWerk"
 INSTALLED_PPDS="/Library/Printers/PPDs/Contents/Resources"
+# Legt „install-test“ an, unmittelbar bevor es den Installer startet; nur dann räumt der Ablauf
+# am Ende mit „uninstall-test“ auf. (Der Schritt läuft in einem eigenen Prozess – eine Variable
+# käme beim Ablauf nicht an.)
+INSTALL_MARKER="${CI_TMP}/install-test.started"
 
 require_system_changes() {
     if [[ "${ALLOW_SYSTEM}" != "true" ]]; then
@@ -273,6 +302,10 @@ require_root_owned() {
 step_install_test() {
     require_system_changes
     [[ -f "${PKG}" ]] || lw_die "Paket fehlt: ${PKG}"
+    # Ab hier kann das System verändert sein (schon preinstall entfernt einen alten Treiber):
+    # Der Ablauf deinstalliert am Ende – auch wenn der Installer selbst scheitert.
+    mkdir -p "$(dirname "${INSTALL_MARKER}")"
+    printf '%s\n' "${PKG}" > "${INSTALL_MARKER}"
     lw_run sudo installer -pkg "${PKG}" -target / -verboseR
     require_root_owned "${INSTALLED_DRIVER}/Filter/rastertolabelwerk" 755
     require_root_owned "${INSTALLED_DRIVER}/Filter/commandtolabelwerk" 755
@@ -327,14 +360,9 @@ step_e2e_print() {
     lpstat -p "${TEST_QUEUE}" >/dev/null 2>&1 || lw_die "Warteschlange ${TEST_QUEUE} fehlt – zuerst „install-test“."
     lw_run sudo cupsctl --debug-logging
     local status=0
-    # Eigene Subshell mit aktivem set -e (ein Aufruf mit || würde set -e abschalten).
-    set +e
-    (
-        set -euo pipefail
-        e2e_print
-    )
-    status=$?
-    set -e
+    # Eigener Prozess (wie jeder Schritt): Jeder fehlschlagende Befehl beendet den Testdruck,
+    # danach werden hier die Diagnosedaten gesammelt.
+    lw_ci_run_process step_e2e_print_job || status=$?
     if [[ "${status}" -ne 0 ]]; then
         lpstat -l -o "${TEST_QUEUE}" >&2 || true
         lpstat -l -p "${TEST_QUEUE}" >&2 || true
@@ -348,8 +376,9 @@ step_e2e_print() {
     return "${status}"
 }
 
-# Druckt ein PDF über die Testwarteschlange an einen lokalen TCP-„Drucker“ und prüft das ZPL.
-e2e_print() {
+# Teil von „e2e-print“ (eigener Prozess): druckt ein PDF über die Testwarteschlange an einen
+# lokalen TCP-„Drucker“ und prüft das empfangene ZPL.
+step_e2e_print_job() {
     local work="${CI_TMP}/e2e"
     rm -rf "${work}"
     mkdir -p "${work}"
@@ -404,8 +433,16 @@ PY
     lw_ok "PDF → CUPS → rastertolabelwerk → ZPL: ${bytes} Bytes, ^XA … ^GFA … ^XZ, ~SD20"
 }
 
+# Räumt nach „install-test“ auf (nur wenn dessen Installer gestartet wurde, siehe Ablauf).
 step_uninstall_test() {
-    lw_run sudo "${INSTALLED_DRIVER}/uninstall.sh" --yes --remove-queues
+    require_system_changes
+    local uninstaller="${INSTALLED_DRIVER}/uninstall.sh"
+    if [[ ! -x "${uninstaller}" ]]; then
+        # Der Installer brach ab, bevor er das Deinstallationsskript anlegen konnte.
+        uninstaller="${LW_REPO_ROOT}/Scripts/uninstall.sh"
+        lw_warn "${INSTALLED_DRIVER}/uninstall.sh fehlt – aufgeräumt wird mit ${uninstaller}."
+    fi
+    lw_run sudo "${uninstaller}" --yes --remove-queues
     [[ ! -e "${INSTALLED_DRIVER}" ]] || lw_die "Treiber wurde nicht entfernt."
     [[ ! -e "/Applications/${APP_NAME}.app" ]] || lw_die "App wurde nicht entfernt."
     if find "${INSTALLED_PPDS}" -name 'LabelWerk-*' | grep -q .; then
@@ -419,14 +456,18 @@ step_uninstall_test() {
 
 # --- Ablauf ------------------------------------------------------------------------------------
 
+# Schrittprozess: nur die eine Funktion ausführen – auf oberster Ebene, damit `set -e` wirkt.
+if [[ ${#LW_CI_PROCESS_CALL[@]} -gt 0 ]]; then
+    lw_ci_exec_process "${LW_CI_PROCESS_CALL[@]}"
+    exit 0
+fi
+
 lw_step "LabelWerk CI (macOS) – Schritte: ${STEPS[*]}"
 mkdir -p "${CI_TMP}"
+# Eine Markierung aus einem früheren (abgebrochenen) Aufruf darf hier keine Deinstallation auslösen.
+rm -f "${INSTALL_MARKER}"
 FAILED=()
-INSTALLED=0
 for step in "${STEPS[@]}"; do
-    if [[ "${step}" == "install-test" ]]; then
-        INSTALLED=1
-    fi
     if ! lw_ci_run_step "${step}" "step_${step//-/_}"; then
         FAILED+=("${step}")
         if [[ "${KEEP_GOING}" != "1" ]]; then
@@ -434,11 +475,12 @@ for step in "${STEPS[@]}"; do
         fi
     fi
 done
-# Nach einer Probeinstallation immer aufräumen – auch wenn ein Schritt fehlschlug.
-if [[ "${INSTALLED}" == "1" ]]; then
+# Nach einer (begonnenen) Probeinstallation immer aufräumen – auch wenn ein Schritt fehlschlug.
+if [[ -f "${INSTALL_MARKER}" ]]; then
     if ! lw_ci_run_step "uninstall-test" step_uninstall_test; then
         FAILED+=("uninstall-test")
     fi
+    rm -f "${INSTALL_MARKER}"
 fi
 
 lw_step "Zusammenfassung"

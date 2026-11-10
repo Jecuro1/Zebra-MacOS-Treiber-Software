@@ -8,7 +8,7 @@ import LabelWerkImaging
 /// Eigenschaften:
 /// * **Wirft nie.** Unbekannte oder nicht nachgebildete Befehle, ungültige Parameter und
 ///   Barcodedaten werden als `RenderWarning` gemeldet; die Verarbeitung läuft weiter.
-/// * Dauerhafte Druckereinstellungen (`^PW`, `^LL`, `^LH`, `^LS`, `^PO`, `^PM`, `^LR`, `^BY`,
+/// * Dauerhafte Druckereinstellungen (`^PW`, `^LL`, `^LH`, `^LS`, `^LT`, `^PO`, `^PM`, `^LR`, `^BY`,
 ///   `^CF`, `^FW`, `^CI`, `^MC`) gelten wie in der Firmware über Formatgrenzen hinweg.
 /// * Gespeicherte Objekte (`~DG`, `~DY`, `^DF`, `^IS`) leben nur innerhalb eines `render`-Aufrufs.
 /// * Formate ohne druckendes Feld (z. B. `^XA^JUS^XZ`, `^DF`-Definitionen) erzeugen kein Etikett.
@@ -19,7 +19,8 @@ import LabelWerkImaging
 /// Barcodes die linke untere Ecke der Balken und bei Grafiken/2D-Codes die linke untere Ecke –
 /// jeweils im gedrehten Koordinatensystem des Felds. Gedreht wird im Uhrzeigersinn
 /// (`R` = 90°, `I` = 180°, `B` = 270°); dabei liegt das Feldrechteck stets rechts unterhalb des
-/// Ursprungs. `^LH` verschiebt alle Felder, `^LS` verschiebt sie nach links.
+/// Ursprungs. `^LH` verschiebt alle Felder, `^LS` verschiebt sie nach links, `^LT` verschiebt das
+/// gesamte Druckbild um bis zu ±120 Punktzeilen (positiv = nach unten).
 public struct ZPLInterpreter: Sendable {
     public var dotsPerMM: Int
     public var defaultWidthDots: Int
@@ -50,7 +51,9 @@ public struct ZPLInterpreter: Sendable {
 /// Dauerhafte Einstellungen (gelten über Formatgrenzen).
 struct PrinterState {
     var labelHome = LabelPoint.zero
+    /// `^LS`: Verschiebung aller Felder nach links (Punkte).
     var labelShift = 0
+    /// `^LT`: Verschiebung des gesamten Druckbilds nach unten (Punktzeilen, −120…120).
     var labelTop = 0
     var printWidth: Int?
     var labelLength: Int?
@@ -408,7 +411,7 @@ struct InterpreterEngine {
                                      inverted: printer.inverted, mirrored: printer.mirrored,
                                      warnings: current.warnings)
         guard !current.serialRecords.isEmpty, current.quantity > 1 else {
-            labels.append(template)
+            labels.append(applyingLabelTop(template))
             return
         }
         // Serialisierung: je Seriennummer ein Etikett mit (Wiederholungen + 1) Kopien.
@@ -433,7 +436,21 @@ struct InterpreterEngine {
                 let replacement = scratch.makeElements(for: record.field, data: data).elements
                 label.elements.replaceSubrange(record.elementRange, with: replacement)
             }
-            labels.append(label)
+            labels.append(applyingLabelTop(label))
         }
+    }
+
+    /// `^LT`: verschiebt das fertige Druckbild (alle Elemente) um `labelTop` Punktzeilen.
+    ///
+    /// Die Verschiebung betrifft das gesamte Format – unabhängig davon, wo `^LT` darin steht –
+    /// und wird erst beim Druck angewandt: Mit `^IS` gespeicherte Bilder, per `^MCN`
+    /// übernommene Felder und `^FT`-Folgepositionen bleiben unverschoben, damit die
+    /// Verschiebung nicht doppelt wirkt.
+    private func applyingLabelTop(_ label: RenderedLabel) -> RenderedLabel {
+        guard printer.labelTop != 0 else { return label }
+        var shifted = label
+        let delta = LabelPoint(x: 0, y: printer.labelTop)
+        shifted.elements = label.elements.map { $0.offset(by: delta) }
+        return shifted
     }
 }

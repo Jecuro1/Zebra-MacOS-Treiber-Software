@@ -42,7 +42,8 @@ public enum EPL {
 
     /// Art der Etikettenerkennung für `Q`.
     public enum MediaSensing: Hashable, Sendable {
-        /// Etiketten mit Lücke, Lückenlänge in Punkten.
+        /// Etiketten mit Lücke, Lückenlänge in Punkten. Eine Lücke `<= 0` bedeutet „keine Lücke“
+        /// und wählt wie in EPL2 Endlosmaterial (`Q{länge},0`).
         case gap(Int)
         /// Schwarze Markierung (Höhe in Punkten) mit optionalem Versatz in Punkten.
         case blackMark(height: Int, offset: Int)
@@ -50,22 +51,43 @@ public enum EPL {
         case continuous
     }
 
+    /// Größte Lücken- bzw. Markenhöhe für `Q` in Punkten (alle Auflösungen).
+    public static let maximumGapDots = 240
+
+    /// Kleinste Lücken- bzw. Markenhöhe für `Q` laut EPL2-Handbuch: 16 Punkte bei 203 dpi
+    /// (und darunter), 18 Punkte ab 300 dpi.
+    public static func minimumGapDots(for resolution: Resolution) -> Int {
+        resolution.dpi >= 300 ? 18 : 16
+    }
+
     /// `Q{länge},{lücke}` / `Q{länge},B{marke}[,{versatz}]` / `Q{länge},0`.
-    public static func formLength(_ length: Int, sensing: MediaSensing) -> String {
+    ///
+    /// Lücke und Markenhöhe werden auf den gültigen Bereich der Auflösung begrenzt
+    /// (``minimumGapDots(for:)`` … ``maximumGapDots``); `.gap` mit einer Lücke `<= 0` ergibt
+    /// Endlosmaterial (`Q{länge},0`) statt still auf Lückenerkennung umzuschalten.
+    ///
+    /// - Parameter resolution: Auflösung des Druckers (bestimmt die Mindestlücke, Standard 203 dpi).
+    public static func formLength(_ length: Int, sensing: MediaSensing, resolution: Resolution = .dpi203) -> String {
         let l = clampInt(length, 1, 65_535)
+        let minimum = minimumGapDots(for: resolution)
         switch sensing {
         case .gap(let gap):
-            return "Q\(l),\(clampInt(gap, 16, 240))"
+            guard gap > 0 else { return "Q\(l),0" }
+            return "Q\(l),\(clampInt(gap, minimum, maximumGapDots))"
         case .blackMark(let height, let offset):
-            let base = "Q\(l),B\(clampInt(height, 16, 240))"
+            let base = "Q\(l),B\(clampInt(height, minimum, maximumGapDots))"
             return offset == 0 ? base : base + ",\(clampInt(offset, -9_999, 9_999))"
         case .continuous:
             return "Q\(l),0"
         }
     }
 
-    /// `Q{länge},{lücke}` – Etiketten mit Lücke.
-    public static func formLength(_ length: Int, gap: Int) -> String { formLength(length, sensing: .gap(gap)) }
+    /// `Q{länge},{lücke}` – Etiketten mit Lücke; `gap <= 0` wählt Endlosmaterial (`Q{länge},0`).
+    ///
+    /// - Parameter resolution: Auflösung des Druckers (Mindestlücke 16 bzw. 18 Punkte ab 300 dpi).
+    public static func formLength(_ length: Int, gap: Int, resolution: Resolution = .dpi203) -> String {
+        formLength(length, sensing: .gap(gap), resolution: resolution)
+    }
 
     /// `S{wert}` – Geschwindigkeitsstufe (1…6, modellabhängig).
     public static func speed(_ value: Int) -> String { "S\(clampInt(value, 1, 6))" }
@@ -281,10 +303,15 @@ public enum EPL {
     public static func transliterated(_ text: String) -> String { LegacyText.asciiTransliterated(text) }
 
     /// Kodiert ein EPL-Programm als Windows-1252 (Codepage `A`); nicht darstellbare Zeichen werden `?`.
+    ///
+    /// Der Text wird zuvor in die kanonisch zusammengesetzte Form (NFC) gebracht: Zerlegte
+    /// Zeichen, wie sie macOS-Dateinamen und manche eingefügten Texte enthalten (`a` + U+0308),
+    /// werden so zu `ä` (0xE4) statt zu `a?`.
     public static func encode(_ program: String) -> Data {
+        let normalized = program.precomposedStringWithCanonicalMapping
         var out = Data()
-        out.reserveCapacity(program.utf8.count)
-        for scalar in program.unicodeScalars {
+        out.reserveCapacity(normalized.utf8.count)
+        for scalar in normalized.unicodeScalars {
             if scalar.value < 0x80 || (0xA0...0xFF).contains(scalar.value) {
                 out.append(UInt8(scalar.value))
             } else if let byte = windows1252Extras[scalar.value] {

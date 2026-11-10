@@ -111,6 +111,11 @@ bool lw_job_add_page(lw_job *job, lw_bitmap *page, int page_number);
  * Schließt den Auftrag ab: zurückgehaltene Seite ausgeben, Sortierwiederholungen schreiben,
  * Endbefehle anhängen, Ausgabe leeren. Mit `canceled` werden keine Wiederholungen mehr
  * geschrieben und eine zurückgehaltene Seite nur einmal ausgegeben.
+ *
+ * Wurde der Auftragskopf noch nicht geschrieben (kein lw_job_begin, keine Seite), gilt:
+ *   - ohne Abbruch: Kopf und Endbefehle werden geschrieben (Auftrag ohne Etiketten);
+ *   - mit `canceled`: es wird gar nichts geschrieben – insbesondere kein `~JC`, das sonst eine
+ *     Kalibrierung mit Etikettenvorschub auslösen würde, und keine Endbefehle ohne Kopf.
  */
 bool lw_job_finish(lw_job *job, bool canceled);
 

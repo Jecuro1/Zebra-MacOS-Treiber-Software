@@ -14,7 +14,10 @@ struct FuzzTests {
         list += ["^A0N", "^AAN", "^ADR", "^AGI", "^A@B", "^GFA", "^GFB", "^GFC", "~DGR:X.GRF", "~DYR:Y",
                  "^XGR:X.GRF", "^XFR:F.ZPL", "^DFR:F.ZPL", "^FN1", "^SN", "^SF", "^FH", "^FH_", "^CC#", "^CT+",
                  "^CD;", "#XA", "+DG", "^BQN", "^BXN", "^B7N", "^BCN", "^FB", "^FT", "^FO", "^FD", "^FS", "^XA",
-                 "^XZ", "^PQ", "^ISR:I.GRF", "^ILR:I.GRF", "^MCN", "^MCY", "^FC%", "^FP"]
+                 "^XZ", "^PQ", "^ISR:I.GRF", "^ILR:I.GRF", "^MCN", "^MCY", "^FC%", "^FP",
+                 // Befehle, deren Parameter einzelne Buchstaben sind (Absturz bei ß/ﬁ/ŉ behoben).
+                 "^A", "^CF", "^CW", "^PO", "^FW", "^LT", "^SFA", "^SFAA,", "^FDß^SFA,", "^BKN,N,50,Y,N,",
+                 "^BXN,5,200,,,,_^FD", "^BXN,5,,,,,~^FD", "^BQN,2,4^FD", "^FDMM,", "^FDLM,N1,", "^FDD03048F,LM,"]
         return list
     }()
 
@@ -24,6 +27,11 @@ struct FuzzTests {
         "FF", "00", "FFFF0000", ":Z64:eJwDAAAAAAE=:0000", ":B64:AAAA:1234", "!!", "::", "gG", "zZ",
         "E:LOGO.GRF", "R:*.*", " ", "\r\n", "\n", "Ä", "€", "漢", "😀", "\u{0}", "\u{1D}", "^", "~",
         "%d.%m.%Y", ">;", ">:", ">5", ">8", ">", "<", "=", "@",
+        // Zeichen mit mehrteiliger Großschreibung und Nicht-ASCII-Ziffern in Parameterpositionen.
+        "ß", "ﬁ", "ŉ", "İ", "ǰ", "ßN", "Nß", "１２", "٣",
+        // Vorzeichenbehaftete Zahlen in Barcodedaten (QR-Byte-Segment, Data-Matrix-Escape).
+        "B-001hello", "B+001", "B0003a,b", "MM,B-001", "_d-12", "~d-12", "_d+12", "~d256", "~d１２３",
+        "N-1", "A12AABB", "B0006qrcode", "-120", "120", "-121",
     ]
 
     private static func randomInput(_ random: inout TestSupport.Random) -> String {
@@ -77,6 +85,16 @@ struct FuzzTests {
     @Test("Bösartige Grenzfälle")
     func pathologicalInputs() {
         let inputs = [
+            // Befunde der Render-Prüfung: früher Prozessabbruch.
+            "^XA^FO0,0^Aß^FDx^FS^XZ",
+            "^XA^POß^FO0,0^FDx^FS^XZ",
+            "^XA^FO0,0^A0N,30^FB300,2,0,ß^FDx^FS^XZ",
+            "^XA^FO0,0^FDß^SFA,ß^FS^PQ2^XZ",
+            "^XA^FO0,0^FDŉ^SFa,ŉ^FS^PQ3^XZ",
+            "^XA^FO0,0^BQN,2,4^FDMM,B-001hello^FS^XZ",
+            "^XA^FO0,0^BXN,5,200,,,,_^FDab_d-12^FS^XZ",
+            "^XA^FO0,0^BXN,5,200^FD~d-99~d+1~d999~d^FS^XZ",
+            "^XA^FO0,0^BQN,2,4^FDD-1-1FF,MM,B-9999,N-1,A^FS^XZ",
             "^XA^FO0,0^GFA,33554433,33554433,1,FF^FS^XZ",
             "^XA^FO0,0^GFA,1000000,1000000,99999999,^FS^XZ",
             "^XA^FO0,0^GFB,999999999,10,1,abc^FS^XZ",

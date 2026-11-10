@@ -81,12 +81,53 @@ enum TestSupport {
 
     // MARK: Externe Rückleser (zxing-cpp)
 
-    /// Python-Interpreter mit zxing-cpp und Pillow: `LABELWERK_ZXING_PYTHON`, sonst die virtuelle
-    /// Umgebung der Entwicklungsmaschine. Fehlt er, werden die Rückleser-Tests übersprungen.
-    static let pythonPath = ProcessInfo.processInfo.environment["LABELWERK_ZXING_PYTHON"]
-        ?? "/tmp/claude-0/-home-user-Zebra-MacOS-Treiber-Software/865082b1-4cb8-59eb-9b78-8386e46dc137/scratchpad/pyenv/bin/python"
+    /// Python-Interpreter mit zxing-cpp und Pillow für die Rückleser-Tests, oder `nil`.
+    ///
+    /// Gesucht wird in dieser Reihenfolge:
+    /// 1. `LABELWERK_ZXING_PYTHON` (Pfad zu einem Interpreter, z. B. einer virtuellen Umgebung
+    ///    mit `pip install zxing-cpp pillow`),
+    /// 2. `python3` und `python` im `PATH`.
+    ///
+    /// Ein Kandidat zählt nur, wenn er `zxingcpp` und `PIL` tatsächlich importieren kann. Fehlt
+    /// ein solcher Interpreter, werden die Rückleser-Tests mit Begründung übersprungen.
+    static let pythonPath: String? = {
+        var candidates: [String] = []
+        let environment = ProcessInfo.processInfo.environment
+        if let configured = environment["LABELWERK_ZXING_PYTHON"], !configured.isEmpty {
+            candidates.append(configured)
+        }
+        let searchPath = environment["PATH"] ?? "/usr/local/bin:/usr/bin:/bin"
+        for directory in searchPath.split(separator: ":") where !directory.isEmpty {
+            for name in ["python3", "python"] {
+                candidates.append(URL(fileURLWithPath: String(directory)).appendingPathComponent(name).path)
+            }
+        }
+        return candidates.first { isUsablePython($0) }
+    }()
 
-    static var hasZXing: Bool { FileManager.default.isExecutableFile(atPath: pythonPath) }
+    static var hasZXing: Bool { pythonPath != nil }
+
+    /// Hinweis für übersprungene Rückleser-Tests.
+    static let zxingSkipReason = Comment(
+        rawValue: "zxing-cpp/Pillow nicht gefunden – LABELWERK_ZXING_PYTHON auf einen Python-Interpreter mit "
+            + "„pip install zxing-cpp pillow“ setzen")
+
+    /// Kann `path` ausgeführt werden und `zxingcpp` sowie `PIL` importieren?
+    private static func isUsablePython(_ path: String) -> Bool {
+        guard FileManager.default.isExecutableFile(atPath: path) else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = ["-I", "-c", "import zxingcpp, PIL.Image"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        process.waitUntilExit()
+        return process.terminationReason == .exit && process.terminationStatus == 0
+    }
 
     /// Eigenes temporäres Verzeichnis je Testlauf.
     static func temporaryDirectory() throws -> URL {
@@ -98,6 +139,7 @@ enum TestSupport {
 
     /// Dekodiert alle Barcodes einer Bitmap mit zxing-cpp; Ergebnis: Liste von (Format, Text).
     static func decode(_ bitmap: MonoBitmap) throws -> [(format: String, text: String)] {
+        let python = try #require(Self.pythonPath, zxingSkipReason)
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let png = directory.appendingPathComponent("label.png")
@@ -110,7 +152,7 @@ enum TestSupport {
             print(getattr(result.format, "name", str(result.format)) + "\\t" + result.text.encode("unicode_escape").decode("ascii"))
         """
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.executableURL = URL(fileURLWithPath: python)
         process.arguments = ["-I", "-c", script, png.path]
         let output = Pipe()
         process.standardOutput = output

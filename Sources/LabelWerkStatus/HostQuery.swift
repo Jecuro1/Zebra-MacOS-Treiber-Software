@@ -61,11 +61,19 @@ public struct PrinterErrorFlags: OptionSet, Hashable, Sendable, Codable {
         (.paused, "Pausiert"),
     ]
 
+    /// Alle Bits, deren Bedeutung bekannt ist (Vereinigung von ``known``).
+    public static let knownMask = PrinterErrorFlags(rawValue: known.reduce(UInt64(0)) { $0 | $1.flag.rawValue })
+
+    /// Gesetzte Bits ohne bekannte Bedeutung (z. B. Gruppe 2 oder Flags neuerer Firmware).
+    ///
+    /// Der Drucker meldet damit einen Fehler, den LabelWerk nicht benennen kann; der
+    /// ``StatusInterpreter`` wertet solche Bits als Fehlerzustand.
+    public var unknownFlags: PrinterErrorFlags { subtracting(Self.knownMask) }
+
     /// Deutsche Bezeichnungen aller gesetzten Flags (unbekannte Bits als Hex-Wert).
     public var displayNames: [String] {
         var names = Self.known.filter { contains($0.flag) }.map(\.name)
-        let knownMask = Self.known.reduce(UInt64(0)) { $0 | $1.flag.rawValue }
-        let unknown = rawValue & ~knownMask
+        let unknown = unknownFlags.rawValue
         if unknown != 0 { names.append("Unbekannter Fehler 0x\(String(unknown, radix: 16, uppercase: true))") }
         return names
     }
@@ -130,11 +138,16 @@ public struct PrinterWarningFlags: OptionSet, Hashable, Sendable, Codable {
         .sensor1, .sensor2, .sensor3, .sensor4, .sensor5, .sensor6, .sensor7, .sensor8,
     ]
 
+    /// Alle Bits, deren Bedeutung bekannt ist (Vereinigung von ``known``).
+    public static let knownMask = PrinterWarningFlags(rawValue: known.reduce(UInt64(0)) { $0 | $1.flag.rawValue })
+
+    /// Gesetzte Bits ohne bekannte Bedeutung.
+    public var unknownFlags: PrinterWarningFlags { subtracting(Self.knownMask) }
+
     /// Deutsche Bezeichnungen aller gesetzten Flags (unbekannte Bits als Hex-Wert).
     public var displayNames: [String] {
         var names = Self.known.filter { contains($0.flag) }.map(\.name)
-        let knownMask = Self.known.reduce(UInt64(0)) { $0 | $1.flag.rawValue }
-        let unknown = rawValue & ~knownMask
+        let unknown = unknownFlags.rawValue
         if unknown != 0 { names.append("Unbekannte Warnung 0x\(String(unknown, radix: 16, uppercase: true))") }
         return names
     }
@@ -187,8 +200,27 @@ public struct HostQueryStatus: Hashable, Sendable, Codable {
 ///
 /// Erkennt die Zeilen `ERRORS:` und `WARNINGS:` unabhängig von Einrückung, Groß-/Kleinschreibung,
 /// Rahmung und Zeilenenden. Akzeptiert je Zeile `Kennziffer Gruppe2 Gruppe1`, `Gruppe2 Gruppe1`
-/// oder nur `Gruppe1`. Fehlt die Warnzeile (abgeschnittene Antwort), bleiben die Warnungen leer.
+/// oder nur `Gruppe1`. Fehlt die Warnzeile vollständig (Antwort vor `WARNINGS:` abgeschnitten),
+/// bleiben die Warnungen leer.
+///
+/// Eine **innerhalb** einer Flagzeile abgeschnittene Antwort wird dagegen nie stillschweigend
+/// als „keine Fehler“ gedeutet, sondern mit ``StatusParseError/invalidField(name:value:)``
+/// abgelehnt, damit der Aufrufer die Abfrage wiederholen kann:
+/// * Jede Hexgruppe muss genau ``groupDigits`` Stellen haben (eine gekürzte Gruppe wie
+///   `0000000` hätte gerade die niederwertigen Bits – Medium leer, Kopf offen – verloren).
+/// * Die Kennziffer muss `0` oder `1` sein; meldet sie `1` (Fehler bzw. Warnung vorhanden),
+///   müssen die Gruppen mindestens ein gesetztes Bit enthalten. Umgekehrt gelten gesetzte Bits
+///   auch bei Kennziffer `0` – die Bits sind die genauere Angabe.
+///
+/// Verbleibende Mehrdeutigkeit: Eine genau hinter Gruppe 2 abgeschnittene Zeile gleicht der
+/// Kurzform `[Kennziffer] Gruppe1`. Mit Kennziffer `1` und leerer Gruppe 2 (Regelfall) wird
+/// sie abgelehnt; ist Gruppe 2 belegt, werden deren Bits als Gruppe 1 gelesen (es bleibt bei
+/// einem Fehlerzustand). Nur bei der kennzifferlosen Kurzform einer Firmware, die keine
+/// Kennziffer sendet, ist eine solche Kürzung nicht erkennbar.
 public enum HostQueryParser {
+    /// Stellenzahl einer Hexgruppe laut ZPL-II-Handbuch (`hhhhhhhh`).
+    public static let groupDigits = 8
+
     public static func parse(_ data: Data) throws -> HostQueryStatus {
         try parse(text: StatusText.decode(data))
     }
@@ -200,7 +232,7 @@ public enum HostQueryParser {
 
         var errors: UInt64?
         var warnings: UInt64?
-        var unlabeled: [UInt64] = []
+        var unlabeled: [[String]] = []
 
         for line in lines {
             guard let colon = line.firstIndex(of: ":") else { continue }
@@ -211,15 +243,21 @@ public enum HostQueryParser {
                 if errors == nil { errors = try flagValue(tokens: tokens, label: "ERRORS") }
             } else if label.contains("WARN") {
                 if warnings == nil { warnings = try flagValue(tokens: tokens, label: "WARNINGS") }
-            } else if isCanonicalFlagLine(tokens), let value = try? flagValue(tokens: tokens, label: label) {
+            } else if isCanonicalFlagLine(tokens) {
                 // Nur exakt aufgebaute Zeilen („[0|1] hhhhhhhh hhhhhhhh“) gelten als unbeschriftete
                 // Flagzeilen – andere Doppelpunktzeilen (z. B. Odometer „1234 INCHES“) nicht.
-                unlabeled.append(value)
+                unlabeled.append(tokens)
             }
         }
         // Unbeschriftete Zeilen (exotische Firmware) in Reihenfolge: zuerst Fehler, dann Warnungen.
-        if errors == nil, !unlabeled.isEmpty { errors = unlabeled.removeFirst() }
-        if warnings == nil, !unlabeled.isEmpty { warnings = unlabeled.removeFirst() }
+        // Ausgewertet werden nur die tatsächlich benötigten Zeilen; ein Widerspruch zur Kennziffer
+        // wird dabei weitergereicht – ein Überspringen würde die Warnzeile zur Fehlerzeile machen.
+        if errors == nil, !unlabeled.isEmpty {
+            errors = try flagValue(tokens: unlabeled.removeFirst(), label: "ERRORS")
+        }
+        if warnings == nil, !unlabeled.isEmpty {
+            warnings = try flagValue(tokens: unlabeled.removeFirst(), label: "WARNINGS")
+        }
 
         guard let errors else {
             throw StatusParseError.missingSection("ERRORS")
@@ -228,47 +266,70 @@ public enum HostQueryParser {
                                warnings: PrinterWarningFlags(rawValue: warnings ?? 0))
     }
 
-    /// `true` für `[Kennziffer] hhhhhhhh [hhhhhhhh]` mit achtstelligen Hexgruppen.
+    /// `true` für `[Kennziffer] hhhhhhhh [hhhhhhhh]` mit Kennziffer `0`/`1` und achtstelligen
+    /// Hexgruppen.
     static func isCanonicalFlagLine(_ tokens: [String]) -> Bool {
         var groups = tokens
-        if groups.first?.count == 1, groups.count > 1 { groups.removeFirst() }
-        return (1...2).contains(groups.count) && groups.allSatisfy { $0.count == 8 && StatusText.hex($0) != nil }
+        if groups.count > 1, isIndicator(groups[0]) { groups.removeFirst() }
+        return (1...2).contains(groups.count) && groups.allSatisfy(isCompleteGroup)
     }
 
     /// Wertet `[Kennziffer] [Gruppe2] Gruppe1` aus.
     ///
-    /// Die Gruppen sind regulär achtstellig; ein einstelliges erstes Token ist daher immer die
-    /// Kennziffer. Steht nur die Kennziffer da (abgeschnittene Antwort), ist nur `0` eindeutig.
+    /// Die Gruppen sind stets ``groupDigits``-stellig; ein einstelliges erstes Token ist daher
+    /// immer die Kennziffer. Steht nur die Kennziffer da (abgeschnittene Antwort), ist nur `0`
+    /// eindeutig. Kürzere Gruppen (abgeschnittene Antwort) und eine Kennziffer `1` ohne
+    /// gesetztes Bit gelten als ungültig – sie würden sonst einen Drucker mit offenem Kopf
+    /// oder leerem Medium als bereit ausweisen.
     static func flagValue(tokens: [String], label: String) throws -> UInt64 {
+        let original = tokens.joined(separator: " ")
         var groups = tokens
         // Zusätzliche Wörter hinter den Gruppen (manche Firmware) ignorieren.
         if let firstNonHex = groups.firstIndex(where: { StatusText.hex($0) == nil }) {
             groups = Array(groups[..<firstNonHex])
         }
         guard !groups.isEmpty else {
-            throw StatusParseError.invalidField(name: label, value: tokens.joined(separator: " "))
+            throw StatusParseError.invalidField(name: label, value: original)
         }
         var indicator: String?
-        if groups[0].count == 1 { indicator = groups.removeFirst() }
+        if groups[0].count == 1 {
+            guard isIndicator(groups[0]) else {
+                throw StatusParseError.invalidField(name: label, value: original)
+            }
+            indicator = groups.removeFirst()
+        }
+        let value: UInt64
         switch groups.count {
         case 0:
             guard indicator == "0" else {
-                throw StatusParseError.invalidField(name: label, value: tokens.joined(separator: " "))
+                throw StatusParseError.invalidField(name: label, value: original)
             }
             return 0
-        case 1:
-            guard let value = StatusText.hex(groups[0]) else {
-                throw StatusParseError.invalidField(name: label, value: groups[0])
-            }
-            return value
-        case 2:
-            guard groups[0].count <= 8, groups[1].count <= 8,
-                  let high = StatusText.hex(groups[0]), let low = StatusText.hex(groups[1]) else {
+        case 1, 2:
+            guard groups.allSatisfy(isCompleteGroup) else {
                 throw StatusParseError.invalidField(name: label, value: groups.joined(separator: " "))
             }
-            return high << 32 | low
+            // isCompleteGroup garantiert gültige Hexziffern.
+            let parsed = groups.map { StatusText.hex($0) ?? 0 }
+            value = parsed.count == 2 ? parsed[0] << 32 | parsed[1] : parsed[0]
         default:
-            throw StatusParseError.invalidField(name: label, value: tokens.joined(separator: " "))
+            throw StatusParseError.invalidField(name: label, value: original)
         }
+        // Kennziffer 1 = „vorhanden“: ohne gesetztes Bit ist die Zeile unvollständig oder
+        // widersprüchlich. Lieber ablehnen (Aufrufer wiederholt) als „Bereit“ melden.
+        if indicator == "1", value == 0 {
+            throw StatusParseError.invalidField(name: label, value: original)
+        }
+        return value
+    }
+
+    /// Kennziffer `0` (nicht vorhanden) oder `1` (vorhanden).
+    static func isIndicator(_ token: String) -> Bool {
+        token == "0" || token == "1"
+    }
+
+    /// Vollständige Hexgruppe mit genau ``groupDigits`` Stellen.
+    static func isCompleteGroup(_ token: String) -> Bool {
+        token.unicodeScalars.count == groupDigits && StatusText.hex(token) != nil
     }
 }

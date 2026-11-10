@@ -12,6 +12,21 @@ private let eplCases: [CommandCase] = [
     CommandCase(EPL.formLength(1218, sensing: .blackMark(height: 24, offset: 16)), "Q1218,B24,16"),
     CommandCase(EPL.formLength(1218, sensing: .blackMark(height: 24, offset: -8)), "Q1218,B24,-8"),
     CommandCase(EPL.formLength(600, sensing: .continuous), "Q600,0"),
+    // Regression: Lücke 0 (bzw. negativ) heißt Endlosmaterial – nicht still `Q…,16`.
+    CommandCase(EPL.formLength(400, gap: 0), "Q400,0"),
+    CommandCase(EPL.formLength(400, gap: -5), "Q400,0"),
+    CommandCase(EPL.formLength(400, sensing: .gap(0)), "Q400,0"),
+    CommandCase(EPL.formLength(400, gap: 1), "Q400,16"),
+    CommandCase(EPL.formLength(400, gap: 500), "Q400,240"),
+    // Regression: Mindestlücke 18 Punkte ab 300 dpi.
+    CommandCase(EPL.formLength(1800, gap: 5, resolution: .dpi300), "Q1800,18"),
+    CommandCase(EPL.formLength(1800, gap: 16, resolution: .dpi300), "Q1800,18"),
+    CommandCase(EPL.formLength(1800, gap: 36, resolution: .dpi300), "Q1800,36"),
+    CommandCase(EPL.formLength(1800, gap: 0, resolution: .dpi300), "Q1800,0"),
+    CommandCase(EPL.formLength(1800, sensing: .blackMark(height: 10, offset: 0), resolution: .dpi300), "Q1800,B18"),
+    CommandCase(EPL.formLength(1218, sensing: .blackMark(height: 10, offset: 0)), "Q1218,B16"),
+    CommandCase(EPL.formLength(1218, gap: 16, resolution: .dpi203), "Q1218,16"),
+    CommandCase(EPL.formLength(900, gap: 10, resolution: .dpi152), "Q900,16"),
     CommandCase(EPL.speed(4), "S4"),
     CommandCase(EPL.speed(9), "S6"),
     CommandCase(EPL.speed(0), "S1"),
@@ -113,6 +128,43 @@ struct EPLTests {
         #expect(Array(EPL.encode("„Test“ – ok…")) == [0x84, 0x54, 0x65, 0x73, 0x74, 0x93, 0x20, 0x96, 0x20, 0x6F, 0x6B, 0x85])
         #expect(Array(EPL.encode("日本")) == [0x3F, 0x3F])
         #expect(EPL.encode("N\nP1\n") == Data("N\nP1\n".utf8))
+    }
+
+    @Test("Windows-1252: zerlegte Zeichen (NFD) werden zusammengesetzt")
+    func encodingDecomposed() {
+        // Regression: „a“ + U+0308 ergab früher [0x61, 0x3F] statt 0xE4.
+        #expect(Array(EPL.encode("a\u{0308}")) == [0xE4])
+        #expect(EPL.encode("a\u{0308}") == EPL.encode("\u{00E4}"))
+        let nfd = "Gru\u{0308}ße – A\u{0308}rger, Cafe\u{0301}, N\u{0303}"
+        #expect(Array(EPL.encode(nfd)) == [0x47, 0x72, 0xFC, 0xDF, 0x65, 0x20, 0x96, 0x20, 0xC4, 0x72, 0x67, 0x65,
+                                           0x72, 0x2C, 0x20, 0x43, 0x61, 0x66, 0xE9, 0x2C, 0x20, 0xD1])
+        #expect(EPL.encode(nfd) == EPL.encode(nfd.precomposedStringWithCanonicalMapping))
+        // Vollständiges Kommando mit zerlegtem Umlaut (wie aus einem macOS-Dateinamen).
+        #expect(Array(EPL.encode(EPL.text("Gro\u{0308}ße", x: 0, y: 0)))
+                == Array("A0,0,0,3,1,1,N,\"".utf8) + [0x47, 0x72, 0xF6, 0xDF, 0x65, 0x22])
+        // Ohne Entsprechung in Windows-1252 bleibt es beim Ersatzzeichen – je Zeichen genau eins.
+        #expect(Array(EPL.encode("q\u{0307}")) == [0x71, 0x3F])
+        #expect(EPL.transliterated("Gro\u{0308}ße") == "Groesse")
+    }
+
+    @Test("Mindestlücke je Auflösung")
+    func minimumGap() {
+        #expect(EPL.minimumGapDots(for: .dpi152) == 16)
+        #expect(EPL.minimumGapDots(for: .dpi203) == 16)
+        #expect(EPL.minimumGapDots(for: .dpi300) == 18)
+        #expect(EPL.minimumGapDots(for: .dpi600) == 18)
+        #expect(EPL.maximumGapDots == 240)
+        for resolution in Resolution.allCases {
+            for gap in -3...300 {
+                let line = EPL.formLength(1000, gap: gap, resolution: resolution)
+                let value = Int(line.split(separator: ",")[1])!
+                if gap <= 0 {
+                    #expect(value == 0)
+                } else {
+                    #expect((EPL.minimumGapDots(for: resolution)...EPL.maximumGapDots).contains(value), "\(line)")
+                }
+            }
+        }
     }
 
     @Test("ASCII-Umschrift")

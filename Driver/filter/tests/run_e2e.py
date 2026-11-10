@@ -12,8 +12,9 @@ Ablauf je Testfall:
      PAGE-Meldungen und – bei ZPL – die dekodierten Grafikdaten geprüft.
 
 Weitere Prüfungen: Fehlerfälle (planar, unbekannte Farbräume, abgeschnittene Daten, falsche
-Aufrufe), Seiten der Höhe 0, SIGTERM-Abbruch, eine 2400 × 32000-Seite mit Speichermessung,
-``commandtolabelwerk`` und die Test-PPD mit ``cupstestppd``.
+Aufrufe), Seiten der Höhe 0, SIGTERM-Abbruch (auch vor der ersten Seite und vor dem Datenstrom),
+eine 2400 × 32000-Seite mit Speichermessung, ``commandtolabelwerk`` und die Test-PPD mit
+``cupstestppd``.
 
 Aufruf:
     run_e2e.py --bindir build [--quick] [--wrapper "valgrind -q …"] [--only MUSTER] [--keep]
@@ -724,6 +725,73 @@ def special_tests(r: Runner):
                 errors)
         r.check("abgebrochen" in err, "keine Abbruchmeldung: %r" % err[-300:], errors)
 
+    def cancel_run(directory: str, opts: str, prefix: bytes) -> Tuple[int, bytes, str]:
+        """Startet den Filter an einer Pipe, schickt `prefix`, bricht per SIGTERM ab und schließt
+        dann die Pipe (wie CUPS, das auch den vorgelagerten Filter beendet)."""
+        out_path = os.path.join(directory, "out.bin")
+        with open(out_path, "wb") as out:
+            proc = subprocess.Popen(r.wrapper + [filt, "1", "u", "t", "3", opts], stdin=subprocess.PIPE,
+                                    stdout=out, stderr=subprocess.PIPE, env=plain_env())
+        lines: List[str] = []
+        ready = threading.Event()
+
+        def read_stderr():
+            for raw_line in proc.stderr:
+                line = raw_line.decode("utf-8", "replace")
+                lines.append(line)
+                if "Modell=" in line:   # erst nach dem Einrichten des SIGTERM-Handlers gemeldet
+                    ready.set()
+
+        reader = threading.Thread(target=read_stderr, daemon=True)
+        reader.start()
+        if prefix:
+            proc.stdin.write(prefix)
+            proc.stdin.flush()
+        if not ready.wait(60):
+            proc.kill()
+            proc.wait()
+            reader.join(timeout=10)
+            return -999, b"", "Filter ist nicht gestartet: " + "".join(lines)
+        time.sleep(0.1 if not r.wrapper else 1.0)   # Präfix lesen lassen; Filter wartet dann an der Pipe
+        proc.send_signal(signal.SIGTERM)
+        time.sleep(0.2 if not r.wrapper else 1.0)
+        try:
+            proc.stdin.close()
+        except BrokenPipeError:
+            pass
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        reader.join(timeout=10)
+        with open(out_path, "rb") as f:
+            return proc.returncode, f.read(), "".join(lines)
+
+    def sigterm_before_first_page(directory: str, errors: List[str]):
+        """Regression: Abbruch, bevor eine Seite vollständig angekommen ist. Der Filter darf weder
+        den Auftragskopf (Startbefehle, ~SD, ~TA und ~JC – eine Kalibrierung mit Vorschub) noch
+        Endbefehle senden und endet mit Exitcode 0 und INFO-Meldung – auch, wenn der Abbruch vor
+        dem Synchronisationswort kommt und cupsRasterOpen deshalb scheitert."""
+        raster, _, _ = r.run_mkraster(directory, [P_TEXT], "native")
+        with open(raster, "rb") as f:
+            data = f.read()
+        prefixes = (("ohne Daten", b""), ("nur Sync-Wort", data[:4]), ("halber Seitenkopf", data[:4 + 900]))
+        variants = (("ZPL", "lwCalibrate=True lwDarkness=10 lwTearOff=10 lwStartCmd=%s lwEndCmd=%s"
+                     % (b64u("^XA^FXstart^XZ"), b64u("~JR"))),
+                    ("EPL", "lwLanguage=EPL lwDarkness=10 lwStartCmd=%s lwEndCmd=%s" % (b64u("OD"), b64u("ENDE"))))
+        for lang, opts in variants:
+            for label, prefix in prefixes:
+                code, out, err = cancel_run(directory, opts, prefix)
+                what = "%s, %s" % (lang, label)
+                tail = err.strip().splitlines()[-2:]
+                r.check(code == 0, "%s: Exitcode %d nach SIGTERM: %r" % (what, code, tail), errors)
+                r.check(out == b"", "%s: Ausgabe nach Abbruch vor der ersten Seite: %r" % (what, out[:120]), errors)
+                r.check("INFO: Auftrag abgebrochen – 0 Etikett(en)" in err,
+                        "%s: keine Abbruchmeldung: %r" % (what, tail), errors)
+                r.check("ERROR:" not in err, "%s: unerwartete Fehlermeldung: %r" % (what, tail), errors)
+                r.check("PAGE:" not in err, "%s: unerwartete PAGE-Meldung" % what, errors)
+
     def big_page(directory: str, errors: List[str]):
         for comp, limit in (("Z64", 64.0), ("Hex", 80.0)):
             raster, infos, dump = r.run_mkraster(directory, ["w=2400,h=32000,pattern=text,seed=5"], "native")
@@ -753,6 +821,7 @@ def special_tests(r: Runner):
 
     r.run_custom("aufruf-fehler", True, bad_invocations)
     r.run_custom("sigterm-abbruch", True, sigterm)
+    r.run_custom("sigterm-vor-erster-seite", True, sigterm_before_first_page)
     r.run_custom("grosse-seite-2400x32000", False, big_page)
     r.run_custom("cupstestppd-test-ppd", False, cupstestppd)
 
