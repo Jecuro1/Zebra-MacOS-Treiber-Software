@@ -222,7 +222,7 @@ final class USBPrinterSession: @unchecked Sendable {
             )
 
             let started = ContinuousClock.now
-            let result = Self.transfer { count in
+            let result = Self.transfer { (count: UnsafeMutablePointer<Int>) in
                 try outPipe.sendIORequest(with: buffer, bytesTransferred: count, completionTimeout: Self.slice)
             }
             let elapsed = started.duration(to: .now).timeInterval
@@ -259,7 +259,7 @@ final class USBPrinterSession: @unchecked Sendable {
             }
             let requested = min(remaining, Self.slice)
             let started = ContinuousClock.now
-            let result = Self.transfer { count in
+            let result = Self.transfer { (count: UnsafeMutablePointer<Int>) in
                 try inPipe.sendIORequest(with: buffer, bytesTransferred: count, completionTimeout: requested)
             }
             let elapsed = started.duration(to: .now).timeInterval
@@ -281,16 +281,16 @@ final class USBPrinterSession: @unchecked Sendable {
 
     /// Führt eine IOUSBHost-Übertragung aus und liefert die übertragene Byteanzahl – auch im Fehlerfall.
     ///
-    /// Der Zählertyp wird aus der Signatur von `sendIORequest` abgeleitet (`NSUInteger *`).
-    private static func transfer<Count: BinaryInteger>(
-        _ body: (UnsafeMutablePointer<Count>) throws -> Void
+    /// `NSUInteger *` wird in Swift als `UnsafeMutablePointer<Int>` importiert.
+    private static func transfer(
+        _ body: (UnsafeMutablePointer<Int>) throws -> Void
     ) -> (count: Int, error: Error?) {
-        var count: Count = 0
+        var count = 0
         do {
-            try body(&count)
-            return (Int(count), nil)
+            try withUnsafeMutablePointer(to: &count) { try body($0) }
+            return (count, nil)
         } catch {
-            return (Int(count), error)
+            return (count, error)
         }
     }
 
