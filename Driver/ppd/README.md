@@ -56,7 +56,7 @@ derselben Datei gelöscht, sodass nie beide nebeneinander liegen.
     "dpi": 203,
     "languages": ["zpl", "epl"],
     "nickName": "Zebra ZD421t (203 dpi) - LabelWerk",
-    "ieee1284": "MFG:Zebra Technologies;CMD:ZPL,EPL2;MDL:ZTC ZD421-203dpi ZPL;CLS:PRINTER;"
+    "ieee1284": "MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL,EPL2;MODEL:ZTC ZD421-203dpi ZPL;CLASS:PRINTER;"
   }
 ]
 ```
@@ -75,14 +75,49 @@ unabhängig von `--model`), `*PSVersion`, `*LanguageLevel "3"`, `*ColorDevice: F
 `*DefaultColorSpace: Gray`, `*TTRasterizer: Type42`, `*Throughput` (Etiketten/Minute bei
 Höchstgeschwindigkeit mit dem Standardformat).
 
-**Gerätezuordnung.** `*1284DeviceID: "MFG:Zebra Technologies;CMD:<Sprachen>;MDL:<mdl>;CLS:PRINTER;"`
-– genau einer je Datei. `MDL` ist der `ZTC …`-Eintrag aus `ieee1284`, der zur Auflösung der
-Datei passt (`ZTC ZD421-300dpi ZPL` in der 300-dpi-PPD), sonst der erste `ZTC …`-Eintrag ohne
-Auflösung, sonst der erste sonstige Eintrag (`ZDesigner …` sind Windows-Treibernamen und werden
-übergangen). Damit wählt macOS beim Anschließen automatisch die PPD mit der richtigen Auflösung.
-Zusätzlich führt jede PPD neben `*Product: "(Zebra <Name>)"` die passenden IEEE-1284-Namen als
-weitere `*Product`-Einträge (`(ZTC ZD421-203dpi ZPL)`), über die macOS Bonjour-/IPP-Drucker
-zuordnet. Generische PPDs haben keinen `*1284DeviceID`.
+**Gerätezuordnung.** `*1284DeviceID: "MANUFACTURER:Zebra Technologies[ ];COMMAND SET:<Sprachen>;MODEL:<mdl>;CLASS:PRINTER;"`
+– genau einer je Datei, mit denselben Schlüsselnamen in derselben Reihenfolge wie die Drucker
+selbst. `MODEL` ist der `ZTC …`-Eintrag aus `ieee1284`, der zur Auflösung der Datei passt
+(`ZTC ZD421-300dpi ZPL` in der 300-dpi-PPD), sonst der erste `ZTC …`-Eintrag ohne Auflösung, sonst
+der erste sonstige Eintrag (`ZDesigner …` sind Windows-Treibernamen und werden übergangen). Für die
+Baureihen in `IEEE1284_PLAIN_MODEL_FAMILIES` (G-Serie `GX`) gilt der `ZTC …`-Eintrag ohne Auflösung
+zuerst (`ZTC GX420d`). Link-OS-Modelle (Ausstattung `linkOS`) schreiben den Hersteller wie das Gerät
+mit Leerzeichen vor dem Semikolon (`Zebra Technologies ;`). Damit wählt macOS beim Anschließen per
+USB und beim Hinzufügen per IP-Adresse (LPD/„HP Jetdirect – Socket“, Kennung per SNMP)
+automatisch die PPD mit der richtigen Auflösung. Zusätzlich führt jede PPD neben
+`*Product: "(Zebra <Name>)"` die passenden IEEE-1284-Namen als weitere `*Product`-Einträge
+(`(ZTC ZD421-203dpi ZPL)`), über die macOS Bonjour-/IPP-Drucker zuordnet. Generische PPDs haben
+keinen `*1284DeviceID`.
+
+*Belege* (Stand November 2026):
+
+* So melden die Drucker ihre Kennung – immer mit langen Schlüsselnamen:
+  * ZD421 (203 dpi) per SNMP (HP-OID `1.3.6.1.4.1.11.2.3.9.1.1.7.0` und Zebra-OIDs
+    `1.3.6.1.4.1.10642.1.3.0`/`.1.10.0`): `MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD421-203dpi ZPL;CLASS:PRINTER;OPTIONS:XML;`
+    – <https://gist.github.com/fproperzi/5269baf2e493046b05ff341029e8e5f5>
+  * ZD611/ZD621 (203/300 dpi) mit Leerzeichen, GX420d/GX420t/GX430d/GX430t ohne Leerzeichen und
+    mit Variantennamen (`MODEL:ZTC GX420d;`) – Treibertabelle von LPrint (Michael Sweet):
+    <https://github.com/michaelrsweet/lprint/blob/master/lprint-zpl.h>
+  * ZQ520 im CPCL-Modus (`^HZA`): `MANUFACTURER:Zebra Technologies ;COMMAND SET:CPCL;MODEL:ZTC ZQ520 (CPCL);…`
+    – <https://developer.zebra.com/forum/25680>
+  * LP 2844-Z per USB: `MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC LP2844-Z-200dpi;CLASS:PRINTER;…`
+    – <https://usb-ids.gowdy.us/read/UD/0a5f>
+* CUPS ordnet PPDs mit `regex_device_id` in `scheduler/cups-driverd.cxx` zu: Aus der Kennung des
+  Geräts entsteht `(MANUFACTURER:.*<wert>.*;).*(COMMAND SET:.*<wert>.*;)?.*(MODEL:.*<wert>.*;)` –
+  die Schlüssel werden wörtlich übernommen („We assume that the device ID in the PPD and the device
+  ID reported by the device itself use the same attribute names and order of attributes“). Die
+  frühere Schreibweise `MFG:…;CMD:…;MDL:…;` passte deshalb auf keinen Zebra-Drucker.
+  <https://github.com/apple/cups/blob/master/scheduler/cups-driverd.cxx>
+  (`tests/test_generate.py` bildet den Vergleich nach.)
+* Nicht belegt und deshalb unverändert: GK420/GC420 (vermutlich wie GX `ZTC GK420d`), Xi4, ZM, S4M,
+  LP/TLP 28xx (der Katalog kennt `ZTC LP2844-Z-200dpi` nicht), Mobildrucker im CPCL-Modus
+  (`ZTC ZQ520 (CPCL)` – eine PPD hat nur einen `*1284DeviceID`, gewählt ist die ZPL-Kennung). Diese
+  Modelle ordnet macOS weiterhin über `*Product`/NickName zu oder sie werden in LabelWerk bzw. in
+  den Systemeinstellungen gewählt.
+* macOS wählt bei „AirPrint“/IPP Everywhere (Standard beim Hinzufügen per IP-Adresse, wenn der
+  Drucker IPP kann) keinen PPD-Treiber, sondern den eigenen AirPrint-Treiber. Solche
+  Warteschlangen stellt die App automatisch auf den LabelWerk-Treiber um (ARCHITECTURE.md §9
+  „Übernahme von macOS-Warteschlangen“).
 
 **CUPS (§10).**
 

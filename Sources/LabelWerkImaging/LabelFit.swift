@@ -20,10 +20,12 @@ public struct PageSizePoints: Hashable, Sendable, Codable {
 /// „An Etikett anpassen“ – Schritt F aus ARCHITECTURE.md §8.
 ///
 /// macOS-Programme schicken oft die Systempapiergröße (A4/Letter, „Andere 210 × 297 mm“) statt der
-/// Etikettengröße der Warteschlange. Weicht die Seitengröße um mehr als 2 mm vom Etikett ab
+/// Etikettengröße der Warteschlange – und drehen ein quer liegendes Etikett dabei oft um 90° gegen
+/// den Uhrzeigersinn. Weicht die Seitengröße um mehr als 2 mm vom Etikett ab
 /// (``PrintSettings/labelWidthHundredthsMM`` × ``PrintSettings/labelHeightHundredthsMM``), wird das
-/// Graustufenbild **vor** dem Rastern auf seinen Inhalt (`L < 250`) zugeschnitten, bei Bedarf per
-/// Flächenmittel verkleinert (nie vergrößert) und mittig auf ein weißes Etikett gesetzt.
+/// Graustufenbild **vor** dem Rastern auf seinen Inhalt (`L < 250`) zugeschnitten, bei Bedarf um 90°
+/// gedreht (Inhalt und Etikett verschieden ausgerichtet), per Flächenmittel auf das Etikett abzüglich
+/// 1,5 mm Rand je Seite vergrößert oder verkleinert und mittig auf ein weißes Etikett gesetzt.
 ///
 /// Byte-gleich mit `lw_fit` im CUPS-Filter und `fit_page` der Python-Referenz: Bis auf die
 /// Umrechnung Punkte → 1/100 mm (``hundredthsMM(fromPoints:)``, `Double`) rechnet alles mit
@@ -33,21 +35,29 @@ public enum LabelFit {
     public static let contentLevel: UInt8 = 250
     /// Abweichung in 1/100 mm, ab der angepasst wird (mehr als 2 mm).
     public static let toleranceHundredthsMM = 200
-    /// Größte Etikettenseite in Punkten (ZPL `^LL`).
+    /// Größte Etikettenseite in Punkten (ZPL `^LL`); auch Obergrenze einer freien Seite beim
+    /// Vergrößern.
     public static let maxDots = 32_000
+    /// Sicherheitsrand je Seite in 1/100 mm (1,5 mm).
+    public static let marginHundredthsMM = 150
     /// Größte gültige Seitenseite in Punkten.
     public static let maxPagePoints = 100_000.0
     /// Größte unterstützte Auflösung (wie der Filter: größere Werte gelten als unbekannt).
     public static let maxDPI = 100_000
 
-    /// Zielgröße in Punkten der Seite; `nil` = frei (Endlosmaterial: Länge beliebig).
+    /// Etikett in Punkten der Seite (`nil` = frei: Endlosmaterial, Länge beliebig) und
+    /// Sicherheitsrand je Seite in Punkten (`marginX` links/rechts, `marginY` oben/unten).
     public struct Plan: Hashable, Sendable {
         public var width: Int?
         public var height: Int?
+        public var marginX: Int
+        public var marginY: Int
 
-        public init(width: Int?, height: Int?) {
+        public init(width: Int?, height: Int?, marginX: Int = 0, marginY: Int = 0) {
             self.width = width
             self.height = height
+            self.marginX = marginX
+            self.marginY = marginY
         }
     }
 
@@ -58,7 +68,12 @@ public enum LabelFit {
         return Int((points * 2540.0 / 72.0 + 0.5).rounded(.down))
     }
 
-    /// Schritt F.1: Zielgröße oder `nil` (keine Anpassung: `Off`, Etikett bzw. Seitengröße
+    /// 1,5 mm in Punkten bei `dpi`, kaufmännisch gerundet: `(150 · dpi + 1270) / 2540`.
+    public static func margin(dpi: Int) -> Int {
+        (marginHundredthsMM * dpi + 1270) / 2540
+    }
+
+    /// Schritt F.1: Etikett samt Rand oder `nil` (keine Anpassung: `Off`, Etikett bzw. Seitengröße
     /// unbekannt, Größe passt auf ± 2 mm, Auflösung ungültig, Bild ohne Fläche).
     ///
     /// Bei Endlosmaterial oder Etikettenlänge 0 ist die Länge frei; bei einer wirksamen Drehung um
@@ -81,7 +96,7 @@ public enum LabelFit {
         for value in [width, height] {
             if let value, !(1...maxDots).contains(value) { return nil }
         }
-        return Plan(width: width, height: height)
+        return Plan(width: width, height: height, marginX: margin(dpi: xDPI), marginY: margin(dpi: yDPI))
     }
 
     /// Schritt F.2: Rahmen der Punkte mit `L < 250`; `nil` bei leerer Seite.
@@ -116,31 +131,52 @@ public enum LabelFit {
         return (left, top, right - left + 1, bottom - top + 1)
     }
 
-    /// Schritt F.3: Zielgröße des Inhalts – nie größer als der Inhalt, Seitenverhältnis erhalten
-    /// (die abhängige Seite kaufmännisch gerundet, mindestens 1).
-    public static func targetSize(contentWidth bw: Int, contentHeight bh: Int, plan: Plan) -> (width: Int, height: Int) {
-        func height(forWidth target: Int) -> Int { max(1, (2 * bh * target + bw) / (2 * bw)) }
-        func width(forHeight target: Int) -> Int { max(1, (2 * bw * target + bh) / (2 * bh)) }
-        switch (plan.width, plan.height) {
-        case let (w?, h?):
-            if bw <= w && bh <= h { return (bw, bh) }
-            return w * bh <= h * bw ? (w, height(forWidth: w)) : (width(forHeight: h), h)
-        case let (w?, nil):
-            return bw <= w ? (bw, bh) : (w, height(forWidth: w))
-        case let (nil, h?):
-            return bh <= h ? (bw, bh) : (width(forHeight: h), h)
-        case (nil, nil):
-            return (bw, bh)
-        }
+    /// Schritt F.3: Drehung des Inhalts `bw` × `bh` – ``QuarterTurn/r90`` (im Uhrzeigersinn),
+    /// ``QuarterTurn/r270`` (gegen den Uhrzeigersinn) oder ``QuarterTurn/r0``.
+    ///
+    /// Nur bei festem Etikett und nur, wenn der gedrehte Inhalt mehr als 10 % größer würde
+    /// (`s90 > 1,1 · s0` mit `s0 = min(W'/bw, H'/bh)`, `s90 = min(W'/bh, H'/bw)`). Das ist genau dann
+    /// der Fall, wenn Inhalt und Etikett (abzüglich Rand) je um mehr als 10 % verschieden ausgerichtet
+    /// sind: Hochformat-Inhalt auf Querformat-Etikett wird im Uhrzeigersinn gedreht (macht die
+    /// Drehung gegen den Uhrzeigersinn rückgängig, mit der macOS ein Querformat auf Hochformat legt),
+    /// Querformat-Inhalt auf Hochformat-Etikett dagegen.
+    public static func rotation(contentWidth bw: Int, contentHeight bh: Int, plan: Plan) -> QuarterTurn {
+        guard plan.width != nil, plan.height != nil else { return .r0 }
+        let inner = box(contentWidth: bw, contentHeight: bh, plan: plan)
+        if 10 * bh > 11 * bw && 10 * inner.width > 11 * inner.height { return .r90 }
+        if 10 * bw > 11 * bh && 10 * inner.height > 11 * inner.width { return .r270 }
+        return .r0
     }
 
-    /// Schritt F.4: Flächenmittel des Ausschnitts (`x`, `y`, `width`, `height`) auf
-    /// `toWidth` × `toHeight` (höchstens so groß wie der Ausschnitt). Jeder Zielpunkt ist die exakt
-    /// gewichtete Summe der überdeckten Quellflächen, einmal gerundet: `(S + T/2) / T`, `T` = Fläche
-    /// des Ausschnitts. Gleiche Größe → unveränderte Kopie.
+    /// Schritt F.4: Zielrahmen für Inhalt `rw` × `rh`: feste Seite abzüglich zweimal Rand (zu klein →
+    /// ganze Seite), freie Seite `max(Inhalt, maxDots)`.
+    public static func box(contentWidth rw: Int, contentHeight rh: Int, plan: Plan) -> (width: Int, height: Int) {
+        func inner(_ side: Int, _ margin: Int) -> Int {
+            let value = side - 2 * margin
+            return value >= 1 ? value : side
+        }
+        return (plan.width.map { inner($0, plan.marginX) } ?? max(rw, maxDots),
+                plan.height.map { inner($0, plan.marginY) } ?? max(rh, maxDots))
+    }
+
+    /// Schritt F.4: Zielgröße des (ggf. gedrehten) Inhalts – so groß wie möglich im Rahmen
+    /// (vergrößern und verkleinern), Seitenverhältnis erhalten (die abhängige Seite kaufmännisch
+    /// gerundet, mindestens 1).
+    public static func targetSize(contentWidth rw: Int, contentHeight rh: Int, plan: Plan) -> (width: Int, height: Int) {
+        let frame = box(contentWidth: rw, contentHeight: rh, plan: plan)
+        if frame.width * rh <= frame.height * rw {
+            return (frame.width, max(1, (2 * rh * frame.width + rw) / (2 * rw)))
+        }
+        return (max(1, (2 * rw * frame.height + rh) / (2 * rh)), frame.height)
+    }
+
+    /// Schritt F.5: Flächenmittel des Ausschnitts (`x`, `y`, `width`, `height`) auf
+    /// `toWidth` × `toHeight` – verkleinern **und** vergrößern, je Achse unabhängig. Jeder Zielpunkt
+    /// ist die exakt gewichtete Summe der überdeckten Quellflächen, einmal gerundet: `(S + T/2) / T`,
+    /// `T` = Fläche des Ausschnitts. Gleiche Größe → unveränderte Kopie.
     public static func areaAverage(_ image: GrayImage, x x0: Int, y y0: Int, width bw: Int, height bh: Int,
                                    toWidth tw: Int, toHeight th: Int) -> GrayImage {
-        precondition(bw > 0 && bh > 0 && tw > 0 && th > 0 && tw <= bw && th <= bh, "LabelFit: ungültige Größen")
+        precondition(bw > 0 && bh > 0 && tw > 0 && th > 0, "LabelFit: ungültige Größen")
         precondition(x0 >= 0 && y0 >= 0 && x0 + bw <= image.width && y0 + bh <= image.height,
                      "LabelFit: Ausschnitt außerhalb des Bildes")
         let stride = image.width
@@ -163,13 +199,13 @@ public enum LabelFit {
         }
         let total = UInt64(bw) * UInt64(bh)
         var out = [UInt8](repeating: 255, count: tw * th)
-        var sums = [UInt64](repeating: 0, count: tw)
-        var current = [UInt64](repeating: 0, count: tw)
-        var next = [UInt64](repeating: 0, count: tw)
-        var row = 0   // nächste auszugebende Zielzeile
+        var acc = [UInt64](repeating: 0, count: tw)
+        var cached = [UInt64](repeating: 0, count: tw)   // Summen der Quellzeile `cachedRow`
+        var fresh = [UInt64](repeating: 0, count: tw)
+        var cachedRow = -1
         image.pixels.withUnsafeBufferPointer { src in
-            for y in 0..<bh {
-                // Waagerecht: Σx ax(X, x) · L je Zielspalte.
+            /// Waagerecht: Σx ax(X, x) · L je Zielspalte X der Quellzeile `y`.
+            func horizontal(_ y: Int, into sums: inout [UInt64]) {
                 let base = (y0 + y) * stride + x0
                 for column in 0..<tw {
                     let first = column * bw / tw, last = ((column + 1) * bw - 1) / tw
@@ -177,35 +213,51 @@ public enum LabelFit {
                     for x in first...last { sum += overlap(x, column, bw, tw) * UInt64(src[base + x]) }
                     sums[column] = sum
                 }
-                // Senkrecht: Quellzeile y deckt [y·th, (y+1)·th) und trifft höchstens zwei Zielzeilen.
-                let lo = y * th, hi = lo + th
-                for target in (lo / bh)...((hi - 1) / bh) where target < th {
-                    let weight = overlap(y, target, bh, th)
-                    if target == row {
-                        for column in 0..<tw { current[column] += weight * sums[column] }
+            }
+            for row in 0..<th {
+                // Zielzeile deckt [row·bh, (row+1)·bh), Quellzeile y deckt [y·th, (y+1)·th).
+                // Aufeinanderfolgende Zielzeilen teilen höchstens eine Quellzeile (die letzte der
+                // vorigen) – beim Vergrößern oft dieselbe; sie wird aus `cached` wiederverwendet.
+                let first = row * bh / th, last = ((row + 1) * bh - 1) / th
+                for column in 0..<tw { acc[column] = 0 }
+                for y in first...last {
+                    let weight = overlap(y, row, bh, th)
+                    if y == cachedRow {
+                        for column in 0..<tw { acc[column] += weight * cached[column] }
                     } else {
-                        for column in 0..<tw { next[column] += weight * sums[column] }
+                        horizontal(y, into: &fresh)
+                        for column in 0..<tw { acc[column] += weight * fresh[column] }
+                        if y == last {
+                            swap(&cached, &fresh)
+                            cachedRow = y
+                        }
                     }
                 }
-                while row < th && (row + 1) * bh <= hi {
-                    for column in 0..<tw { out[row * tw + column] = UInt8((current[column] + total / 2) / total) }
-                    swap(&current, &next)
-                    for column in 0..<tw { next[column] = 0 }
-                    row += 1
-                }
+                for column in 0..<tw { out[row * tw + column] = UInt8((acc[column] + total / 2) / total) }
             }
         }
         return GrayImage(width: tw, height: th, pixels: out)
     }
 
-    /// Schritte F.2–F.5: legt das Bild nach `plan` auf das Etikett (leere Seite → weißes Etikett,
-    /// freie Seite 1 Punkt).
+    /// Schritte F.2–F.6: legt das Bild nach `plan` auf das Etikett – Inhalt zuschneiden, bei Bedarf
+    /// drehen (``rotation(contentWidth:contentHeight:plan:)``), skalieren, mittig einsetzen (leere
+    /// Seite → weißes Etikett, freie Seite 1 Punkt).
     public static func apply(_ image: GrayImage, plan: Plan) -> GrayImage {
         guard let bounds = contentBounds(image) else {
             return GrayImage(width: plan.width ?? 1, height: plan.height ?? 1, fill: 255)
         }
-        let target = targetSize(contentWidth: bounds.width, contentHeight: bounds.height, plan: plan)
-        let scaled = areaAverage(image, x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+        let turn = rotation(contentWidth: bounds.width, contentHeight: bounds.height, plan: plan)
+        let source: GrayImage
+        let region: (x: Int, y: Int, width: Int, height: Int)
+        if turn == .r0 {
+            source = image
+            region = bounds
+        } else {
+            source = image.cropped(x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height).rotated(turn)
+            region = (0, 0, source.width, source.height)
+        }
+        let target = targetSize(contentWidth: region.width, contentHeight: region.height, plan: plan)
+        let scaled = areaAverage(source, x: region.x, y: region.y, width: region.width, height: region.height,
                                  toWidth: target.width, toHeight: target.height)
         let canvasWidth = plan.width ?? target.width
         let canvasHeight = plan.height ?? target.height
