@@ -46,10 +46,10 @@ else
 endif
 
 ALL_CFLAGS := $(CFLAGS) $(STD_FLAGS) $(WARN_FLAGS) $(PLATFORM_FLAGS) $(SAN_FLAGS) $(CPPFLAGS) -I$(SRCDIR)
-LIBS       := -lcups $(CUPSIMAGE_LIB) -lz
+LIBS       := -lcups $(CUPSIMAGE_LIB) -lz -lm
 ALL_LDFLAGS := $(LDFLAGS) $(SAN_FLAGS)
 
-LIB_SRCS := lw_util.c lw_bitmap.c lw_dither.c lw_encode.c lw_raster.c lw_options.c lw_job.c lw_cups.c
+LIB_SRCS := lw_util.c lw_bitmap.c lw_dither.c lw_encode.c lw_raster.c lw_options.c lw_fit.c lw_job.c lw_cups.c
 LIB_OBJS := $(addprefix $(BUILDDIR)/obj/,$(LIB_SRCS:.c=.o))
 
 FILTERS     := $(BUILDDIR)/rastertolabelwerk $(BUILDDIR)/commandtolabelwerk

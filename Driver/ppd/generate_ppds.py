@@ -201,6 +201,8 @@ OPT_CANCEL_BEFORE = "lwCancelBefore"
 OPT_CANCEL_DELAY = "lwCancelDelay"
 OPT_POWER_UP = "lwPowerUpAction"
 OPT_HEAD_CLOSE = "lwHeadCloseAction"
+#: „An Etikett anpassen“ (§8 „F“): Seiten mit abweichender Größe (A4/Letter) auf das Etikett legen.
+OPT_FIT_TO_LABEL = "lwFitToLabel"
 #: Freie Base64url-Werte – bewusst keine PPD-Optionen (siehe README, Abschnitt „Optionen“).
 OPT_START_CMD = "lwStartCmd"
 OPT_END_CMD = "lwEndCmd"
@@ -210,11 +212,17 @@ OPT_LABEL_END_CMD = "lwLabelEndCmd"
 OPT_FORMAT_PREFIX = "lwFormatPrefix"
 OPT_CONTROL_PREFIX = "lwControlPrefix"
 OPT_DELIMITER = "lwDelimiter"
+#: Etikettengröße der Warteschlange in 1/100 mm (für lwFitToLabel) – frei wählbar, daher keine
+#: PPD-Optionen; die App setzt sie aus dem Etikettenformat als Warteschlangen-Standard.
+OPT_LABEL_WIDTH = "lwLabelWidth"
+OPT_LABEL_HEIGHT = "lwLabelHeight"
 
-#: Optionen aus §9, die bewusst nicht in der PPD stehen: freie Werte (Base64url, ASCII-Codes)
-#: und das veraltete ``lwRotate180`` (ersetzt durch ``lwRotation``; der Filter wertet es weiter aus).
+#: Optionen aus §9, die bewusst nicht in der PPD stehen: freie Werte (Base64url, ASCII-Codes,
+#: Etikettengröße) und das veraltete ``lwRotate180`` (ersetzt durch ``lwRotation``; der Filter wertet
+#: es weiter aus).
 NON_PPD_OPTIONS = frozenset({OPT_START_CMD, OPT_END_CMD, OPT_LABEL_START_CMD, OPT_LABEL_END_CMD,
-                             OPT_FORMAT_PREFIX, OPT_CONTROL_PREFIX, OPT_DELIMITER, OPT_ROTATE})
+                             OPT_FORMAT_PREFIX, OPT_CONTROL_PREFIX, OPT_DELIMITER, OPT_ROTATE,
+                             OPT_LABEL_WIDTH, OPT_LABEL_HEIGHT})
 
 #: Feste Auswahllisten aus §9 (PPD-Teilmengen, wo §9 sie vorgibt).
 DARKNESS_VALUES = tuple(range(1, 31))            # „Temperatur“ 1…30 wie im Windows-Treiber
@@ -240,6 +248,7 @@ RTC_VALUES = ("JobStart", "EveryLabel", "EveryMinute")
 MEDIA_ACTION_VALUES = ("Feed", "Calibrate", "Length", "NoMotion", "ShortCal")
 DITHER_VALUES = ("Threshold", "Ordered", "Halftone", "FloydSteinberg", "Atkinson", "Stucki")
 COMPRESSION_VALUES = ("Z64", "ACS", "Hex")
+FIT_TO_LABEL_VALUES = ("Auto", "Off")
 PRINT_MODE_VALUES = tuple(PRINT_MODE_CUPS.values())
 MEDIA_TYPE_VALUES = tuple(MEDIA_TYPE_CUPS.values())
 LANGUAGE_VALUES = tuple(LANGUAGE_CUPS.values())
@@ -278,6 +287,7 @@ OPTION_LANGUAGES: Dict[str, Tuple[str, ...]] = {
     OPT_CANCEL_DELAY: ("zpl", "epl"),
     OPT_POWER_UP: ("zpl",),
     OPT_HEAD_CLOSE: ("zpl",),
+    OPT_FIT_TO_LABEL: ("zpl", "epl", "cpcl"),
 }
 
 #: Druckmodi, bei denen ``lwCutEvery`` (``^PQ``-Schnittzähler) sinnvoll ist.
@@ -303,6 +313,7 @@ DEVICE_GROUP = "Advanced"
 
 #: Option → (Gruppe, englischer Text, deutscher Text) – deutsche Begriffe wie im Windows-Treiber.
 OPTION_TEXTS: Dict[str, Tuple[str, str, str]] = {
+    OPT_FIT_TO_LABEL: ("PageSetup", "Fit to Label", "An Etikett anpassen"),
     OPT_TRACKING: ("PageSetup", "Media Type", "Medientyp"),
     OPT_MARK_OFFSET: ("PageSetup", "Mark Offset", "Markierung Versatz"),
     OPT_ROTATION: ("PageSetup", "Rotation", "Drehung"),
@@ -337,7 +348,7 @@ OPTION_TEXTS: Dict[str, Tuple[str, str, str]] = {
 
 #: Reihenfolge der lw-Optionen in der PPD (innerhalb ihrer Gruppen, wie im Windows-Dialog).
 OPTION_ORDER: Tuple[str, ...] = (
-    OPT_TRACKING, OPT_MARK_OFFSET, OPT_ROTATION, OPT_MIRROR, OPT_NEGATIVE, OPT_STOP_AT_LAST,
+    OPT_FIT_TO_LABEL, OPT_TRACKING, OPT_MARK_OFFSET, OPT_ROTATION, OPT_MIRROR, OPT_NEGATIVE, OPT_STOP_AT_LAST,
     OPT_STOP_OFFSET,
     OPT_SPEED, OPT_DARKNESS, OPT_MEDIA_TYPE, OPT_LABEL_TOP, OPT_LABEL_LEFT, OPT_BACKFEED,
     OPT_PAUSE_EVERY, OPT_CONTROL_CHARS, OPT_RTC, OPT_CANCEL_BEFORE, OPT_CANCEL_DELAY,
@@ -424,6 +435,10 @@ COMPRESSION_TEXTS = {
     "Hex": ("Hex (Uncompressed)", "Hex (unkomprimiert)"),
 }
 THRESHOLD_NOTES = {64: ("lighter", "heller"), 128: ("default", "Standard"), 192: ("darker", "dunkler")}
+FIT_TO_LABEL_TEXTS = {
+    "Auto": ("Automatic", "Automatisch"),
+    "Off": ("Off", "Aus"),
+}
 
 #: Übersetzung der Standardoptionen.
 STANDARD_TEXTS = {
@@ -1300,6 +1315,7 @@ def build_options(target: Target) -> List[UIOption]:
                                 f"{value} ({note[1]})" if note else str(value)))
     add(OPT_THRESHOLD, threshold, "128")
     add(OPT_COMPRESSION, _mapped_choices(COMPRESSION_VALUES, COMPRESSION_TEXTS, False), "Z64")
+    add(OPT_FIT_TO_LABEL, _mapped_choices(FIT_TO_LABEL_VALUES, FIT_TO_LABEL_TEXTS, False), "Auto")
 
     ordered = [options[k] for k in OPTION_ORDER if k in options]
     for index, option in enumerate(ordered):
@@ -1397,7 +1413,8 @@ def render_ppd(target: Target, file_version: str = DEFAULT_FILE_VERSION) -> byte
     w.comment("Filter: rastertolabelwerk (CUPS-Raster, 8 Bit Graustufen) -> ZPL II / EPL2 / CPCL.")
     w.comment("Optionen und Werte: ARCHITECTURE.md Abschnitt 9. Gruppen wie der Windows-Treiber.")
     w.comment("Freie Werte (lwStartCmd, lwEndCmd, lwLabelStartCmd, lwLabelEndCmd, lwFormatPrefix,")
-    w.comment("lwControlPrefix, lwDelimiter) setzt die App je Warteschlange per 'lpadmin -o'.")
+    w.comment("lwControlPrefix, lwDelimiter, lwLabelWidth, lwLabelHeight) setzt die App je Warteschlange")
+    w.comment("per 'lpadmin -o name-default=...'.")
     w.comment("Zebra ist eine Marke der Zebra Technologies Corp.; LabelWerk ist unabhaengig.")
     w.comment("=" * 72)
     w.attr("FormatVersion", "4.3")

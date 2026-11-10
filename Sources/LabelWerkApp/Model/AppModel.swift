@@ -13,7 +13,13 @@ final class AppModel {
     let catalog = ModelCatalog.shared
     private(set) var sessions: [PrinterSession] = []
     var selection: SidebarItem?
-    var customStocks: [LabelStock] = [] { didSet { scheduleSave() } }
+    var customStocks: [LabelStock] = [] {
+        didSet {
+            scheduleSave()
+            // Geänderte Maße eines eigenen Formats erreichen die macOS-Warteschlangen automatisch.
+            if !isRestoring, customStocks != oldValue { queueSync?.noteStocksChanged() }
+        }
+    }
     private(set) var history: [JobRecord] = []
     var preferences = AppPreferences() {
         didSet {
@@ -46,12 +52,16 @@ final class AppModel {
     @ObservationIgnored private let writer = PersistenceWriter()
     @ObservationIgnored private var isRestoring = false
     @ObservationIgnored private var hasStarted = false
+    /// Hält die macOS-Warteschlangen der Drucker auf dem Stand der gespeicherten Einstellungen
+    /// (Etikettengröße, Treiberoptionen) – nach Änderungen und einmal nach dem Start.
+    @ObservationIgnored private(set) var queueSync: QueueSyncService!
 
     // MARK: Init
 
     init() {
         VirtualPrinter.registerWithConnectionFactory()
         restore()
+        queueSync = QueueSyncService(model: self)
     }
 
     private func restore() {
@@ -85,6 +95,9 @@ final class AppModel {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        // Warteschlangen älterer Versionen (ohne benannte Etikettengröße, lwLabelWidth …) einmalig
+        // abgleichen – still, ohne Passwortabfrage, nur bei Abweichungen.
+        queueSync.syncAtLaunch()
         guard preferences.autoConnect else { return }
         for session in sessions {
             Task { await session.connect() }
@@ -222,9 +235,12 @@ final class AppModel {
         scheduleSave()
     }
 
-    /// Wird von `PrinterSession` aufgerufen, wenn sich gespeicherte Daten geändert haben.
+    /// Wird von `PrinterSession` aufgerufen, wenn sich gespeicherte Daten geändert haben. Betrifft die
+    /// Änderung die macOS-Warteschlange (Format, Einstellungen, Sprache, Warteschlange), gleicht
+    /// `queueSync` sie verzögert ab – egal, welcher Bereich der App sie vorgenommen hat.
     func printerDidChange(_ session: PrinterSession) {
         scheduleSave()
+        queueSync?.noteChange(session)
     }
 
     // MARK: Etiketten
@@ -274,13 +290,14 @@ final class AppModel {
 
     // MARK: Hinweise
 
-    func toast(_ title: String, message: String? = nil, style: Toast.Style = .info) {
-        let toast = Toast(style: style, title: title, message: message)
+    func toast(_ title: String, message: String? = nil, style: Toast.Style = .info, action: ToastAction? = nil) {
+        let toast = Toast(style: style, title: title, message: message, action: action)
         animate(.spring(response: 0.4, dampingFraction: 0.8)) {
             toasts.append(toast)
             if toasts.count > 4 { toasts.removeFirst(toasts.count - 4) }
         }
-        let duration: Double = style == .error ? 7 : 4
+        // Hinweise mit Aktion bleiben länger stehen, damit sie erreichbar sind.
+        let duration: Double = action != nil ? 15 : (style == .error ? 7 : 4)
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(duration))
             self?.dismissToast(toast.id)

@@ -182,7 +182,37 @@ enum Commands {
     static func encode(_ context: Context) throws -> ExitCode {
         let job = try ImageJob(context: context, identity: nil)
         let images = try job.loadImages(context.arguments.arguments)
-        var encoder = JobEncoder(language: context.language, resolution: job.resolution, settings: job.settings,
+        // An Etikett anpassen (§8 „F“): nur encode – bei print legt ImageLayout die Bilder ohnehin aufs Etikett.
+        var settings = job.settings
+        if let raw = context.arguments.value("fit-to-label") {
+            guard let mode = LabelFitMode(cupsValue: raw) else {
+                throw CLIError.usage("„--fit-to-label“ erwartet auto oder off, nicht „\(raw)“.")
+            }
+            settings.fitToLabel = mode
+        }
+        if let raw = context.arguments.value("label-size") {
+            guard let size = EncodeSizes.labelSize(raw) else {
+                throw CLIError.usage("„--label-size“ erwartet Breite×Höhe in mm oder Zoll, z. B. 104x76.2mm oder 4x6in "
+                                     + "(Breite > 0, Höhe ≥ 0), nicht „\(raw)“.")
+            }
+            settings.setLabelSize(widthMM: size.widthMM, heightMM: size.heightMM)
+        }
+        var pageSizes: [PageSizePoints?]?
+        if let raw = context.arguments.value("page-size") {
+            guard job.keepsImageSize else {
+                throw CLIError.usage("„--page-size“ beschreibt die Bilder unverändert und braucht „--no-layout“.")
+            }
+            guard let sizes = EncodeSizes.pageSizes(raw) else {
+                throw CLIError.usage("„--page-size“ erwartet Breite×Höhe in Punkten, z. B. 595.28x841.89 "
+                                     + "(mehrere durch Komma getrennt), nicht „\(raw)“.")
+            }
+            guard sizes.count == 1 || sizes.count == images.count else {
+                throw CLIError.usage("„--page-size“: \(sizes.count) Seitengrößen für \(images.count) Bilder "
+                                     + "(erlaubt: eine für alle oder genau eine je Bild).")
+            }
+            pageSizes = sizes.count == 1 ? Array(repeating: sizes[0], count: images.count) : sizes
+        }
+        var encoder = JobEncoder(language: context.language, resolution: job.resolution, settings: settings,
                                  stock: job.stock, maxPrintWidthDots: job.maxPrintWidthDots)
         if let seconds = try context.arguments.int("fixed-time") {
             let date = Date(timeIntervalSince1970: TimeInterval(seconds))
@@ -197,11 +227,18 @@ enum Commands {
             }
             encoder.timeZone = zone
         }
-        let data = try encoder.encode(images: images, copies: job.copies, collate: !context.arguments.has("no-collate"))
+        let collate = !context.arguments.has("no-collate")
+        let data: Data
+        if let pageSizes {
+            data = try encoder.encode(images: images, pageSizes: pageSizes, copies: job.copies, collate: collate)
+        } else {
+            data = try encoder.encode(images: images, copies: job.copies, collate: collate)
+        }
         if let output = context.arguments.value("output"), output != "-" {
             try Files.write(data, to: output)
+            let first = encoder.fitted(images[0], pageSize: pageSizes?[0])
             Console.err("\(output): \(data.count) Byte \(context.language.displayName), \(images.count) Etikett(en) "
-                        + "\(images[0].width) × \(images[0].height) Punkte (\(job.stock.name), \(job.resolution.dpi) dpi)")
+                        + "\(first.width) × \(first.height) Punkte (\(job.stock.name), \(job.resolution.dpi) dpi)")
         } else {
             Console.write(data)
         }
@@ -327,6 +364,52 @@ enum Files {
             throw CLIError.failure("„\(path)“ ist beschädigt: \((error as? LocalizedError)?.errorDescription ?? String(describing: error))")
         }
         throw CLIError.failure("„\(path)“ ist kein PNG- oder PNM-Bild.")
+    }
+}
+
+// MARK: - Größenangaben von encode (An Etikett anpassen)
+
+/// Zerlegt `--label-size` und `--page-size` von `lwctl encode`.
+enum EncodeSizes {
+    /// `104x76.2mm`, `104 × 76,2 mm`, `4x6in` (Standard mm; Breite > 0, Höhe ≥ 0 = frei; je ≤ 1000 mm).
+    static func labelSize(_ raw: String) -> (widthMM: Double, heightMM: Double)? {
+        var text = raw.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "")
+        var factor = 1.0
+        if text.hasSuffix("mm") {
+            text.removeLast(2)
+        } else if text.hasSuffix("in") {
+            text.removeLast(2)
+            factor = 25.4
+        }
+        guard let (width, height) = pair(text.replacingOccurrences(of: ",", with: ".")) else { return nil }
+        let widthMM = width * factor, heightMM = height * factor
+        guard widthMM > 0, heightMM >= 0, widthMM <= 1000, heightMM <= 1000 else { return nil }
+        return (widthMM, heightMM)
+    }
+
+    /// `595.28x841.89` bzw. mehrere durch Komma oder Semikolon getrennt (Punkte, Dezimalpunkt,
+    /// optional `pt`); jede Seite 0 ≤ Wert ≤ 100 000 – 0 heißt „unbekannt“ (wie ein Rasterkopf ohne
+    /// Seitengröße: keine Anpassung).
+    static func pageSizes(_ raw: String) -> [PageSizePoints]? {
+        let items = raw.split(whereSeparator: { $0 == "," || $0 == ";" })
+        guard !items.isEmpty else { return nil }
+        var sizes: [PageSizePoints] = []
+        for item in items {
+            var text = item.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "")
+            if text.hasSuffix("pt") { text.removeLast(2) }
+            guard let (width, height) = pair(text), width >= 0, height >= 0,
+                  width <= LabelFit.maxPagePoints, height <= LabelFit.maxPagePoints else { return nil }
+            sizes.append(PageSizePoints(width: width, height: height))
+        }
+        return sizes
+    }
+
+    /// `B x H` mit `x`, `X` oder `×` als Trenner.
+    private static func pair(_ text: String) -> (Double, Double)? {
+        let parts = text.replacingOccurrences(of: "×", with: "x").split(separator: "x", omittingEmptySubsequences: false)
+        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1]),
+              width.isFinite, height.isFinite else { return nil }
+        return (width, height)
     }
 }
 

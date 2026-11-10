@@ -134,7 +134,8 @@ passenden Katalogformate und `*CustomPageSize` mit `*MaxMediaWidth`/`*MaxMediaHe
 
 | Gruppe | Option (deutscher Titel) | Auswahl in der PPD | Standard |
 |---|---|---|---|
-| Seite einrichten | `lwMediaTracking` (Medientyp) | `Default` `Continuous` (Endlosmaterial) `Gap` (Einzeletiketten) `BlackMark` (Etiketten mit schwarzen Markierungen) `Notch` (Etiketten mit Seitenkerben) `Auto` | `Default` |
+| Seite einrichten | `lwFitToLabel` (An Etikett anpassen) | `Auto` (Automatisch) `Off` (Aus) – Seiten, deren Größe um mehr als 2 mm vom Etikett der Warteschlange (`lwLabelWidth`/`lwLabelHeight`) abweicht, legt der Filter auf das Etikett (ARCHITECTURE.md §8 „F“) | `Auto` |
+| | `lwMediaTracking` (Medientyp) | `Default` `Continuous` (Endlosmaterial) `Gap` (Einzeletiketten) `BlackMark` (Etiketten mit schwarzen Markierungen) `Notch` (Etiketten mit Seitenkerben) `Auto` | `Default` |
 | | `lwMarkOffset` (Markierung Versatz) | `Default` + −10 −5 −3 −2 −1 0 1 2 3 4 5 10 15 20 25 30 35 mm in Punkten der Auflösung, nur Werte in −80…283 Punkten (ZPL) | `Default` |
 | | `lwRotation` (Drehung) | `0` „0° – Hochformat“, `90` „90° – Querformat“, `180` „180° – Hochformat“, `270` „270° – Querformat“ | `0` |
 | | `lwMirror` (Spiegeln), `lwNegative` (Invers), `lwStopAtLast` (Bei letztem Element stoppen) | Boolean `False`/`True` | `False` |
@@ -169,13 +170,14 @@ ZPL-only sind `lwLabelTop`, `lwLabelLeft`, `lwTearOff`, `lwBackfeed`, `lwCompres
 `lwCutEvery`, `lwCalibrate`, `lwSaveSettings`, `lwMarkOffset`, `lwPauseEvery`, `lwControlChars`,
 `lwRTC`, `lwPowerUpAction`, `lwHeadCloseAction`; `lwMediaType`, `lwPrintMode`, `lwCancelBefore`
 und `lwCancelDelay` wirken in ZPL und EPL2 (EPL2 kennt nur Abreißen, Spenden, Schneiden).
-`lwRotation`, `lwStopAtLast` und `lwStopOffset` wirken in allen Sprachen. Reine EPL2-Modelle
+`lwFitToLabel`, `lwRotation`, `lwStopAtLast` und `lwStopOffset` wirken in allen Sprachen. Reine EPL2-Modelle
 (LP/TLP 2844, TLP 3842) und die generische CPCL-PPD zeigen deshalb nur die wirksamen Optionen.
 
 **Keine PPD-Optionen** sind `lwStartCmd`/`lwEndCmd`/`lwLabelStartCmd`/`lwLabelEndCmd` (freie
 Base64url-Zeichenketten), `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` (freie ASCII-Codes
-33…126 für „Steuerzeichen: Intern“) und das veraltete `lwRotate180` (ersetzt durch `lwRotation`;
-der Filter wertet es weiterhin aus). Ein Druckdialog kann freie Werte nicht darstellen; stünden
+33…126 für „Steuerzeichen: Intern“), `lwLabelWidth`/`lwLabelHeight` (Etikettengröße der
+Warteschlange in 1/100 mm für `lwFitToLabel`, aus dem Etikettenformat) und das veraltete
+`lwRotate180` (ersetzt durch `lwRotation`; der Filter wertet es weiterhin aus). Ein Druckdialog kann freie Werte nicht darstellen; stünden
 sie als Auswahl in der PPD, würde ein Dialog den Platzhalter mit jedem Auftrag senden und die
 gesetzten Warteschlangenwerte überdecken. Ohne PPD-Eintrag gelangen sie als serverseitige Vorgaben
 zuverlässig in `argv[5]` des Filters – gesetzt mit `lpadmin -p <queue> -o lwStartCmd-default=…`,

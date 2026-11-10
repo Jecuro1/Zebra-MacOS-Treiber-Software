@@ -11,6 +11,8 @@
  * Abbruch, leere und flächenlose Seiten; Windows-Optionen: Drehung 90/180/270°, Markenversatz,
  * Bei letztem Element stoppen, Pause, eigene Steuerzeichen, RTC (^ST) mit fester/schrittweiser
  * Uhr, ~JA mit Wartezeit, Etikettenbefehle, ^MF, Linerless-Modi (SGD), Seitenkerben.
+ * An Etikett anpassen (§8 „F“): Optionen, Entscheidung, Inhaltsrahmen, Zielgröße, Flächenmittel
+ * (gegen die Definition), Einsetzen, freie Seite (Endlosmaterial), Drehung.
  */
 
 #if !defined(__APPLE__) && !defined(_DEFAULT_SOURCE)
@@ -27,6 +29,7 @@
 #include "lw_bitmap.h"
 #include "lw_dither.h"
 #include "lw_encode.h"
+#include "lw_fit.h"
 #include "lw_job.h"
 #include "lw_options.h"
 #include "lw_raster.h"
@@ -2233,6 +2236,229 @@ static void test_job_epl_cpcl_extended(void)
 /* Hilfen                                                                                     */
 /* ------------------------------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------------------------------ */
+/* An Etikett anpassen (§8 „F“)                                                              */
+/* ------------------------------------------------------------------------------------------ */
+
+static void test_fit_options(void)
+{
+    lw_fit_mode m = LW_FIT_OFF;
+    CHECK_INT(lw_parse_fit_mode("auto", &m), LW_PARSE_OK); CHECK_INT(m, LW_FIT_AUTO);
+    CHECK_INT(lw_parse_fit_mode("OFF", &m), LW_PARSE_OK); CHECK_INT(m, LW_FIT_OFF);
+    CHECK_INT(lw_parse_fit_mode("Default", &m), LW_PARSE_DEFAULT);
+    CHECK_INT(lw_parse_fit_mode("True", &m), LW_PARSE_INVALID);
+    CHECK(strcmp(lw_fit_mode_name(LW_FIT_AUTO), "Auto") == 0 && strcmp(lw_fit_mode_name(LW_FIT_OFF), "Off") == 0);
+
+    static const char *const empty[] = { NULL };
+    table_lookup t0 = { { empty, empty, empty } };
+    lw_settings s;
+    lw_settings_init(&s);
+    CHECK_INT(lw_settings_resolve(&s, table_lookup_fn, &t0, NULL), 0);
+    CHECK_INT(s.fit_to_label, LW_FIT_AUTO);
+    CHECK_INT(s.label_width, 0);
+    CHECK_INT(s.label_height, 0);
+    lw_settings_free(&s);
+
+    /* argv: ungültiger Modus fällt auf die PPD-Auswahl; Größen begrenzt, Custom.-Präfix erlaubt. */
+    static const char *const argv_level[] = { "lwFitToLabel", "Yes", "lwLabelWidth", "Custom.10400",
+                                              "lwLabelHeight", "999999", NULL };
+    static const char *const marked_level[] = { "lwFitToLabel", "Off", NULL };
+    table_lookup t1 = { { argv_level, marked_level, empty } };
+    int warnings = 0;
+    lw_logger log = { discard_log, &warnings };
+    lw_settings_init(&s);
+    CHECK_INT(lw_settings_resolve(&s, table_lookup_fn, &t1, &log), 1);
+    CHECK_INT(s.fit_to_label, LW_FIT_OFF);
+    CHECK_INT(s.label_width, 10400);
+    CHECK_INT(s.label_height, LW_LABEL_SIZE_MAX);
+    lw_settings_free(&s);
+
+    static const char *const neg_level[] = { "lwLabelWidth", "-5", "lwLabelHeight", " 7620 ", "lwFitToLabel",
+                                             "Default", NULL };
+    static const char *const ppd_level[] = { "lwFitToLabel", "Off", NULL };
+    table_lookup t2 = { { neg_level, empty, ppd_level } };
+    lw_settings_init(&s);
+    lw_settings_resolve(&s, table_lookup_fn, &t2, NULL);
+    CHECK_INT(s.label_width, 0);
+    CHECK_INT(s.label_height, 7620);
+    CHECK_INT(s.fit_to_label, LW_FIT_AUTO);   /* "Default" auf argv schlägt die PPD */
+    lw_settings_free(&s);
+}
+
+/* Flächenmittel direkt nach der Definition (§8 „F“ Schritt 4). */
+static uint8_t naive_area(const uint8_t *lum, int width, int x0, int y0, int bw, int bh, int tw, int th,
+                          int X, int Y)
+{
+    long long sum = 0;
+    for (int y = 0; y < bh; y++) {
+        long long lo = (long long)y * th > (long long)Y * bh ? (long long)y * th : (long long)Y * bh;
+        long long hi = (long long)(y + 1) * th < (long long)(Y + 1) * bh ? (long long)(y + 1) * th
+                                                                          : (long long)(Y + 1) * bh;
+        long long ay = hi > lo ? hi - lo : 0;
+        if (ay == 0)
+            continue;
+        for (int x = 0; x < bw; x++) {
+            long long l2 = (long long)x * tw > (long long)X * bw ? (long long)x * tw : (long long)X * bw;
+            long long h2 = (long long)(x + 1) * tw < (long long)(X + 1) * bw ? (long long)(x + 1) * tw
+                                                                              : (long long)(X + 1) * bw;
+            long long ax = h2 > l2 ? h2 - l2 : 0;
+            sum += ax * ay * lum[(size_t)(y0 + y) * (size_t)width + (size_t)(x0 + x)];
+        }
+    }
+    long long total = (long long)bw * bh;
+    return (uint8_t)((sum + total / 2) / total);
+}
+
+static void test_fit(void)
+{
+    /* Punkte → 1/100 mm */
+    CHECK_INT(lw_fit_hundredths_mm(595.0), 20990);
+    CHECK_INT(lw_fit_hundredths_mm(842.0), 29704);
+    CHECK_INT(lw_fit_hundredths_mm(295.0), 10407);
+    CHECK_INT(lw_fit_hundredths_mm(216.0), 7620);
+    CHECK_INT(lw_fit_hundredths_mm(0.0), -1);
+    CHECK_INT(lw_fit_hundredths_mm(-1.0), -1);
+    CHECK_INT(lw_fit_hundredths_mm(100001.0), -1);
+    CHECK_INT(lw_fit_hundredths_mm(0.0 / 0.0), -1);
+
+    /* Entscheidung */
+    lw_settings s;
+    lw_settings_init(&s);
+    lw_fit_plan plan = { -1, -1 };
+    CHECK(!lw_fit_decide(&s, 100, 100, 595.0, 842.0, 203, 203, &plan));        /* Etikett unbekannt */
+    s.label_width = 10400;
+    s.label_height = 7620;
+    CHECK(lw_fit_decide(&s, 100, 100, 595.0, 842.0, 203, 203, &plan));
+    CHECK_INT(plan.width, 831);
+    CHECK_INT(plan.height, 609);
+    CHECK(!lw_fit_decide(&s, 100, 100, 295.0, 216.0, 203, 203, &plan));        /* w295h216 passt */
+    CHECK(!lw_fit_decide(&s, 100, 100, 294.0 + 2.0 * 72.0 / 25.4, 216.0, 203, 203, &plan));   /* ≤ 2 mm */
+    CHECK(lw_fit_decide(&s, 100, 100, 295.0, 222.0, 300, 300, &plan));         /* Höhe 78,3 mm */
+    CHECK_INT(plan.width, 1228);
+    CHECK_INT(plan.height, 900);
+    CHECK(!lw_fit_decide(&s, 0, 100, 595.0, 842.0, 203, 203, &plan));          /* ohne Fläche */
+    CHECK(!lw_fit_decide(&s, 100, 100, 595.0, 842.0, 0, 203, &plan));          /* Auflösung 0 */
+    CHECK(!lw_fit_decide(&s, 100, 100, 0.0, 842.0, 203, 203, &plan));
+    s.fit_to_label = LW_FIT_OFF;
+    CHECK(!lw_fit_decide(&s, 100, 100, 595.0, 842.0, 203, 203, &plan));
+    s.fit_to_label = LW_FIT_AUTO;
+    s.rotation = 90;                                                            /* Seite quer */
+    CHECK(!lw_fit_decide(&s, 100, 100, 216.0, 295.0, 203, 203, &plan));
+    CHECK(lw_fit_decide(&s, 100, 100, 595.0, 842.0, 203, 203, &plan));
+    CHECK_INT(plan.width, 609);
+    CHECK_INT(plan.height, 831);
+    s.rotation = 0;
+    s.tracking = LW_TRACKING_CONTINUOUS;                                       /* Länge frei */
+    CHECK(!lw_fit_decide(&s, 100, 100, 295.0, 842.0, 203, 203, &plan));
+    CHECK(lw_fit_decide(&s, 100, 100, 595.0, 842.0, 203, 203, &plan));
+    CHECK_INT(plan.width, 831);
+    CHECK_INT(plan.height, 0);
+    s.tracking = LW_TRACKING_GAP;
+    s.label_height = 0;
+    CHECK(lw_fit_decide(&s, 100, 100, 595.0, 842.0, 203, 203, &plan));
+    CHECK_INT(plan.height, 0);
+    s.label_width = 1;                                                          /* 0,01 mm → 0 Punkte */
+    CHECK(!lw_fit_decide(&s, 100, 100, 595.0, 842.0, 203, 203, &plan));
+    s.label_width = 100000;
+    s.label_height = 100000;                                                    /* 1 m bei 1200 dpi > 32000 */
+    CHECK(!lw_fit_decide(&s, 100, 100, 595.0, 842.0, 1200, 1200, &plan));
+
+    /* Inhaltsrahmen */
+    uint8_t page[100];
+    memset(page, 255, sizeof(page));
+    int x0 = -1, y0 = -1, bw = -1, bh = -1;
+    CHECK(!lw_fit_content_bounds(page, 10, 10, &x0, &y0, &bw, &bh));
+    page[5 * 10 + 1] = 0;
+    page[5 * 10 + 4] = 100;
+    page[7 * 10 + 2] = 249;
+    page[8 * 10 + 9] = 250;                                                     /* kein Inhalt */
+    CHECK(lw_fit_content_bounds(page, 10, 10, &x0, &y0, &bw, &bh));
+    CHECK_INT(x0, 1); CHECK_INT(y0, 5); CHECK_INT(bw, 4); CHECK_INT(bh, 3);
+
+    /* Zielgröße */
+    int tw = 0, th = 0;
+    lw_fit_plan both = { 200, 200 }, width_only = { 200, 0 }, height_only = { 0, 200 };
+    lw_fit_target_size(100, 50, &both, &tw, &th); CHECK_INT(tw, 100); CHECK_INT(th, 50);
+    lw_fit_target_size(400, 100, &both, &tw, &th); CHECK_INT(tw, 200); CHECK_INT(th, 50);
+    lw_fit_target_size(100, 400, &both, &tw, &th); CHECK_INT(tw, 50); CHECK_INT(th, 200);
+    lw_fit_target_size(401, 3, &both, &tw, &th); CHECK_INT(tw, 200); CHECK_INT(th, 1);  /* 1,496 → 1 */
+    lw_fit_target_size(3, 1000, &width_only, &tw, &th); CHECK_INT(tw, 3); CHECK_INT(th, 1000);
+    lw_fit_target_size(1000, 3, &width_only, &tw, &th); CHECK_INT(tw, 200); CHECK_INT(th, 1);
+    lw_fit_target_size(1000, 300, &height_only, &tw, &th); CHECK_INT(tw, 667); CHECK_INT(th, 200);
+
+    /* Flächenmittel gegen die Definition (zufällige Ausschnitte und Zielgrößen) */
+    uint32_t rng = 12345;
+    for (int round = 0; round < 300; round++) {
+        rng = rng * 1103515245u + 12345u;
+        int w = 1 + (int)(rng >> 16) % 29;
+        rng = rng * 1103515245u + 12345u;
+        int h = 1 + (int)(rng >> 16) % 23;
+        uint8_t *lum = malloc((size_t)(w * h));
+        for (int i = 0; i < w * h; i++) {
+            rng = rng * 1103515245u + 12345u;
+            lum[i] = (uint8_t)(rng >> 24);
+        }
+        rng = rng * 1103515245u + 12345u;
+        int ax = (int)(rng >> 16) % w;
+        rng = rng * 1103515245u + 12345u;
+        int ay = (int)(rng >> 16) % h;
+        rng = rng * 1103515245u + 12345u;
+        int abw = 1 + (int)(rng >> 16) % (w - ax);
+        rng = rng * 1103515245u + 12345u;
+        int abh = 1 + (int)(rng >> 16) % (h - ay);
+        rng = rng * 1103515245u + 12345u;
+        int atw = 1 + (int)(rng >> 16) % abw;
+        rng = rng * 1103515245u + 12345u;
+        int ath = 1 + (int)(rng >> 16) % abh;
+        uint8_t *out = malloc((size_t)(atw * ath) + 3);
+        memset(out, 0xAB, (size_t)(atw * ath) + 3);
+        CHECK(lw_fit_area_average(lum, (size_t)w, ax, ay, abw, abh, out, (size_t)atw, atw, ath));
+        int bad = 0;
+        for (int Y = 0; Y < ath; Y++)
+            for (int X = 0; X < atw; X++)
+                bad += out[Y * atw + X] != naive_area(lum, w, ax, ay, abw, abh, atw, ath, X, Y);
+        CHECK_INT(bad, 0);
+        CHECK(out[atw * ath] == 0xAB && out[atw * ath + 2] == 0xAB);           /* nicht über das Ziel hinaus */
+        free(out);
+        free(lum);
+    }
+    /* Gleichmäßige Fläche bleibt gleich; 2:1 mittelt mit Rundung (0+255)/2 → 128. */
+    uint8_t flat[12] = { 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77, 77 }, half[2] = { 0, 255 }, one = 0;
+    uint8_t small[2];
+    CHECK(lw_fit_area_average(flat, 4, 0, 0, 4, 3, small, 2, 2, 1));
+    CHECK_INT(small[0], 77); CHECK_INT(small[1], 77);
+    CHECK(lw_fit_area_average(half, 2, 0, 0, 2, 1, &one, 1, 1, 1));
+    CHECK_INT(one, 128);
+
+    /* Einsetzen: mittig, Rest weiß; leere Seite → weißes Etikett; freie Seite = Inhaltshöhe */
+    uint8_t *fitted = NULL;
+    int fw = 0, fh = 0;
+    lw_fit_plan ten = { 10, 10 };
+    CHECK(lw_fit_apply(&ten, page, 10, 10, &fitted, &fw, &fh));
+    CHECK_INT(fw, 10); CHECK_INT(fh, 10);
+    /* Inhalt 4 × 3 an (3, 3): Zeile 3 = Seitenzeile 5 */
+    static const uint8_t row3[10] = { 255, 255, 255, 0, 255, 255, 100, 255, 255, 255 };
+    CHECK_BYTES(fitted + 30, 10, row3, 10);
+    CHECK_INT(fitted[5 * 10 + 4], 249);
+    CHECK_INT(fitted[0], 255);
+    free(fitted);
+    uint8_t blank[6] = { 255, 255, 255, 250, 254, 255 };
+    CHECK(lw_fit_apply(&ten, blank, 3, 2, &fitted, &fw, &fh));
+    CHECK_INT(fw, 10); CHECK_INT(fh, 10);
+    int white = 0;
+    for (int i = 0; i < 100; i++)
+        white += fitted[i] == 255;
+    CHECK_INT(white, 100);
+    free(fitted);
+    lw_fit_plan free_len = { 2, 0 };
+    CHECK(lw_fit_apply(&free_len, page, 10, 10, &fitted, &fw, &fh));
+    CHECK_INT(fw, 2); CHECK_INT(fh, 2);                                         /* 4 × 3 → 2 × 2 (1,5 → 2) */
+    free(fitted);
+    CHECK(lw_fit_apply(&free_len, blank, 3, 2, &fitted, &fw, &fh));
+    CHECK_INT(fw, 2); CHECK_INT(fh, 1);
+    free(fitted);
+}
+
 static void test_util(void)
 {
     char buf[8];
@@ -2312,6 +2538,8 @@ static const test_case tests[] = {
     { "job_rotation", test_job_rotation },
     { "job_stop_at_last", test_job_stop_at_last },
     { "job_epl_cpcl_ext", test_job_epl_cpcl_extended },
+    { "fit_options", test_fit_options },
+    { "fit", test_fit },
     { "util", test_util },
 };
 

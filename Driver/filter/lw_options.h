@@ -57,6 +57,12 @@
 #define LW_OPT_LABEL_END_CMD "lwLabelEndCmd"
 #define LW_OPT_POWER_UP_ACTION "lwPowerUpAction"
 #define LW_OPT_HEAD_CLOSE_ACTION "lwHeadCloseAction"
+#define LW_OPT_FIT_TO_LABEL  "lwFitToLabel"
+#define LW_OPT_LABEL_WIDTH   "lwLabelWidth"
+#define LW_OPT_LABEL_HEIGHT  "lwLabelHeight"
+
+/** Obergrenze von lwLabelWidth/lwLabelHeight in 1/100 mm (1 m). */
+#define LW_LABEL_SIZE_MAX 100000
 
 /* Zusätzliche PPD-Attribute (*lwModel: "zd421t" …). */
 #define LW_ATTR_MODEL           "lwModel"
@@ -146,6 +152,12 @@ typedef enum lw_media_action {
     LW_MEDIA_ACTION_SHORT_CAL       /* S */
 } lw_media_action;
 
+/** „An Etikett anpassen“ (lwFitToLabel, §8 „F“). */
+typedef enum lw_fit_mode {
+    LW_FIT_AUTO = 0,          /* abweichende Seitengrößen auf das Etikett legen (Standard) */
+    LW_FIT_OFF                /* Seiten unverändert drucken */
+} lw_fit_mode;
+
 /** Aufgelöste Druckeinstellungen eines Auftrags. */
 typedef struct lw_settings {
     lw_language language;
@@ -192,6 +204,10 @@ typedef struct lw_settings {
     size_t label_end_commands_len;
     lw_media_action power_up_action;    /* ^MF – nur zusammen mit head_close_action */
     lw_media_action head_close_action;
+    /* --- An Etikett anpassen (§8 „F“) --- */
+    lw_fit_mode fit_to_label;
+    int label_width;         /* 0…100000 (1/100 mm), 0 = unbekannt */
+    int label_height;        /* 0…100000 (1/100 mm), 0 = unbekannt bzw. frei (Endlosmaterial) */
 } lw_settings;
 
 /** Ebene, aus der ein Optionswert stammt (in Vorrangreihenfolge). */
@@ -246,6 +262,8 @@ lw_parse_result lw_parse_compression(const char *text, lw_compression *value);
 lw_parse_result lw_parse_rotation(const char *text, int *value);
 lw_parse_result lw_parse_rtc(const char *text, lw_rtc *value);
 lw_parse_result lw_parse_media_action(const char *text, lw_media_action *value);
+/** "Auto" / "Off" ("Default" → LW_PARSE_DEFAULT). */
+lw_parse_result lw_parse_fit_mode(const char *text, lw_fit_mode *value);
 /** "Standard" → false, "Printer" → true ("Default" → LW_PARSE_DEFAULT). */
 lw_parse_result lw_parse_control_chars(const char *text, bool *printer);
 /** Dezimaler ASCII-Code 33…126 (sonst LW_PARSE_INVALID). */
@@ -274,6 +292,7 @@ const char *lw_print_mode_sgd(lw_print_mode m);
 const char *lw_print_mode_sgd_set(lw_print_mode m);
 char lw_media_action_code(lw_media_action a);          /* 'F' 'C' 'L' 'N' 'S' / 0 */
 const char *lw_rtc_name(lw_rtc r);                     /* "JobStart" … / "-" */
+const char *lw_fit_mode_name(lw_fit_mode m);           /* "Auto" / "Off" */
 /** Wirksame Drehung: rotation ≠ 0 ? rotation : (rotate180 ? 180 : 0). */
 int lw_settings_effective_rotation(const lw_settings *s);
 

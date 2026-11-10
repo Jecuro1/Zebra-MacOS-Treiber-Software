@@ -11,6 +11,11 @@
  *     bpp=<Bits je Pixel, Standard Kanäle × bpc>  bpl=<Bytes je Zeile, Standard minimal>
  *     (libcups ≥ 2.3 akzeptiert nur exakte Werte; abweichende Werte nur mit raw=1 sinnvoll)
  *     pattern=<gradient|hgrad|vgrad|text|checker|noise|blank|black|bars|dots>  seed=<n>
+ *     bx=<x> by=<y> bw=<b> bh=<h>  Muster nur in diesem Rechteck, außerhalb weiß (z. B. ein kleines
+ *             Etikett in der Ecke einer A4-Seite)
+ *     pw=<Punkte> ph=<Punkte>  Seitengröße (cupsPageSize, float; PageSize gerundet). Standard:
+ *             w · 72 / xres bzw. h · 72 / yres (ganzzahlig, wie bisher)
+ *     cps=0   cupsPageSize nicht setzen (0) – der Filter nimmt dann PageSize
  *     raw=1   Kopf und Daten ohne libcups-Prüfung direkt schreiben (nur -m native; erlaubt
  *             z. B. Seiten mit Höhe 0)
  *     truncate=<n>  nur die ersten n Zeilen schreiben (unvollständiger Datenstrom; nur letzte Seite)
@@ -21,7 +26,9 @@
  * den Kopfdaten und der Lage der Rohdaten, damit der Python-Referenz-Encoder die Luminanz
  * unabhängig berechnen kann. Die letzte Zeile {"readable_pages": n} nennt, wie viele Seiten die
  * installierte libcups beim Lesen vollständig liefert (Gegenprobe; libcups beendet den
- * Datenstrom je nach Version an ungültigen Köpfen).
+ * Datenstrom je nach Version an ungültigen Köpfen). Dieselbe Zeile nennt in "page_sizes" je gelesener
+ * Seite die Seitengröße [Breite, Höhe] in Punkten, wie der Filter sie verwendet: cupsPageSize, wenn
+ * beide > 0, sonst PageSize (§8 „F“; Zahlen mit %.17g, also exakt).
  *
  * Füllkanäle (z. B. bei 1-Bit-RGB mit bpp=4) und Füllbytes am Zeilenende werden bewusst mit
  * Einsen bzw. 0xA5 belegt: Der Filter muss sie ignorieren. Bittiefen außer 1/2/4/8/16 erzeugen
@@ -53,6 +60,9 @@ typedef struct page_spec {
     unsigned seed;
     int raw;
     long truncate_rows;   /* < 0: alle Zeilen */
+    unsigned box_x, box_y, box_w, box_h;   /* box_w/box_h 0 = ganze Seite */
+    double page_w, page_h;                 /* Punkte; < 0 = aus w/h und Auflösung */
+    int cups_page_size;                    /* 0 = cupsPageSize leer lassen */
 } page_spec;
 
 static void die(const char *msg)
@@ -95,6 +105,15 @@ static int parse_color_space(const char *v)
     return (int)n;
 }
 
+static double parse_points(const char *v)
+{
+    char *end = NULL;
+    double n = strtod(v, &end);
+    if (end == v || *end != '\0' || !(n >= 0.0))
+        die("ungültige Seitengröße");
+    return n;
+}
+
 static unsigned parse_unsigned(const char *v)
 {
     char *end = NULL;
@@ -117,6 +136,8 @@ static void parse_page(const char *arg, page_spec *p)
     p->xres = p->yres = 203;
     strcpy(p->pattern, "gradient");
     p->truncate_rows = -1;
+    p->page_w = p->page_h = -1.0;
+    p->cups_page_size = 1;
 
     char *copy = strdup(arg);
     if (copy == NULL)
@@ -149,6 +170,13 @@ static void parse_page(const char *arg, page_spec *p)
         else if (strcmp(k, "seed") == 0) p->seed = parse_unsigned(v);
         else if (strcmp(k, "raw") == 0) p->raw = (int)parse_unsigned(v);
         else if (strcmp(k, "truncate") == 0) p->truncate_rows = (long)parse_unsigned(v);
+        else if (strcmp(k, "bx") == 0) p->box_x = parse_unsigned(v);
+        else if (strcmp(k, "by") == 0) p->box_y = parse_unsigned(v);
+        else if (strcmp(k, "bw") == 0) p->box_w = parse_unsigned(v);
+        else if (strcmp(k, "bh") == 0) p->box_h = parse_unsigned(v);
+        else if (strcmp(k, "pw") == 0) p->page_w = parse_points(v);
+        else if (strcmp(k, "ph") == 0) p->page_h = parse_points(v);
+        else if (strcmp(k, "cps") == 0) p->cups_page_size = (int)parse_unsigned(v);
         else die("unbekannter Schlüssel in Seitenangabe");
     }
     free(copy);
@@ -181,7 +209,22 @@ static uint32_t hash32(uint32_t x)
     return x;
 }
 
+static unsigned pattern_value_full(const page_spec *p, unsigned x, unsigned y);
+
+/* Muster, außerhalb des Rechtecks bx/by/bw/bh weiß (Koordinaten des Musters relativ zum Rechteck). */
 static unsigned pattern_value(const page_spec *p, unsigned x, unsigned y)
+{
+    if (p->box_w == 0 || p->box_h == 0)
+        return pattern_value_full(p, x, y);
+    if (x < p->box_x || y < p->box_y || x - p->box_x >= p->box_w || y - p->box_y >= p->box_h)
+        return 65535;
+    page_spec inner = *p;
+    inner.width = p->box_w;
+    inner.height = p->box_h;
+    return pattern_value_full(&inner, x - p->box_x, y - p->box_y);
+}
+
+static unsigned pattern_value_full(const page_spec *p, unsigned x, unsigned y)
 {
     const unsigned w = p->width > 1 ? p->width - 1 : 1;
     const unsigned h = p->height > 1 ? p->height - 1 : 1;
@@ -368,6 +411,16 @@ int main(int argc, char *argv[])
         h.PageSize[1] = p.yres ? p.height * 72 / p.yres : 0;
         h.cupsPageSize[0] = (float)h.PageSize[0];
         h.cupsPageSize[1] = (float)h.PageSize[1];
+        if (p.page_w >= 0.0) {
+            h.cupsPageSize[0] = (float)p.page_w;
+            h.PageSize[0] = (unsigned)(p.page_w + 0.5);
+        }
+        if (p.page_h >= 0.0) {
+            h.cupsPageSize[1] = (float)p.page_h;
+            h.PageSize[1] = (unsigned)(p.page_h + 0.5);
+        }
+        if (!p.cups_page_size)
+            h.cupsPageSize[0] = h.cupsPageSize[1] = 0.0f;
         h.ImagingBoundingBox[2] = h.PageSize[0];
         h.ImagingBoundingBox[3] = h.PageSize[1];
 
@@ -448,6 +501,8 @@ int main(int argc, char *argv[])
     cups_raster_t *reader = cupsRasterOpen(in, CUPS_RASTER_READ);
     int readable = 0;
     cups_page_header2_t rh;
+    char sizes[8192] = "";
+    size_t sizes_len = 0;
     while (reader != NULL && cupsRasterReadHeader2(reader, &rh)) {
         unsigned lines = rh.cupsHeight;
         if (rh.cupsColorOrder == CUPS_ORDER_PLANAR && rh.cupsNumColors > 1)
@@ -461,11 +516,22 @@ int main(int argc, char *argv[])
         free(buf);
         if (!complete)
             break;
+        double pw = 0.0, ph = 0.0;
+        if (rh.cupsPageSize[0] > 0.0f && rh.cupsPageSize[1] > 0.0f) {
+            pw = rh.cupsPageSize[0];
+            ph = rh.cupsPageSize[1];
+        } else if (rh.PageSize[0] > 0 && rh.PageSize[1] > 0) {
+            pw = rh.PageSize[0];
+            ph = rh.PageSize[1];
+        }
+        if (sizes_len + 64 < sizeof(sizes))
+            sizes_len += (size_t)snprintf(sizes + sizes_len, sizeof(sizes) - sizes_len, "%s[%.17g, %.17g]",
+                                          readable > 0 ? ", " : "", pw, ph);
         readable++;
     }
     if (reader != NULL)
         cupsRasterClose(reader);
     close(in);
-    printf("{\"readable_pages\": %d}\n", readable);
+    printf("{\"readable_pages\": %d, \"page_sizes\": [%s]}\n", readable, sizes);
     return 0;
 }

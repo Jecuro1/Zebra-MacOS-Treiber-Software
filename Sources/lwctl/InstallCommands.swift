@@ -65,6 +65,17 @@ enum InstallCommands {
         var genericPPD: Bool
         var stock: String?
         var pageSize: String?
+        /// Etikettengröße der Warteschlange, z. B. `104x76.2mm` (aus `--stock`, `--size` oder von der
+        /// bisherigen Warteschlange übernommen).
+        var labelSize: String?
+        /// `lwLabelWidth`/`lwLabelHeight` in 1/100 mm (nur bei `--stock`/`--size`).
+        var labelWidth: Int?
+        var labelHeight: Int?
+        /// `true`, wenn die Größe nicht in der Modell-PPD steht und als benannte Seitengröße in eine
+        /// Kopie der PPD ergänzt wird (``queuePPD``).
+        var addedPageSize: Bool
+        /// PPD, die `lpadmin -P` erhält: die Modell-PPD oder die ergänzte Kopie.
+        var queuePPD: String
         var setDefault: Bool
         var testPage: Bool
         var dryRun: Bool
@@ -146,8 +157,26 @@ enum InstallCommands {
             }
             stock = found
         }
-        if let stock, let explicitModel {
-            try checkStock(stock, model: explicitModel, language: explicitLanguage ?? explicitModel.defaultLanguage)
+        // --size: freie Etikettengröße (z. B. 104x76.2mm), Alternative zu --stock.
+        var requestedSize: QueueLabelSize?
+        if let rawSize = arguments.value("size") {
+            guard stock == nil else {
+                throw CLIError.usage("„--stock“ und „--size“ schließen sich aus – bitte nur eines angeben.")
+            }
+            guard let parsed = LabelSizing.parseSize(rawSize) else {
+                throw CLIError.usage("Ungültige Etikettengröße „\(rawSize)“. Beispiele: --size 104x76.2mm, --size 4x3in")
+            }
+            guard parsed.widthMM >= LabelSizing.minimumWidthMM, parsed.heightMM >= LabelSizing.minimumHeightMM else {
+                throw CLIError.usage("Etiketten müssen mindestens \(millimeters(LabelSizing.minimumWidthMM)) mm breit und "
+                                     + "\(millimeters(LabelSizing.minimumHeightMM)) mm hoch sein („\(rawSize)“).")
+            }
+            requestedSize = QueueLabelSize(widthMM: parsed.widthMM, heightMM: parsed.heightMM)
+        }
+        if let stock { requestedSize = QueueLabelSize(stock: stock) }
+        /// Format für die Prüfung „passt auf den Drucker?“ (bei --size ein eigenes Format).
+        let checkedStock = stock ?? requestedSize.map(sizeStock)
+        if let checkedStock, let explicitModel {
+            try checkStock(checkedStock, model: explicitModel, language: explicitLanguage ?? explicitModel.defaultLanguage)
         }
         let requestedName = arguments.value("name")?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let requestedName, requestedName.isEmpty {
@@ -227,8 +256,8 @@ enum InstallCommands {
                  + "(\(queueLanguage.displayName), \(queueResolution.dpi) dpi) verwendet; \(effect).")
         }
         // Erst jetzt bekannt bei Erkennung bzw. ohne Katalogmodell (Grenzen der generischen PPD).
-        if let stock, explicitModel == nil {
-            try checkStock(stock, model: model, language: queueLanguage)
+        if let checkedStock, explicitModel == nil {
+            try checkStock(checkedStock, model: model, language: queueLanguage)
         }
 
         // 5. Warteschlange: Name, Beschreibung, Geräte-URI.
@@ -271,6 +300,9 @@ enum InstallCommands {
         }
         let existing = installedQueues.first { $0.name.caseInsensitiveCompare(queue) == .orderedSame }
         var keptSettings: [String] = []
+        /// Ohne --stock/--size: eine früher ergänzte Etikettengröße der bisherigen Warteschlange, die
+        /// in die neue PPD übernommen wird (sonst verwürfe lpadmin ihre Seitengröße).
+        var carriedSize: QueueLabelSize?
         if let existing {
             let isLabelWerk = isLabelWerkQueue(existing)
             if !(isLabelWerk && CUPSQueues.isSameDevice(existing.deviceURI, deviceURI)) {
@@ -290,7 +322,8 @@ enum InstallCommands {
             if isLabelWerk {
                 if let text = CUPSQueues.ppdText(ofQueue: existing.name), text.contains("*lwModel:") {
                     var excluded: Set<String> = ["Resolution"]
-                    if stock != nil { excluded.formUnion(["PageSize", "PageRegion"]) }
+                    if requestedSize != nil { excluded.formUnion(["PageSize", "PageRegion"]) }
+                    if requestedSize == nil { carriedSize = PPDFiles.addedLabelSize(inQueuePPD: text) }
                     if explicitLanguage != nil || generic != nil { excluded.insert("lwLanguage") }
                     // Veraltete Optionen (lwRotate180) gehen als ihre Nachfolger mit (lwRotation).
                     keptSettings = CUPSQueues.carriedDefaults(CUPSQueues.ppdDefaults(text)
@@ -302,14 +335,36 @@ enum InstallCommands {
             }
         }
 
-        // 6. Befehle.
+        // 6. Etikettengröße: Steht sie nicht in der Modell-PPD, kommt sie als benannte Seitengröße in
+        //    eine Kopie der PPD (lpadmin verwürfe „-o PageSize=…“ sonst stillschweigend).
+        let labelSize = requestedSize ?? carriedSize
+        var queuePPD = ppd.path
+        var patchedPPD: (url: URL, text: String)?
+        if let labelSize, !PPDFiles.containsPageSize(labelSize, basePPD: ppd.path) {
+            let text: String
+            do {
+                text = try PPDFiles.patchedText(basePPD: ppd.path, size: labelSize)
+            } catch {
+                throw CLIError.failure("Die Etikettengröße \(labelSize.germanName) kann nicht in „\(ppd.path)“ ergänzt werden: "
+                                       + ((error as? LocalizedError)?.errorDescription ?? String(describing: error)))
+            }
+            let url = PPDFiles.temporaryPath(queue: queue, size: labelSize)
+            patchedPPD = (url, text)
+            queuePPD = url.path
+        }
+
+        // 7. Befehle.
         let lpadmin = ToolRunner.locate("lpadmin", fallbacks: lpadminFallbacks)
-        var queueArguments = ["-p", queue, "-E", "-v", deviceURI, "-P", ppd.path, "-D", description]
+        var queueArguments = ["-p", queue, "-E", "-v", deviceURI, "-P", queuePPD, "-D", description]
         if let location, !location.isEmpty { queueArguments += ["-L", location] }
         // Neue Warteschlangen werden nicht freigegeben; bei vorhandenen bleibt die Freigabe, wie sie ist.
         if existing == nil { queueArguments += ["-o", "printer-is-shared=false"] }
         for setting in keptSettings { queueArguments += ["-o", setting] }
-        if let stock { queueArguments += ["-o", "PageSize=\(stock.ppdKeyword)"] }
+        if let requestedSize {
+            queueArguments += ["-o", "\(QueueDefaults.pageSizeOption)=\(requestedSize.keyword)",
+                               "-o", "\(QueueDefaults.labelWidthOption)-default=\(requestedSize.widthHundredths)",
+                               "-o", "\(QueueDefaults.labelHeightOption)-default=\(requestedSize.heightHundredths)"]
+        }
         if let explicitLanguage, generic == nil { queueArguments += ["-o", "lwLanguage=\(explicitLanguage.cupsValue)"] }
         var commands: [[String]] = [[lpadmin] + queueArguments]
         if setDefault { commands.append([lpadmin, "-d", queue]) }
@@ -333,7 +388,12 @@ enum InstallCommands {
             detectedProduct: identity?.model, serialNumber: identity?.serialNumber,
             model: model?.id, modelName: model?.displayName, resolution: queueResolution.dpi,
             language: queueLanguage.rawValue, ppd: ppd.path, genericPPD: generic != nil,
-            stock: stock?.id, pageSize: stock?.ppdKeyword, setDefault: setDefault, testPage: testPage,
+            stock: stock?.id, pageSize: labelSize?.keyword,
+            labelSize: labelSize.map { LabelSizing.format($0.widthMM, decimalSeparator: ".") + "x"
+                + LabelSizing.format($0.heightMM, decimalSeparator: ".") + "mm" },
+            labelWidth: requestedSize?.widthHundredths, labelHeight: requestedSize?.heightHundredths,
+            addedPageSize: patchedPPD != nil, queuePPD: queuePPD,
+            setDefault: setDefault, testPage: testPage,
             dryRun: dryRun, commands: commands, warnings: warnings, installed: false)
 
         if !context.json {
@@ -348,19 +408,37 @@ enum InstallCommands {
             Console.field("Auflösung", "\(queueResolution.dpi) dpi")
             Console.field("Sprache", queueLanguage.displayName)
             Console.field("PPD", ppd.path + (generic != nil ? " (generisch)" : ""))
+            if let patchedPPD {
+                Console.field("Kopie", patchedPPD.url.path + " (mit Seitengröße \(labelSize?.keyword ?? ""))")
+            }
             Console.field("Warteschlange", queue + (existing != nil ? " (vorhanden – wird aktualisiert)" : ""))
             Console.field("Beschreibung", description)
             Console.field("Standort", plan.location)
-            Console.field("Etikett", stock.map { "\($0.name) (PageSize \($0.ppdKeyword))" })
+            if let stock {
+                Console.field("Etikett", "\(stock.name) (PageSize \(stock.ppdKeyword))")
+            } else if let labelSize {
+                let origin = requestedSize == nil ? ", von der bisherigen Warteschlange" : ""
+                Console.field("Etikett", "\(labelSize.germanName) (PageSize \(labelSize.keyword)"
+                              + (patchedPPD != nil ? ", als benannte Seitengröße ergänzt" : "") + origin + ")")
+            }
             Console.field("Geräte-URI", deviceURI)
             Console.field("Beibehalten", keptSettings.isEmpty ? nil
                           : "\(keptSettings.count) Einstellungen der bisherigen Warteschlange (-o im Befehl unten)")
             Console.out()
         }
 
-        // 7. Ausführen (bzw. im Probelauf nur anzeigen).
+        // 8. Ausführen (bzw. im Probelauf nur anzeigen).
         defer {
             if let temporaryTestPage { try? FileManager.default.removeItem(atPath: temporaryTestPage) }
+            if let patchedPPD { PPDFiles.removeTemporary(patchedPPD.url) }
+        }
+        if let patchedPPD, !dryRun {
+            do {
+                try PPDFiles.write(patchedPPD.text, to: patchedPPD.url)
+            } catch {
+                throw CLIError.failure("Die ergänzte PPD „\(patchedPPD.url.path)“ konnte nicht geschrieben werden: "
+                                       + error.localizedDescription)
+            }
         }
         for (index, command) in commands.enumerated() {
             if !context.json { Console.out("$ " + shellLine(command)) }
@@ -440,6 +518,11 @@ enum InstallCommands {
         throw CLIError.usage("„\(stock.name)“ (\(millimeters(stock.widthMM)) × \(millimeters(stock.heightMM)) mm) passt nicht auf \(printer) "
                              + "(Druckbreite \(millimeters(width)) mm, Etiketten bis \(millimeters(length)) mm lang). "
                              + "Passende Formate: \(list)")
+    }
+
+    /// Format für die Prüfung einer freien Größe (`--size`) mit ``checkStock(_:model:language:)``.
+    static func sizeStock(_ size: QueueLabelSize) -> LabelStock {
+        LabelStock(id: "size-\(size.keyword)", name: size.germanName, widthMM: size.widthMM, heightMM: size.heightMM)
     }
 
     /// Millimeter ohne überflüssige Nachkommastellen, z. B. `56` oder `53,5`.

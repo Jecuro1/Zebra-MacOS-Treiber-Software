@@ -9,7 +9,10 @@
  *      alle lw*-Optionen nach ARCHITECTURE.md §9 auflösen (argv > markierte Auswahl > PPD-Standard)
  *      und die PPD-Attribute *lwModel, *lwMaxPrintWidthDots, *lwDefaultGapDots lesen.
  *   2. Raster aus Datei oder stdin lesen; jede Zeile in 8-Bit-Luminanz umrechnen (§4.1), über die
- *      volle Seitenbreite rastern und auf die Druckbreite abschneiden.
+ *      volle Seitenbreite rastern und auf die Druckbreite abschneiden. Weicht die Seitengröße
+ *      (cupsPageSize) um mehr als 2 mm vom Etikett der Warteschlange ab (lwLabelWidth/
+ *      lwLabelHeight, lwFitToLabel=Auto), wird die Seite zuerst ganz gelesen und an das Etikett
+ *      angepasst (§8 „F“, lw_fit) – sonst zeilenweise ohne Seitenpuffer.
  *   3. Seiten byte-genau nach §8 kodieren (lw_job) und nach stdout schreiben.
  *
  * Meldungen an CUPS auf stderr: "INFO:", "WARNING:", "ERROR:", "DEBUG:", "PAGE: n m".
@@ -48,6 +51,7 @@
 #include "lw_bitmap.h"
 #include "lw_cups.h"
 #include "lw_dither.h"
+#include "lw_fit.h"
 #include "lw_job.h"
 #include "lw_options.h"
 #include "lw_raster.h"
@@ -57,6 +61,8 @@
 #define LW_MAX_RASTER_WIDTH 100000u
 /** Größte Etikettenlänge, die ZPL (^LL) annimmt. */
 #define LW_ZPL_MAX_LABEL_LENGTH 32000
+/** Größter Seitenpuffer für „An Etikett anpassen“ (Bytes Luminanz); größere Seiten unverändert. */
+#define LW_FIT_MAX_PAGE_BYTES ((size_t)1 << 30)
 
 static volatile sig_atomic_t g_canceled = 0;
 
@@ -181,6 +187,133 @@ static page_result discard_page(cups_raster_t *ras, const cups_page_header2_t *h
     return PAGE_OK;
 }
 
+/* Quelle der Luminanzzeilen einer Seite: der Rasterdatenstrom (Zeile für Zeile) oder ein
+ * Seitenpuffer (nach „An Etikett anpassen“). */
+typedef struct row_source {
+    cups_raster_t *ras;
+    const cups_page_header2_t *h;
+    const lw_raster_converter *conv;
+    page_buffers *b;
+    int page_number;
+    int raster_height;
+    const lw_logger *log;
+    const uint8_t *image;      /* NULL = Datenstrom */
+    size_t image_stride;
+} row_source;
+
+/* Liefert Luminanzzeile `y` (Datenstrom: die nächste Zeile). */
+static page_result next_row(const row_source *src, int y, const uint8_t **row)
+{
+    if (src->image != NULL) {
+        *row = src->image + (size_t)y * src->image_stride;
+        return PAGE_OK;
+    }
+    if (cupsRasterReadPixels(src->ras, src->b->line, src->h->cupsBytesPerLine) != src->h->cupsBytesPerLine) {
+        if (g_canceled)
+            return PAGE_CANCELED;
+        lw_log(src->log, LW_LOG_ERROR, "Rasterdaten von Seite %d sind unvollständig (Zeile %d von %d).",
+               src->page_number, y + 1, src->raster_height);
+        return PAGE_FAILED;
+    }
+    lw_raster_convert_line(src->conv, src->b->line, src->b->lum);
+    *row = src->b->lum;
+    return PAGE_OK;
+}
+
+/* Rastert `width` × `height` Luminanzzeilen aus `src`, schneidet auf die Druckbreite ab und gibt
+ * die Seite an den Auftrag. */
+static page_result rasterize_page(const row_source *src, int width, int height, const cups_page_header2_t *h,
+                                  lw_job *job, const lw_settings *settings, int max_print_width,
+                                  page_buffers *b, const lw_logger *log)
+{
+    const int page_number = src->page_number;
+    /* Bei 90°/270° wird erst nach dem Drehen abgeschnitten (lw_job_add_page, §8 Schritt 0). */
+    const int rotation = lw_settings_effective_rotation(settings);
+    const bool quarter = rotation == 90 || rotation == 270;
+    const int rotated_width = quarter ? height : width;
+    const int label_length = quarter ? width : height;
+    const int out_width = (!quarter && max_print_width > 0 && width > max_print_width) ? max_print_width : width;
+    if (max_print_width > 0 && rotated_width > max_print_width)
+        lw_log(log, LW_LOG_INFO, "Seite %d ist %d Punkte breit und wird auf die Druckbreite von %d Punkten abgeschnitten.",
+               page_number, rotated_width, max_print_width);
+    if (quarter)
+        lw_log(log, LW_LOG_DEBUG, "Seite %d wird um %d° gedreht.", page_number, rotation);
+    if (settings->language == LW_LANGUAGE_ZPL && label_length > LW_ZPL_MAX_LABEL_LENGTH)
+        lw_log(log, LW_LOG_WARNING, "Seite %d ist %d Punkte lang – ZPL erlaubt höchstens %d (^LL); der Drucker kürzt das Etikett.",
+               page_number, label_length, LW_ZPL_MAX_LABEL_LENGTH);
+
+    lw_bitmap page;
+    lw_bitmap_init(&page);
+    if (!lw_bitmap_alloc(&page, out_width, height)) {
+        lw_log(log, LW_LOG_ERROR, "Seite %d (%d × %d Punkte) ist zu groß oder es fehlt Speicher.",
+               page_number, out_width, height);
+        return PAGE_FAILED;
+    }
+    const size_t full_bpr = ((size_t)width + 7) / 8;
+    if (!ensure_buffer(&b->dither_row, &b->dither_row_size, full_bpr)) {
+        lw_bitmap_free(&page);
+        lw_log(log, LW_LOG_ERROR, "Nicht genügend Speicher für Seite %d.", page_number);
+        return PAGE_FAILED;
+    }
+
+    lw_ditherer ditherer;
+    if (!lw_ditherer_init(&ditherer, settings->dither, settings->threshold, width)) {
+        lw_bitmap_free(&page);
+        lw_log(log, LW_LOG_ERROR, "Nicht genügend Speicher für die Rasterung von Seite %d.", page_number);
+        return PAGE_FAILED;
+    }
+
+    /* Gerastert wird über die volle Seitenbreite (wie JobEncoder.encode(images:)); erst die
+     * fertige 1-Bit-Zeile wird auf die Druckbreite abgeschnitten. */
+    const bool crop = out_width < width;
+    const uint8_t last_mask = lw_bitmap_last_mask(out_width);
+    page_result result = PAGE_OK;
+    for (int y = 0; y < height; y++) {
+        const uint8_t *lum = NULL;
+        result = next_row(src, y, &lum);
+        if (result != PAGE_OK)
+            break;
+        uint8_t *row = lw_bitmap_row(&page, y);
+        if (crop) {
+            lw_ditherer_row(&ditherer, lum, b->dither_row);
+            memcpy(row, b->dither_row, (size_t)page.bpr);
+            row[page.bpr - 1] &= last_mask;
+        } else {
+            lw_ditherer_row(&ditherer, lum, row);
+        }
+    }
+    lw_ditherer_free(&ditherer);
+
+    if (result == PAGE_OK) {
+        job->resolution_dpi = (int)h->HWResolution[0];
+        if (!lw_job_add_page(job, &page, page_number))
+            result = PAGE_FAILED;
+    }
+    lw_bitmap_free(&page);
+    return result;
+}
+
+/* Seitengröße in Punkten: cupsPageSize, wenn beide > 0, sonst PageSize, sonst unbekannt (§8 „F“). */
+static bool page_size_points(const cups_page_header2_t *h, double *w, double *hgt)
+{
+    if (h->cupsPageSize[0] > 0.0f && h->cupsPageSize[1] > 0.0f) {
+        *w = (double)h->cupsPageSize[0];
+        *hgt = (double)h->cupsPageSize[1];
+        return true;
+    }
+    if (h->PageSize[0] > 0 && h->PageSize[1] > 0) {
+        *w = (double)h->PageSize[0];
+        *hgt = (double)h->PageSize[1];
+        return true;
+    }
+    return false;
+}
+
+static int resolution_or_zero(unsigned dpi)
+{
+    return dpi <= 100000u ? (int)dpi : 0;
+}
+
 static page_result process_page(cups_raster_t *ras, const cups_page_header2_t *h, int page_number,
                                 lw_job *job, const lw_settings *settings, int max_print_width,
                                 page_buffers *b, const lw_logger *log)
@@ -197,10 +330,11 @@ static page_result process_page(cups_raster_t *ras, const cups_page_header2_t *h
 
     lw_log(log, LW_LOG_DEBUG,
            "Seite %d: %u × %u Punkte, %u × %u dpi, Farbraum %s, %u Bit/Farbe, %u Bit/Pixel, "
-           "%u Bytes/Zeile, Anordnung %u",
+           "%u Bytes/Zeile, Anordnung %u, Seitengröße %.2f × %.2f pt",
            page_number, h->cupsWidth, h->cupsHeight, h->HWResolution[0], h->HWResolution[1],
            lw_raster_color_space_name(format.color_space), h->cupsBitsPerColor,
-           h->cupsBitsPerPixel, h->cupsBytesPerLine, format.color_order);
+           h->cupsBitsPerPixel, h->cupsBytesPerLine, format.color_order,
+           (double)h->cupsPageSize[0], (double)h->cupsPageSize[1]);
 
     if (h->cupsWidth == 0 || h->cupsHeight == 0) {
         lw_log(log, LW_LOG_WARNING, "Seite %d hat keine druckbare Fläche (%u × %u Punkte) und wird übersprungen.",
@@ -227,78 +361,60 @@ static page_result process_page(cups_raster_t *ras, const cups_page_header2_t *h
 
     const int width = (int)h->cupsWidth;
     const int height = (int)h->cupsHeight;
-    /* Bei 90°/270° wird erst nach dem Drehen abgeschnitten (lw_job_add_page, §8 Schritt 0). */
-    const int rotation = lw_settings_effective_rotation(settings);
-    const bool quarter = rotation == 90 || rotation == 270;
-    const int rotated_width = quarter ? height : width;
-    const int label_length = quarter ? width : height;
-    const int out_width = (!quarter && max_print_width > 0 && width > max_print_width) ? max_print_width : width;
-    if (max_print_width > 0 && rotated_width > max_print_width)
-        lw_log(log, LW_LOG_INFO, "Seite %d ist %d Punkte breit und wird auf die Druckbreite von %d Punkten abgeschnitten.",
-               page_number, rotated_width, max_print_width);
-    if (quarter)
-        lw_log(log, LW_LOG_DEBUG, "Seite %d wird um %d° gedreht.", page_number, rotation);
-    if (settings->language == LW_LANGUAGE_ZPL && label_length > LW_ZPL_MAX_LABEL_LENGTH)
-        lw_log(log, LW_LOG_WARNING, "Seite %d ist %d Punkte lang – ZPL erlaubt höchstens %d (^LL); der Drucker kürzt das Etikett.",
-               page_number, label_length, LW_ZPL_MAX_LABEL_LENGTH);
-
-    lw_bitmap page;
-    lw_bitmap_init(&page);
-    if (!lw_bitmap_alloc(&page, out_width, height)) {
-        lw_log(log, LW_LOG_ERROR, "Seite %d (%d × %d Punkte) ist zu groß oder es fehlt Speicher.",
-               page_number, out_width, height);
-        return PAGE_FAILED;
-    }
-    const size_t full_bpr = ((size_t)width + 7) / 8;
     if (!ensure_buffer(&b->line, &b->line_size, h->cupsBytesPerLine) ||
-        !ensure_buffer(&b->lum, &b->lum_size, (size_t)width) ||
-        !ensure_buffer(&b->dither_row, &b->dither_row_size, full_bpr)) {
-        lw_bitmap_free(&page);
+        !ensure_buffer(&b->lum, &b->lum_size, (size_t)width)) {
         lw_log(log, LW_LOG_ERROR, "Nicht genügend Speicher für Seite %d.", page_number);
         return PAGE_FAILED;
     }
+    row_source stream = { ras, h, &conv, b, page_number, height, log, NULL, 0 };
 
-    lw_ditherer ditherer;
-    if (!lw_ditherer_init(&ditherer, settings->dither, settings->threshold, width)) {
-        lw_bitmap_free(&page);
-        lw_log(log, LW_LOG_ERROR, "Nicht genügend Speicher für die Rasterung von Seite %d.", page_number);
-        return PAGE_FAILED;
+    /* --- §8 „F“: An Etikett anpassen ------------------------------------------------------ */
+    double page_w = 0.0, page_h = 0.0;
+    lw_fit_plan plan;
+    bool fit = page_size_points(h, &page_w, &page_h) &&
+               lw_fit_decide(settings, width, height, page_w, page_h, resolution_or_zero(h->HWResolution[0]),
+                             resolution_or_zero(h->HWResolution[1]), &plan);
+    if (!fit)
+        return rasterize_page(&stream, width, height, h, job, settings, max_print_width, b, log);
+
+    const size_t page_bytes = (size_t)width * (size_t)height;
+    uint8_t *image = page_bytes <= LW_FIT_MAX_PAGE_BYTES ? malloc(page_bytes) : NULL;
+    if (image == NULL) {
+        lw_log(log, LW_LOG_WARNING, "Seite %d (%d × %d Punkte) ist zu groß, um sie an das Etikett anzupassen – "
+               "sie wird unverändert gedruckt.", page_number, width, height);
+        return rasterize_page(&stream, width, height, h, job, settings, max_print_width, b, log);
     }
-
-    /* Gerastert wird über die volle Seitenbreite (wie JobEncoder.encode(images:)); erst die
-     * fertige 1-Bit-Zeile wird auf die Druckbreite abgeschnitten. */
-    const bool crop = out_width < width;
-    const uint8_t last_mask = lw_bitmap_last_mask(out_width);
-    page_result result = PAGE_OK;
     for (int y = 0; y < height; y++) {
-        if (cupsRasterReadPixels(ras, b->line, h->cupsBytesPerLine) != h->cupsBytesPerLine) {
-            if (g_canceled) {
-                result = PAGE_CANCELED;
-            } else {
-                lw_log(log, LW_LOG_ERROR, "Rasterdaten von Seite %d sind unvollständig (Zeile %d von %d).",
-                       page_number, y + 1, height);
-                result = PAGE_FAILED;
-            }
-            break;
+        const uint8_t *lum = NULL;
+        page_result r = next_row(&stream, y, &lum);
+        if (r != PAGE_OK) {
+            free(image);
+            return r;
         }
-        lw_raster_convert_line(&conv, b->line, b->lum);
-        uint8_t *row = lw_bitmap_row(&page, y);
-        if (crop) {
-            lw_ditherer_row(&ditherer, b->lum, b->dither_row);
-            memcpy(row, b->dither_row, (size_t)page.bpr);
-            row[page.bpr - 1] &= last_mask;
-        } else {
-            lw_ditherer_row(&ditherer, b->lum, row);
-        }
+        memcpy(image + (size_t)y * (size_t)width, lum, (size_t)width);
     }
-    lw_ditherer_free(&ditherer);
-
-    if (result == PAGE_OK) {
-        job->resolution_dpi = (int)h->HWResolution[0];
-        if (!lw_job_add_page(job, &page, page_number))
-            result = PAGE_FAILED;
+    uint8_t *fitted = NULL;
+    int fitted_w = 0, fitted_h = 0;
+    row_source buffered = stream;
+    page_result result;
+    if (lw_fit_apply(&plan, image, width, height, &fitted, &fitted_w, &fitted_h)) {
+        lw_log(log, LW_LOG_INFO,
+               "Seite %d (%.0f × %.0f mm) passt nicht zum Etikett – der Inhalt wird automatisch auf "
+               "das Etikett gelegt (%d × %d Punkte).",
+               page_number, page_w * 25.4 / 72.0, page_h * 25.4 / 72.0, fitted_w, fitted_h);
+        free(image);
+        buffered.image = fitted;
+        buffered.image_stride = (size_t)fitted_w;
+        result = rasterize_page(&buffered, fitted_w, fitted_h, h, job, settings, max_print_width, b, log);
+        free(fitted);
+    } else {
+        lw_log(log, LW_LOG_WARNING, "Nicht genügend Speicher, um Seite %d an das Etikett anzupassen – "
+               "sie wird unverändert gedruckt.", page_number);
+        buffered.image = image;
+        buffered.image_stride = (size_t)width;
+        result = rasterize_page(&buffered, width, height, h, job, settings, max_print_width, b, log);
+        free(image);
     }
-    lw_bitmap_free(&page);
     return result;
 }
 

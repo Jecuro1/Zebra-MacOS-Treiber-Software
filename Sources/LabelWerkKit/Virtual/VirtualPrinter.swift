@@ -378,6 +378,36 @@ public actor VirtualPrinter: PrinterConnection {
         jsonEnabled = on
     }
 
+    /// Simuliert einen Drucker ohne SGD (`false`: `! U1 getvar` und JSON bleiben unbeantwortet,
+    /// wie bei älteren ZPL-Druckern) bzw. mit SGD (`true`).
+    public func setSupportsSGD(_ on: Bool) {
+        sgdEnabled = on
+        if !on { jsonEnabled = false }
+    }
+
+    /// Legt simuliert Etiketten ein (wie nach dem Kalibrieren): Druckbreite (`ezpl.print_width`,
+    /// `nil` = unverändert), Etikettenlänge (`zpl.label_length`, Feld `dddd` von `~HS`) und Medientyp
+    /// (`ezpl.media_type`, `media.sense_mode`). Werte werden auf die Grenzen des Modells begrenzt.
+    public func loadMedia(widthDots: Int? = nil, lengthDots: Int, tracking: MediaTracking = .gap) {
+        if let widthDots {
+            // Höchstwert wie am echten Drucker in Zebra-Punkten (8/12/24 je mm): ZD421 mit 203 dpi → 832.
+            let maximum = max(model.printWidthDots(resolution),
+                              Int((model.printWidthMM * Double(resolution.dotsPerMM)).rounded()))
+            store.force("ezpl.print_width", String(min(maximum, max(2, widthDots))))
+        }
+        store.force("zpl.label_length", String(min(model.maxLabelLengthDots(resolution), max(1, lengthDots))))
+        switch tracking {
+        case .continuous:
+            store.force("ezpl.media_type", "continuous")
+        case .blackMark:
+            store.force("ezpl.media_type", "mark")
+            store.force("media.sense_mode", "bar")
+        case .gap, .notch, .autoDetect:
+            store.force("ezpl.media_type", "gap/notch")
+            store.force("media.sense_mode", "gap")
+        }
+    }
+
     /// Begrenzt die Bytes je `read(timeout:)` (simuliert stückweise eintreffende Antworten);
     /// `nil` = unbegrenzt.
     public func setMaximumReadChunk(_ bytes: Int?) {

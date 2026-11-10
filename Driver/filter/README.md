@@ -34,12 +34,13 @@ Einzelne End-to-End-Fälle: `python3 tests/run_e2e.py --bindir build --only kopi
 
 | Datei | Inhalt |
 |---|---|
-| `rastertolabelwerk.c` | Filter-Hauptprogramm: Raster lesen, Zeilen umrechnen, rastern, Auftrag schreiben, SIGTERM |
+| `rastertolabelwerk.c` | Filter-Hauptprogramm: Raster lesen, Zeilen umrechnen, (an Etikett anpassen,) rastern, Auftrag schreiben, SIGTERM |
 | `commandtolabelwerk.c` | Befehlsfilter (`#CUPS-COMMAND`-Dateien) |
 | `lw_cups.c/.h` | libcups-Anbindung: argv[5], PPD (`ppdMarkDefaults` + `cupsMarkOptions`), Attribute, Kopien, Sortierung |
 | `lw_options.c/.h` | Optionen aus §9: Zerlegung, Vorrang, Begrenzung (entspricht `PrintSettings`) |
 | `lw_raster.c/.h` | Rasterzeile → 8-Bit-Luminanz (alle Bittiefen, Farbräume, chunky/banded) |
 | `lw_dither.c/.h` | Schwelle, Bayer, Halbton, Floyd–Steinberg, Atkinson, Stucki – zeilenweise (Streaming) |
+| `lw_fit.c/.h` | An Etikett anpassen (§8 „F“): Entscheidung, Inhaltsrahmen, Zielgröße, Flächenmittel, Einsetzen |
 | `lw_encode.c/.h` | Hex, ACS, Base64, CRC-16/XMODEM, Z64, Base64url, UTF-8-Prüfung |
 | `lw_job.c/.h` | ZPL-/EPL-/CPCL-Schreiber, Vorverarbeitung, Kopien/Sortierung (Zwischendatei) |
 | `lw_bitmap.c/.h` | 1-Bit-Bitmaps: Abschneiden, Negativ, Spiegeln, 90°/180°/270°, Höhe ändern |
@@ -84,12 +85,26 @@ PPD-Auswahl liegen (auch als `Custom.37`) und werden auf gültige Bereiche begre
 | `lwCancelBefore` / `lwCancelDelay` | `True`/`False` / 0…10000 ms (Standard 1000) | `~JA` am Auftragsanfang vor den Startbefehlen (ZPL; EPL wörtlich; `~JA` löscht die Daten vor sich im Eingangspuffer), danach Ausgabe leeren und warten |
 | `lwLabelStartCmd` `lwLabelEndCmd` | Base64url wie `lwStartCmd` | Rohbefehle je Etikett: ZPL nach `^XA` bzw. vor `^XZ`, EPL nach `N` bzw. vor `P` (CPCL: keine) |
 | `lwPowerUpAction` `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` | `^XA^MFa,b^XZ` im Kopf – nur wenn beide gesetzt, nur ZPL; die Aktion beim Einschalten wirkt erst beim nächsten Einschalten (mit `lwSaveSettings=True`) |
+| `lwFitToLabel` | `Auto` (Standard) `Off` | An Etikett anpassen (alle Sprachen, siehe unten) |
+| `lwLabelWidth` `lwLabelHeight` | 0…100000 (1/100 mm, 0 = unbekannt; nicht in der PPD) | Etikettengröße der Warteschlange für `lwFitToLabel`; Länge 0 bzw. `Continuous` = nur die Breite anpassen |
+
+**An Etikett anpassen** (§8 „F“). macOS-Programme schicken oft A4/Letter („Andere 210 × 297 mm“)
+statt der Etikettengröße der Warteschlange. Weicht die Seitengröße aus dem Rasterkopf
+(`cupsPageSize`, sonst `PageSize`) um mehr als 2 mm von `lwLabelWidth` × `lwLabelHeight` ab, liest der
+Filter die Seite ganz (8-Bit-Luminanz, `cupsWidth · cupsHeight` Bytes, höchstens 1 GiB), schneidet sie
+auf den Inhalt (`L < 250`) zu, verkleinert ihn bei Bedarf per Flächenmittel (nie vergrößern,
+Seitenverhältnis bleibt) und setzt ihn mittig auf ein weißes Etikett in der Auflösung des Auftrags
+(`HWResolution`); danach geht es normal weiter (Rastern, Drehung, Abschneiden …). Bei 90°/270°
+Drehung gilt das Etikett quer. Meldung: `INFO: Seite 1 (210 × 297 mm) passt nicht zum Etikett – der
+Inhalt wird automatisch auf das Etikett gelegt (831 × 609 Punkte).` Passende Seiten, `Off` und
+Warteschlangen ohne `lwLabelWidth` laufen wie bisher zeilenweise ohne Seitenpuffer.
 
 Reihenfolge des ZPL-Auftragskopfs: `~JA`, Startbefehle, `~SD`, `~TA`, `~JS`, `~JC`, SGD
 `media.printmode` (Linerless), `^MF`, `^ST`. Je Etikett: (`^ST`), `^XA`, Etikettenanfang, `^MM`,
 `^MN`, `^MT`, `^PR`, `^PW`, `^LL`, `^LH`, `^LT`, `^LS`, `^PO`, `^PM`, Grafik, `^PQ`, `^JUS`,
-Etikettenende, `^XZ`. Vorverarbeitung: (0) Drehung 90/270, (1) Abschneiden, (1b) Bei letztem
-Element stoppen, (2) Negativ, (3) leere Seite überspringen, (4) EPL/CPCL spiegeln, (5) 180°.
+Etikettenende, `^XZ`. Vorverarbeitung: (F) an Etikett anpassen (vor dem Rastern), (0) Drehung
+90/270, (1) Abschneiden, (1b) Bei letztem Element stoppen, (2) Negativ, (3) leere Seite
+überspringen, (4) EPL/CPCL spiegeln, (5) 180°.
 
 PPD-Attribute: `*lwModel` (Meldungen, Selbsttest), `*lwMaxPrintWidthDots` (breitere Seiten werden
 rechts abgeschnitten – gerastert wird vorher über die volle Breite), `*lwDefaultGapDots`
@@ -157,7 +172,8 @@ werden mit `DEBUG:` übergangen.
   Optionszerlegung und Vorrangregeln, ZPL/EPL/CPCL byte-genau, Kopien/Sortierung, Abbruch;
   Drehung 90/270 gegen eine Naivimplementierung, Stoppen/Stoppversatz, eigene Steuerzeichen
   (auch vertauscht `^`↔`~`), RTC mit fester und schrittweiser Uhr, `~JA` samt Wartehaken,
-  Etikettenbefehle, `^MF`, Linerless, Kerben, Markenversatz.
+  Etikettenbefehle, `^MF`, Linerless, Kerben, Markenversatz; An Etikett anpassen (Entscheidung,
+  Inhaltsrahmen, Zielgröße, Flächenmittel gegen die Definition, Einsetzen, freie Länge).
 * **End-to-End** (`tests/run_e2e.py`): fast 500 Fälle – alle Sprachen × Kompressionen ×
   Rasterverfahren, Negativ/Spiegeln/180°/leere Seiten/Abschneiden/Kopien/Sortierung/Start- und
   Endbefehle, sämtliche Auftragseinstellungen, Vorrangregeln mit PPD-Varianten, 36 Rasterformate
@@ -166,6 +182,10 @@ werden mit `DEBUG:` übergangen.
   die Test-PPD; dazu jede Option der Windows-Druckeinstellungen je Sprache (RTC mit
   `LW_FIXED_TIME`/`LW_TIME_STEP_SECONDS`, auch mit Sommerzeit über `TZ`), PPD-Standardwerte und
   ungültige Werte der neuen Optionen sowie eine Zeitmessung der Wartezeit nach `~JA` (300 ms,
-  Faktor, SIGTERM). Die Referenz prüft sich vorab selbst (`python3 tests/reference_encoder.py`).
+  Faktor, SIGTERM). „An Etikett anpassen“: A4/Letter mit kleinem Etikett in der Ecke, volle Seiten
+  (verkleinert), quer, leer, gemischt, Drehung, Endlosmaterial, `PageSize`-Ersatz, PWG, 300 dpi und
+  die unveränderten Fälle (passende Größe, `Off`, ohne Etikett, PPD-Standard `Off`). `mkraster`
+  setzt dafür `pw=`/`ph=` (Seitengröße in Punkten), `cps=0` und ein Inhaltsrechteck `bx/by/bw/bh`.
+  Die Referenz prüft sich vorab selbst (`python3 tests/reference_encoder.py`).
 * **Konformität** (`Scripts/tests/test_encoder_conformance.py`): Swift-`JobEncoder` (über
   `lwctl encode`), dieser Filter und die Referenz müssen für rund 650 Fälle byte-gleich sein.

@@ -711,35 +711,22 @@ final class PrintPrefsEditor {
         return true
     }
 
-    /// Kennungspräfix der hier erzeugten eigenen Formate.
-    static let customStockPrefix = "custom-prefs-"
+    /// Kennungspräfix der hier erzeugten eigenen Formate (``LabelStockLibrary/customStockPrefix``).
+    static var customStockPrefix: String { LabelStockLibrary.customStockPrefix }
 
-    /// „Benutzerdefiniert 104 × 76,2 mm“.
+    /// „Benutzerdefiniert 104 × 76,2 mm“ (``LabelStockLibrary/customStockName(widthMM:heightMM:)``).
     static func customStockName(widthMM: Double, heightMM: Double) -> String {
-        func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...1))) }
-        return tr("Benutzerdefiniert %@ × %@ mm", number(widthMM), number(heightMM))
+        LabelStockLibrary.customStockName(widthMM: widthMM, heightMM: heightMM)
     }
 
+    /// Eigenes Format für „Benutzerdefiniert“: gleiches eigenes Format wiederverwenden, sonst das
+    /// zuletzt hier erzeugte Format dieses Druckers aktualisieren (solange es kein anderer nutzt), sonst
+    /// ein neues anlegen – gemeinsame Logik mit Assistent und manuellem Hinzufügen (``LabelStockLibrary``).
     private func customStockID(for draft: PrintPrefsDraft, session: PrinterSession, model: AppModel) -> String {
-        let width = (draft.widthMM * 100).rounded() / 100
-        let height = (draft.heightMM * 100).rounded() / 100
-        let tracking = draft.settings.tracking ?? session.stock.tracking
-        // Gleiches eigenes Format vorhanden → wiederverwenden.
-        if let match = model.customStocks.first(where: {
-            abs($0.widthMM - width) < 0.05 && abs($0.heightMM - height) < 0.05 && $0.tracking == tracking
-        }) {
-            return match.id
-        }
-        // Das zuletzt hier erzeugte Format dieses Druckers aktualisieren, solange es kein anderer nutzt.
-        let current = session.stock
-        let sharedWithOthers = model.sessions.contains { $0.id != session.id && $0.saved.stockID == current.id }
-        let id = current.isCustom && current.id.hasPrefix(Self.customStockPrefix) && !sharedWithOthers
-            ? current.id
-            : Self.customStockPrefix + UUID().uuidString.lowercased()
-        model.addCustomStock(LabelStock(id: id, name: Self.customStockName(widthMM: width, heightMM: height),
-                                        widthMM: width, heightMM: height, gapMM: draft.gapMM, tracking: tracking,
-                                        mediaType: draft.settings.mediaType, category: .custom, isCustom: true))
-        return id
+        LabelStockLibrary.customStockID(widthMM: draft.widthMM, heightMM: draft.heightMM, gapMM: draft.gapMM,
+                                        tracking: draft.settings.tracking ?? session.stock.tracking,
+                                        mediaType: draft.settings.mediaType, currentStock: session.stock,
+                                        ownerID: session.id, model: model)
     }
 
     // MARK: Drucker

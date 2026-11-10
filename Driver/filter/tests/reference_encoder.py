@@ -14,6 +14,10 @@ Seitenkerben, Linerless, Bei letztem Element stoppen, Pause, eigene Steuerzeiche
 ``time_step``) – wie ``LW_FIXED_TIME``/``LW_TIME_STEP_SECONDS`` beim Filter; die Ortszeit folgt
 der Umgebungsvariablen ``TZ`` des Python-Prozesses.
 
+„An Etikett anpassen“ (§8 „F“, ``lwFitToLabel``/``lwLabelWidth``/``lwLabelHeight``): ``fit_page`` bzw.
+``encode_job_from_luminance(..., page_sizes=[(pw, ph), …])`` – Seitengröße in Punkten wie
+``cupsPageSize``; ohne ``page_sizes`` gilt jede Seite als etikettengroß.
+
 Als Modul importierbar::
 
     import reference_encoder as ref
@@ -24,6 +28,7 @@ Als Modul importierbar::
 from __future__ import annotations
 
 import base64
+import math
 import sys
 import time
 import zlib
@@ -479,6 +484,10 @@ class Settings:
     label_end_commands: bytes = b""
     power_up_action: Optional[str] = None  # Feed / Calibrate / Length / NoMotion / ShortCal
     head_close_action: Optional[str] = None
+    # --- An Etikett anpassen (§8 „F“) ---
+    fit_to_label: str = "Auto"             # Auto / Off
+    label_width: int = 0                   # 1/100 mm, 0 = unbekannt
+    label_height: int = 0                  # 1/100 mm, 0 = unbekannt bzw. frei
 
     def clamped(self) -> "Settings":
         def c(v, lo, hi):
@@ -496,7 +505,8 @@ class Settings:
                        rotation=self.rotation if self.rotation in (0, 90, 180, 270) else 0,
                        mark_offset=c(self.mark_offset, -80, 283), stop_offset=c(self.stop_offset, 0, 32000),
                        pause_every=c(self.pause_every, 0, 9999), cancel_delay=c(self.cancel_delay, 0, 10000),
-                       control_chars=chars)
+                       control_chars=chars, label_width=c(self.label_width, 0, LABEL_SIZE_MAX),
+                       label_height=c(self.label_height, 0, LABEL_SIZE_MAX))
 
     @property
     def effective_rotation(self) -> int:
@@ -508,6 +518,8 @@ class Settings:
 #: Standard-Steuerzeichen (^ ~ ,) und gültiger Bereich eigener Zeichen.
 STANDARD_CONTROL_CHARS = (0x5E, 0x7E, 0x2C)
 CONTROL_CHAR_MIN, CONTROL_CHAR_MAX = 33, 126
+#: Obergrenze von lwLabelWidth/lwLabelHeight (1/100 mm = 1 m).
+LABEL_SIZE_MAX = 100000
 
 
 ENUMS = {
@@ -526,6 +538,7 @@ ENUMS = {
     "lwPowerUpAction": {k.lower(): k for k in ("Feed", "Calibrate", "Length", "NoMotion", "ShortCal")},
     "lwHeadCloseAction": {k.lower(): k for k in ("Feed", "Calibrate", "Length", "NoMotion", "ShortCal")},
     "lwControlChars": {"standard": False, "printer": True},
+    "lwFitToLabel": {"auto": "Auto", "off": "Off"},
 }
 
 INVALID = object()
@@ -654,6 +667,9 @@ def resolve_settings(argv: Dict[str, str], marked: Dict[str, str], defaults: Dic
         label_end_commands=pick("lwLabelEndCmd", _parse_commands, b""),
         power_up_action=pick("lwPowerUpAction", lambda t: _parse_enum("lwPowerUpAction", t), None),
         head_close_action=pick("lwHeadCloseAction", lambda t: _parse_enum("lwHeadCloseAction", t), None),
+        fit_to_label=pick("lwFitToLabel", lambda t: _parse_enum("lwFitToLabel", t), "Auto"),
+        label_width=pick("lwLabelWidth", _parse_int, 0),
+        label_height=pick("lwLabelHeight", _parse_int, 0),
     )
     if pick("lwControlChars", lambda t: _parse_enum("lwControlChars", t), False):
         s = replace(s, control_chars=(pick("lwFormatPrefix", _parse_char, STANDARD_CONTROL_CHARS[0]),
@@ -951,11 +967,183 @@ def encode_job(pages: Sequence[Bitmap], settings: Settings, *, resolution_dpi: i
     return bytes(out)
 
 
-def encode_job_from_luminance(images: Sequence[Tuple[int, int, bytes]], settings: Settings,
-                              **kwargs) -> bytes:
-    """Rastert jedes Luminanzbild über die volle Breite (vor dem Abschneiden) und kodiert den
-    Auftrag – entspricht JobEncoder.encode(images:) bzw. dem CUPS-Filter."""
+# --------------------------------------------------------------------------------------------
+# §8 „F“ – An Etikett anpassen (vor dem Rastern)
+# --------------------------------------------------------------------------------------------
+
+FIT_CONTENT_LEVEL = 250        # Inhalt ⇔ L < 250
+FIT_TOLERANCE = 200            # 1/100 mm (2 mm)
+FIT_MAX_DOTS = 32000
+FIT_MAX_PAGE_POINTS = 100000.0
+
+
+def points_to_hundredths_mm(points: float) -> Optional[int]:
+    """⌊pt · 2540 / 72 + 0,5⌋ in double (wie C/Swift), None bei ungültiger Seitengröße."""
+    if not (0.0 < points <= FIT_MAX_PAGE_POINTS):      # NaN fällt ebenfalls heraus
+        return None
+    return int(math.floor(points * 2540.0 / 72.0 + 0.5))
+
+
+def fit_plan(s: Settings, width: int, height: int, page_size: Optional[Tuple[float, float]],
+             xdpi: int, ydpi: int) -> Optional[Tuple[Optional[int], Optional[int]]]:
+    """Schritt F.1: Zielgröße (W, H) in Punkten (None = freie Seite) oder None = keine Anpassung."""
+    if s.fit_to_label != "Auto" or s.label_width <= 0 or page_size is None or width <= 0 or height <= 0:
+        return None
+    page_w, page_h = (points_to_hundredths_mm(v) for v in page_size)
+    if page_w is None or page_h is None:
+        return None
+    length = 0 if s.tracking == "Continuous" else s.label_height
+    if s.effective_rotation in (90, 270):
+        cw, ch = length, s.label_width          # Seite quer: Breite = Etikettenlänge
+    else:
+        cw, ch = s.label_width, length
+    differs = (cw > 0 and abs(page_w - cw) > FIT_TOLERANCE) or (ch > 0 and abs(page_h - ch) > FIT_TOLERANCE)
+    if not differs or xdpi <= 0 or ydpi <= 0:
+        return None
+    target_w = (cw * xdpi + 1270) // 2540 if cw > 0 else None
+    target_h = (ch * ydpi + 1270) // 2540 if ch > 0 else None
+    for value in (target_w, target_h):
+        if value is not None and not 1 <= value <= FIT_MAX_DOTS:
+            return None
+    return target_w, target_h
+
+
+_CONTENT_TABLE = bytes(1 if v < FIT_CONTENT_LEVEL else 0 for v in range(256))
+
+
+def content_bounds(lum: bytes, width: int, height: int) -> Optional[Tuple[int, int, int, int]]:
+    """Schritt F.2: (x0, y0, bw, bh) der Punkte mit L < 250, None bei leerer Seite."""
+    left, right, top, bottom = width, -1, -1, -1
+    for y in range(height):
+        row = lum[y * width:(y + 1) * width].translate(_CONTENT_TABLE)
+        first = row.find(1)
+        if first < 0:
+            continue
+        if top < 0:
+            top = y
+        bottom = y
+        left = min(left, first)
+        right = max(right, row.rfind(1))
+    if top < 0:
+        return None
+    return left, top, right - left + 1, bottom - top + 1
+
+
+def fit_target_size(bw: int, bh: int, target_w: Optional[int], target_h: Optional[int]) -> Tuple[int, int]:
+    """Schritt F.3: nie vergrößern, Seitenverhältnis behalten (gerundet, mindestens 1)."""
+    def scaled_h() -> int:
+        return max(1, (2 * bh * target_w + bw) // (2 * bw))
+
+    def scaled_w() -> int:
+        return max(1, (2 * bw * target_h + bh) // (2 * bh))
+
+    if target_w is not None and target_h is not None:
+        if bw <= target_w and bh <= target_h:
+            return bw, bh
+        if target_w * bh <= target_h * bw:
+            return target_w, scaled_h()
+        return scaled_w(), target_h
+    if target_w is not None:
+        return (bw, bh) if bw <= target_w else (target_w, scaled_h())
+    return (bw, bh) if bh <= target_h else (scaled_w(), target_h)
+
+
+def _axis_spans(source: int, target: int) -> List[Tuple[int, int, List[Tuple[int, int]]]]:
+    """Je Zielindex: Bereich [a, b) der Quellpunkte mit vollem Gewicht ``target`` und die Randpunkte
+    mit Teilgewicht (Quelle s deckt [s·target, (s+1)·target), Ziel X deckt [X·source, (X+1)·source))."""
+    spans = []
+    for index in range(target):
+        lo, hi = index * source, (index + 1) * source
+        parts = []
+        for s in range(lo // target, (hi - 1) // target + 1):
+            weight = min((s + 1) * target, hi) - max(s * target, lo)
+            if weight > 0:
+                parts.append((s, weight))
+        full = [s for s, w in parts if w == target]
+        a, b = (full[0], full[-1] + 1) if full else (0, 0)
+        spans.append((a, b, [(s, w) for s, w in parts if w != target]))
+    return spans
+
+
+def area_average(lum: bytes, width: int, x0: int, y0: int, bw: int, bh: int, tw: int, th: int) -> bytes:
+    """Schritt F.4: Flächenmittel des Ausschnitts (x0, y0, bw, bh) auf tw × th – exakte Summe der
+    Teilflächen, einmal gerundet: (S + T/2) / T mit T = bw·bh."""
+    rows = [lum[(y0 + y) * width + x0:(y0 + y) * width + x0 + bw] for y in range(bh)]
+    if tw == bw and th == bh:
+        return b"".join(rows)
+    xspans, yspans = _axis_spans(bw, tw), _axis_spans(bh, th)
+    total = bw * bh
+    cache: Dict[int, List[int]] = {}
+
+    def horizontal(y: int) -> List[int]:
+        """Σx ax(X, x) · L(x, y) je Zielspalte X."""
+        if y not in cache:
+            row = rows[y]
+            cache[y] = [tw * sum(row[a:b]) + sum(w * row[s] for s, w in edges) for a, b, edges in xspans]
+        return cache[y]
+
+    out = bytearray()
+    for a, b, edges in yspans:
+        acc = [0] * tw
+        contributions = [(y, th) for y in range(a, b)] + edges
+        for y, weight in contributions:
+            sums = horizontal(y)
+            for X in range(tw):
+                acc[X] += weight * sums[X]
+        out += bytes((value + total // 2) // total for value in acc)
+        # Eine Quellzeile gehört zu höchstens zwei aufeinanderfolgenden Zielzeilen.
+        last = max(y for y, _ in contributions)
+        for key in [key for key in cache if key < last]:
+            del cache[key]
+    return bytes(out)
+
+
+def fit_page(lum: bytes, width: int, height: int, s: Settings, page_size: Optional[Tuple[float, float]],
+             xdpi: int, ydpi: int) -> Tuple[int, int, bytes]:
+    """§8 „F“ für eine Seite: liefert (Breite, Höhe, Luminanz) – unverändert, wenn nichts anzupassen ist."""
+    plan = fit_plan(s, width, height, page_size, xdpi, ydpi)
+    if plan is None:
+        return width, height, lum
+    target_w, target_h = plan
+    bounds = content_bounds(lum, width, height)
+    if bounds is None:                                                   # leere Seite → leeres Etikett
+        cw, ch = target_w or 1, target_h or 1
+        return cw, ch, b"\xff" * (cw * ch)
+    x0, y0, bw, bh = bounds
+    tw, th = fit_target_size(bw, bh, target_w, target_h)
+    scaled = area_average(lum, width, x0, y0, bw, bh, tw, th)
+    cw = target_w if target_w is not None else tw
+    ch = target_h if target_h is not None else th
+    ox, oy = (cw - tw) // 2, (ch - th) // 2
+    canvas = bytearray(b"\xff" * (cw * ch))
+    for y in range(th):
+        start = (oy + y) * cw + ox
+        canvas[start:start + tw] = scaled[y * tw:(y + 1) * tw]
+    return cw, ch, bytes(canvas)
+
+
+def fit_images(images: Sequence[Tuple[int, int, bytes]], settings: Settings, page_sizes=None,
+               resolution_dpi: int = 203) -> List[Tuple[int, int, bytes]]:
+    """Wendet §8 „F“ auf alle Seiten an. ``page_sizes``: je Seite None, (pw, ph) in Punkten oder
+    (pw, ph, xdpi, ydpi); ohne Auflösung gilt ``resolution_dpi`` für beide Richtungen."""
     s = settings.clamped()
+    result = []
+    for index, (w, h, lum) in enumerate(images):
+        size = page_sizes[index] if page_sizes is not None else None
+        if size is not None:
+            xdpi, ydpi = (size[2], size[3]) if len(size) == 4 else (resolution_dpi, resolution_dpi)
+            w, h, lum = fit_page(lum, w, h, s, (size[0], size[1]), xdpi, ydpi)
+        result.append((w, h, lum))
+    return result
+
+
+def encode_job_from_luminance(images: Sequence[Tuple[int, int, bytes]], settings: Settings,
+                              page_sizes=None, **kwargs) -> bytes:
+    """Passt jede Seite an das Etikett an (§8 „F“, nur mit ``page_sizes``), rastert jedes
+    Luminanzbild über die volle Breite (vor dem Abschneiden) und kodiert den Auftrag – entspricht
+    JobEncoder.encode(images:pageSizes:) bzw. dem CUPS-Filter."""
+    s = settings.clamped()
+    images = fit_images(images, s, page_sizes, kwargs.get("resolution_dpi", 203))
     pages = [dither(lum, w, h, s.dither, s.threshold) for (w, h, lum) in images]
     return encode_job(pages, s, **kwargs)
 
@@ -1002,6 +1190,56 @@ def selftest() -> None:
     assert resolve_settings({"lwRotation": "90", "lwRotate180": "True"}, {}, {}).effective_rotation == 90
     assert resolve_settings({"lwRotate180": "True"}, {}, {}).effective_rotation == 180
     assert set_time_line(0)[-5:] == ",M^XZ"
+    # §8 „F“: Optionen, Umrechnung, Entscheidung, Flächenmittel gegen die Definition
+    fit = resolve_settings({"lwFitToLabel": " off ", "lwLabelWidth": "Custom.10400", "lwLabelHeight": "999999"},
+                           {}, {})
+    assert (fit.fit_to_label, fit.label_width, fit.label_height) == ("Off", 10400, LABEL_SIZE_MAX)
+    assert resolve_settings({"lwFitToLabel": "Default", "lwLabelWidth": "-5"}, {}, {}).fit_to_label == "Auto"
+    assert resolve_settings({"lwLabelWidth": "-5"}, {}, {}).label_width == 0
+    assert resolve_settings({"lwFitToLabel": "Yes"}, {}, {"lwFitToLabel": "Off"}).fit_to_label == "Off"
+    assert points_to_hundredths_mm(595.0) == 20990 and points_to_hundredths_mm(842.0) == 29704
+    assert points_to_hundredths_mm(0.0) is None and points_to_hundredths_mm(float("nan")) is None
+    label = Settings(label_width=10400, label_height=7620)
+    assert fit_plan(label, 10, 10, (595.0, 842.0), 203, 203) == (831, 609)
+    assert fit_plan(label, 10, 10, (295.0, 216.0), 203, 203) is None            # w295h216 passt
+    assert fit_plan(replace(label, rotation=90), 10, 10, (216.0, 295.0), 203, 203) is None
+    assert fit_plan(replace(label, rotation=270), 10, 10, (595.0, 842.0), 203, 203) == (609, 831)
+    assert fit_plan(replace(label, tracking="Continuous"), 10, 10, (295.0, 842.0), 203, 203) is None
+    assert fit_plan(replace(label, tracking="Continuous"), 10, 10, (595.0, 842.0), 203, 203) == (831, None)
+    assert fit_plan(replace(label, fit_to_label="Off"), 10, 10, (595.0, 842.0), 203, 203) is None
+    assert fit_plan(Settings(), 10, 10, (595.0, 842.0), 203, 203) is None
+    assert fit_target_size(100, 50, 200, 200) == (100, 50)
+    assert fit_target_size(400, 100, 200, 200) == (200, 50)
+    assert fit_target_size(100, 400, 200, 200) == (50, 200)
+    assert fit_target_size(3, 1000, 200, None) == (3, 1000) and fit_target_size(1000, 3, 200, None) == (200, 1)
+
+    def brute(lum, width, x0, y0, bw, bh, tw, th):
+        out = bytearray()
+        for ty in range(th):
+            for tx in range(tw):
+                acc = 0
+                for y in range(bh):
+                    ay = max(0, min((y + 1) * th, (ty + 1) * bh) - max(y * th, ty * bh))
+                    for x in range(bw):
+                        ax = max(0, min((x + 1) * tw, (tx + 1) * bw) - max(x * tw, tx * bw))
+                        acc += ax * ay * lum[(y0 + y) * width + x0 + x]
+                out.append((acc + bw * bh // 2) // (bw * bh))
+        return bytes(out)
+
+    for _ in range(60):
+        w, h = rng.randint(1, 23), rng.randint(1, 19)
+        lum = bytes(rng.randint(0, 255) for _ in range(w * h))
+        x0, y0 = rng.randint(0, w - 1), rng.randint(0, h - 1)
+        bw, bh = rng.randint(1, w - x0), rng.randint(1, h - y0)
+        tw, th = rng.randint(1, bw), rng.randint(1, bh)
+        assert area_average(lum, w, x0, y0, bw, bh, tw, th) == brute(lum, w, x0, y0, bw, bh, tw, th)
+    page = bytes([255] * 50 + [255, 0, 255, 255, 100] + [255] * 45)          # 10 × 10, Inhalt in Zeile 5
+    assert content_bounds(page, 10, 10) == (1, 5, 4, 1)
+    assert content_bounds(bytes([250] * 12), 4, 3) is None and content_bounds(bytes([249]), 1, 1) == (0, 0, 1, 1)
+    w, h, out = fit_page(page, 10, 10, Settings(label_width=100, label_height=100), (500.0, 500.0), 254, 254)
+    assert (w, h) == (10, 10) and out[4 * 10 + 3:4 * 10 + 7] == bytes([0, 255, 255, 100])   # mittig: (3, 4)
+    assert fit_page(bytes([255] * 4), 2, 2, Settings(label_width=100, label_height=100), (500.0, 500.0),
+                    254, 254) == (10, 10, b"\xff" * 100)
 
 
 __all__ = [
@@ -1011,6 +1249,8 @@ __all__ = [
     "resolve_settings", "parse_cups_options", "encode_job", "encode_job_from_luminance",
     "label_sequence", "preprocess", "resolve_collate", "parse_copies", "selftest", "rotate_quarter",
     "last_black_row", "with_height", "set_time_line", "LINERLESS_SGD", "STANDARD_CONTROL_CHARS",
+    "points_to_hundredths_mm", "fit_plan", "content_bounds", "fit_target_size", "area_average", "fit_page",
+    "fit_images", "LABEL_SIZE_MAX",
 ]
 
 

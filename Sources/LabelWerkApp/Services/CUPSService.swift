@@ -4,7 +4,14 @@ import LabelWerkKit
 /// Verwaltung der macOS-Druckerwarteschlangen (CUPS) über `lpadmin`, `lpstat`, `lpoptions`, `lpinfo`.
 ///
 /// Administratoren dürfen Warteschlangen auf macOS ohne Passwort anlegen (Gruppe `_lpadmin`).
-/// Schlägt das mit „Forbidden“ fehl, wird automatisch mit Administratorrechten wiederholt.
+/// Schlägt das mit „Forbidden“ fehl, wird – nur bei Aktionen des Benutzers – mit
+/// Administratorrechten wiederholt; der automatische Abgleich (`QueueSyncService`) fragt nie nach
+/// einem Passwort.
+///
+/// Etikettengröße (ARCHITECTURE.md §9 „Etikettengröße der Warteschlange“): Die Größe des Formats wird
+/// Standard-Papiergröße der Warteschlange. Steht sie nicht in der Modell-PPD, erhält die Warteschlange
+/// eine Kopie der PPD mit dieser benannten Seitengröße (`lpadmin -P`), dazu `lwLabelWidth`/
+/// `lwLabelHeight` als Warteschlangen-Standard für „An Etikett anpassen“.
 enum CUPSService {
     static let lpadmin = "/usr/sbin/lpadmin"
     static let lpinfo = "/usr/sbin/lpinfo"
@@ -24,6 +31,10 @@ enum CUPSService {
         case ambiguousUSBDevice
         case invalidQueueName
         case optionsNotApplied([String])
+        /// `lpadmin` verweigert die Änderung und eine Passwortabfrage ist nicht erlaubt.
+        case notAuthorized
+        /// Die Warteschlange ist nicht (mehr) eingerichtet.
+        case queueMissing(String)
 
         var errorDescription: String? {
             switch self {
@@ -39,6 +50,10 @@ enum CUPSService {
                 return tr("Ungültiger Warteschlangenname.")
             case .optionsNotApplied(let names):
                 return tr("Die Warteschlange hat diese Einstellungen nicht übernommen: %@", names.joined(separator: ", "))
+            case .notAuthorized:
+                return tr("macOS erlaubt diesem Benutzer nicht, Drucker zu ändern. Ein Administrator kann die Einstellungen unter „Druckeinstellungen“ erneut übertragen.")
+            case .queueMissing(let queue):
+                return tr("Die macOS-Warteschlange „%@“ ist nicht eingerichtet.", queue)
             }
         }
     }
@@ -170,9 +185,14 @@ enum CUPSService {
 
     // MARK: Einrichten & Ändern
 
-    /// Legt eine Warteschlange für den Drucker an und überträgt die Treiber-Standardwerte.
+    /// Legt eine Warteschlange für den Drucker an und überträgt die Treiber-Standardwerte samt
+    /// Etikettengröße.
+    ///
+    /// - Parameter stock: Etikettenformat des Druckers (auch eigene Formate aus `AppModel.customStocks`);
+    ///   `nil` = Katalogformat `printer.stockID`.
     @discardableResult
-    static func installQueue(for printer: SavedPrinter, queueName: String? = nil) async throws -> String {
+    static func installQueue(for printer: SavedPrinter, queueName: String? = nil,
+                             stock: LabelStock? = nil) async throws -> String {
         guard isDriverInstalled else { throw CUPSError.driverNotInstalled }
         guard let uri = try await deviceURI(for: printer.descriptor) else { throw CUPSError.noDeviceURI }
         guard let ppd = ppdURL(modelID: printer.modelID, resolution: printer.resolution, language: printer.language) else {
@@ -185,164 +205,232 @@ enum CUPSService {
         let name = existing.contains { $0.name == requested } ? requested : sanitizedQueueName(requested)
         // `-R` wirkt sofort und nur auf vorhandene Warteschlangen: Veraltete Standards nur dann entfernen.
         let exists = existing.contains { $0.name == name }
-        let plan = defaultsPlan(settings: printer.settings, language: printer.language, removingStale: exists,
-                                resolution: printer.resolution)
-        var args = ["-p", name, "-E", "-v", uri, "-P", ppd.path,
+        let configuration = QueueConfiguration(printer: printer,
+                                               stock: stock ?? ModelCatalog.shared.stock(id: printer.stockID))
+        let plan = configuration.plan(removingStale: exists)
+        let queuePPD = try queuePPDFile(base: ppd, size: configuration.labelSize, queue: name)
+        defer { queuePPD.cleanup() }
+        var args = ["-p", name, "-E", "-v", uri, "-P", queuePPD.path,
                     "-D", printer.name, "-o", "printer-is-shared=false"]
         if !printer.location.isEmpty { args += ["-L", printer.location] }
-        if let stock = ModelCatalog.shared.stock(id: printer.stockID) {
-            args += ["-o", "PageSize=\(stock.ppdKeyword)"]
-        }
         args += plan.arguments
         try await runLpadmin(args)
-        // Die Warteschlange steht; abweichende Optionen lassen sich unter „Druckeinstellungen“ erneut übertragen.
-        let mismatched = await mismatchedOptions(queue: name, plan: plan)
-        if !mismatched.isEmpty {
-            NSLog("LabelWerk: Warteschlange %@ hat Optionen nicht übernommen: %@", name, mismatched.joined(separator: ", "))
+        // Die Warteschlange steht; abweichende Optionen gleicht der automatische Abgleich bzw.
+        // „Druckeinstellungen“ erneut ab.
+        let state = await queueState(name)
+        let difference = QueueDefaults.difference(plan, current: state.options, pageSizeChoices: state.pageSizeChoices)
+        if !difference.mismatchedOptions.isEmpty || difference.missingPageSize {
+            NSLog("LabelWerk: Warteschlange %@ hat Optionen nicht übernommen: %@", name,
+                  difference.mismatchedOptions.joined(separator: ", "))
         }
         return name
     }
 
-    /// Überträgt Druckeinstellungen als Standardwerte der Warteschlange (wirkt für alle Programme)
-    /// und prüft sie anschließend mit `lpoptions`.
+    /// Überträgt Druckeinstellungen und Etikettengröße als Standardwerte der Warteschlange (wirkt für
+    /// alle Programme) und prüft sie anschließend mit `lpoptions`. Fehlt die Größe in der PPD der
+    /// Warteschlange, wird deren PPD durch eine ergänzte Kopie der Modell-PPD ersetzt.
     ///
     /// - Returns: Titel der Einstellungen, deren Wert nicht in der Auswahl der PPD liegt. Sie gelten
     ///   als Warteschlangen-Standard exakt; Druckdialoge bieten dafür nur den nächstliegenden Wert an.
     /// - Throws: `CUPSError.optionsNotApplied`, wenn die Warteschlange Werte nicht übernommen hat.
     @discardableResult
     static func setDefaults(queue: String, settings: PrintSettings, stock: LabelStock?,
-                            language: PrinterLanguage?, resolution: Resolution? = nil) async throws -> [String] {
-        let plan = defaultsPlan(settings: settings, language: language, removingStale: true, resolution: resolution)
-        var args = ["-p", queue] + plan.arguments
-        if let stock { args += ["-o", "PageSize=\(stock.ppdKeyword)"] }
-        try await runLpadmin(args)
-        let mismatched = await mismatchedOptions(queue: queue, plan: plan)
-        guard mismatched.isEmpty else { throw CUPSError.optionsNotApplied(mismatched) }
-        return plan.approximated.map(optionTitle)
+                            language: PrinterLanguage?, resolution: Resolution? = nil,
+                            modelID: String? = nil) async throws -> [String] {
+        let configuration = QueueConfiguration(settings: settings, stock: stock, language: language,
+                                               resolution: resolution, modelID: modelID)
+        let outcome = try await apply(configuration, to: queue, force: true, allowAdminPrompt: true)
+        return outcome.approximated.map(optionTitle)
+    }
+
+    // MARK: Abgleich (Soll ↔ Ist)
+
+    /// Soll-Zustand einer Warteschlange aus den gespeicherten LabelWerk-Einstellungen.
+    struct QueueConfiguration: Equatable {
+        var settings: PrintSettings
+        /// Etikettenformat (Größe = Standard-Papiergröße der Warteschlange); `nil` = unbekannt.
+        var stock: LabelStock?
+        var language: PrinterLanguage?
+        /// Auflösung der PPD (Auswahl der Millimeter-Optionen; `nil` = exakte Werte als Standard).
+        var resolution: Resolution?
+        /// Modell für die Modell-PPD, falls die PPD der Warteschlange nicht lesbar ist.
+        var modelID: String?
+
+        init(settings: PrintSettings, stock: LabelStock?, language: PrinterLanguage?, resolution: Resolution?,
+             modelID: String?) {
+            self.settings = settings
+            self.stock = stock
+            self.language = language
+            self.resolution = resolution
+            self.modelID = modelID
+        }
+
+        init(printer: SavedPrinter, stock: LabelStock?) {
+            self.init(settings: printer.settings, stock: stock, language: printer.language,
+                      resolution: printer.resolution, modelID: printer.modelID)
+        }
+
+        /// Benannte Seitengröße der Warteschlange.
+        var labelSize: QueueLabelSize? { stock.map(QueueLabelSize.init(stock:)) }
+
+        /// `lpadmin`-Plan: Einstellungen mit `lwLabelWidth`/`lwLabelHeight` aus dem Format
+        /// (Endlosmaterial: Länge 0) und `PageSize`.
+        func plan(removingStale: Bool) -> QueueDefaults.Plan {
+            QueueDefaults.plan(settings: settings.withLabelSize(of: stock), language: language,
+                               removingStale: removingStale, resolution: resolution, labelSize: labelSize)
+        }
+    }
+
+    /// Stand einer vorhandenen Warteschlange laut `lpoptions` und ihrer PPD.
+    struct QueueState: Equatable {
+        /// Aktuelle Werte (markierte PPD-Wahl, darüber die Warteschlangen-Standards).
+        var options: [String: String] = [:]
+        /// Alle Seitengrößen der PPD der Warteschlange (`PageSize` in `lpoptions -l`).
+        var pageSizeChoices: [String] = []
+        /// Inhalt von `/etc/cups/ppd/<queue>.ppd` (falls lesbar).
+        var ppdText: String?
+        /// `lpoptions` hat geantwortet (die Warteschlange existiert).
+        var isKnown: Bool { !options.isEmpty || !pageSizeChoices.isEmpty }
+    }
+
+    /// Ergebnis eines Abgleichs.
+    struct QueueApplyOutcome: Equatable {
+        /// Es wurde `lpadmin` ausgeführt.
+        var changed: Bool
+        /// Die PPD der Warteschlange wurde ersetzt (ergänzte Etikettengröße).
+        var replacedPPD: Bool
+        /// Optionen außerhalb der PPD-Auswahl (exakt als Warteschlangen-Standard).
+        var approximated: [String]
+        /// Abweichungen vor dem Abgleich (leer, wenn nichts zu tun war).
+        var difference: QueueDefaults.Difference
+    }
+
+    /// Liest den Stand einer Warteschlange (`lpoptions -p <queue> -l`, `lpoptions -p <queue>` und ihre PPD).
+    static func queueState(_ queue: String) async -> QueueState {
+        var state = QueueState()
+        let environment = ["LC_ALL": "C", "LANG": "C"]
+        if let list = try? await ProcessRunner.run(lpoptions, ["-p", queue, "-l"], environment: environment),
+           list.succeeded {
+            let parsed = LPOptionsList.parse(list.stdout)
+            state.pageSizeChoices = parsed[QueueDefaults.pageSizeOption]?.choices ?? []
+            var plain: [String: String] = [:]
+            if let result = try? await ProcessRunner.run(lpoptions, ["-p", queue], environment: environment),
+               result.succeeded {
+                plain = CUPSQueueLister.parseLpoptions(result.stdout)
+            }
+            state.options = QueueDefaults.currentOptions(list: parsed, plain: plain)
+        }
+        state.ppdText = queuePPDText(queue)
+        return state
+    }
+
+    /// Inhalt der PPD einer Warteschlange (`/etc/cups/ppd/<queue>.ppd`), falls lesbar.
+    static func queuePPDText(_ queue: String) -> String? {
+        guard !queue.isEmpty, !queue.contains("/"), !queue.hasPrefix(".") else { return nil }
+        return try? PPDFiles.read("/etc/cups/ppd/\(queue).ppd")
+    }
+
+    /// Modell-PPD, aus der die PPD einer Warteschlange stammt (`*lwModel` + Auflösung), sonst die PPD
+    /// für Modell, Auflösung und Sprache der Einstellungen.
+    static func basePPD(queuePPD text: String?, configuration: QueueConfiguration) -> URL? {
+        if let text, let stem = QueuePPD.baseStem(of: text) {
+            for ext in ["ppd.gz", "ppd"] {
+                let url = ppdDirectory.appendingPathComponent("\(stem).\(ext)")
+                if FileManager.default.fileExists(atPath: url.path) { return url }
+            }
+        }
+        return ppdURL(modelID: configuration.modelID, resolution: configuration.resolution ?? .dpi203,
+                      language: configuration.language ?? .zpl)
+    }
+
+    /// Vergleicht Soll und Ist einer Warteschlange, ohne etwas zu ändern.
+    static func check(_ configuration: QueueConfiguration, queue: String)
+        async -> (plan: QueueDefaults.Plan, difference: QueueDefaults.Difference, state: QueueState) {
+        let plan = configuration.plan(removingStale: true)
+        let state = await queueState(queue)
+        // Veraltete ergänzte Größen nur mit bekannter Modell-PPD der Warteschlange erkennen.
+        let base = state.ppdText.flatMap { QueuePPD.baseStem(of: $0) }.flatMap { PPDPageSizes.keywords(forPPDNamed: $0) }
+        let difference = QueueDefaults.difference(plan, current: state.options, pageSizeChoices: state.pageSizeChoices,
+                                                  basePageSizes: base)
+        return (plan, difference, state)
+    }
+
+    /// Bringt eine vorhandene Warteschlange auf den Soll-Zustand: Nur bei Abweichungen (oder mit
+    /// `force`) läuft `lpadmin`; fehlt die Etikettengröße in ihrer PPD (oder enthält diese eine veraltete
+    /// ergänzte Größe), wird die PPD durch die (ergänzte) Modell-PPD ersetzt – mit allen Standardwerten
+    /// im selben Aufruf, denn `lpadmin -P` setzt sie auf die der neuen PPD zurück.
+    ///
+    /// - Parameter allowAdminPrompt: Bei fehlenden Rechten nach dem Administratorpasswort fragen
+    ///   (nur bei Aktionen des Benutzers); sonst `CUPSError.notAuthorized`.
+    /// - Throws: `CUPSError.optionsNotApplied` (Abweichungen nach dem Abgleich), `noPPD`, `notAuthorized`,
+    ///   Fehler von `lpadmin`.
+    @discardableResult
+    static func apply(_ configuration: QueueConfiguration, to queue: String, force: Bool,
+                      allowAdminPrompt: Bool) async throws -> QueueApplyOutcome {
+        let (plan, difference, state) = await check(configuration, queue: queue)
+        // `lpadmin -p` legte eine fehlende Warteschlange (ohne Geräte-URI) neu an.
+        guard state.isKnown else { throw CUPSError.queueMissing(queue) }
+        guard force || !difference.isEmpty else {
+            return QueueApplyOutcome(changed: false, replacedPPD: false, approximated: plan.approximated,
+                                     difference: difference)
+        }
+        var args = ["-p", queue]
+        var queuePPD: QueuePPDFile?
+        if difference.needsPPD {
+            guard let base = basePPD(queuePPD: state.ppdText, configuration: configuration) else {
+                throw CUPSError.noPPD(queue)
+            }
+            let file = try queuePPDFile(base: base, size: configuration.labelSize, queue: queue)
+            queuePPD = file
+            args += ["-P", file.path]
+        }
+        defer { queuePPD?.cleanup() }
+        args += plan.arguments
+        try await runLpadmin(args, allowAdminPrompt: allowAdminPrompt)
+
+        let after = await queueState(queue)
+        let remaining = QueueDefaults.difference(plan, current: after.options, pageSizeChoices: after.pageSizeChoices)
+        // `lpoptions` nicht verfügbar oder ohne Ausgabe: nicht prüfbar.
+        if after.isKnown {
+            var failed = remaining.mismatchedOptions
+            if remaining.missingPageSize, !failed.contains(QueueDefaults.pageSizeOption) {
+                failed.append(QueueDefaults.pageSizeOption)
+            }
+            guard failed.isEmpty else { throw CUPSError.optionsNotApplied(failed.map(optionTitle)) }
+        }
+        return QueueApplyOutcome(changed: true, replacedPPD: queuePPD != nil, approximated: plan.approximated,
+                                 difference: difference)
+    }
+
+    /// PPD für `lpadmin -P`: die Modell-PPD selbst, wenn sie die Größe enthält (oder keine bekannt ist),
+    /// sonst eine ergänzte Kopie in einem temporären Ordner.
+    struct QueuePPDFile {
+        var path: String
+        var temporary: URL?
+
+        func cleanup() {
+            if let temporary { PPDFiles.removeTemporary(temporary) }
+        }
+    }
+
+    static func queuePPDFile(base: URL, size: QueueLabelSize?, queue: String) throws -> QueuePPDFile {
+        guard let size, !PPDFiles.containsPageSize(size, basePPD: base.path) else {
+            return QueuePPDFile(path: base.path, temporary: nil)
+        }
+        let text = try PPDFiles.patchedText(basePPD: base.path, size: size)
+        let url = PPDFiles.temporaryPath(queue: queue, size: size)
+        try PPDFiles.write(text, to: url)
+        return QueuePPDFile(path: url.path, temporary: url)
     }
 
     // MARK: Standardwerte abbilden
 
-    /// Auswahlwerte der ganzzahligen PPD-Optionen (Driver/ppd/README.md). `lpadmin -o name=wert`
-    /// übernimmt nur PPD-Schlüsselwörter mit einem Wert aus ihrer Auswahl – andere Werte verwirft es
-    /// stillschweigend.
-    static let ppdIntegerChoices: [String: [Int]] = [
-        CUPSOptionName.darkness: Array(1...30),
-        CUPSOptionName.labelTop: Array(stride(from: -120, through: 120, by: 10)),
-        CUPSOptionName.tearOff: Array(stride(from: -120, through: 120, by: 10)),
-        CUPSOptionName.labelLeft: Array(stride(from: -200, through: 200, by: 10)),
-        CUPSOptionName.threshold: [64, 96, 128, 160, 192],
-        CUPSOptionName.cutEvery: [0, 1, 2, 5, 10, 25, 50, 100],
-        CUPSOptionName.pauseEvery: [0, 1, 2, 5, 10, 25, 50, 100],
-        CUPSOptionName.cancelDelay: [0, 250, 500, 1000, 2000, 3000, 5000, 10000],
-    ]
-
-    /// Ganzzahlige PPD-Optionen, deren Auswahl Millimeter in Punkten der Auflösung sind
-    /// (Driver/ppd/generate_ppds.py: `MARK_OFFSET_MM`, `STOP_OFFSET_MM`).
-    static let ppdMillimetreChoices: [String: (millimetres: [Int], range: ClosedRange<Int>)] = [
-        CUPSOptionName.markOffset: ([-10, -5, -3, -2, -1, 0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35], -80...283),
-        CUPSOptionName.stopOffset: ([0, 1, 2, 3, 5, 10], 0...32_000),
-    ]
-
-    /// Auswahl einer ganzzahligen PPD-Option für die Auflösung (`nil` = keine Ganzzahl-Option bzw.
-    /// Auflösung unbekannt bei auflösungsabhängigen Optionen).
-    static func ppdChoices(_ name: String, resolution: Resolution?) -> [Int]? {
-        if let fixed = ppdIntegerChoices[name] { return fixed }
-        guard let resolution, let spec = ppdMillimetreChoices[name] else { return nil }
-        var seen = Set<Int>()
-        return spec.millimetres.compactMap { mm -> Int? in
-            let dots = resolution.dots(fromMM: Double(mm))
-            guard spec.range.contains(dots), seen.insert(dots).inserted else { return nil }
-            return dots
-        }
-    }
-
-    /// Optionen ohne PPD-Eintrag (freie Base64url-Werte, eigene Steuerzeichen und das veraltete
-    /// `lwRotate180`): nur als Warteschlangen-Standard möglich.
-    static let queueOnlyOptions: Set<String> = Set(CUPSOptionName.nonPPD)
-
-    /// `lpadmin`-Argumente für die Treiber-Standardwerte und die danach erwarteten Werte.
-    struct DefaultsPlan: Equatable {
-        var arguments: [String] = []
-        /// Erwarteter Wert je Option (wie ihn `currentOptions` liefert).
-        var expected: [String: String] = [:]
-        /// Optionen, die als Warteschlangen-Standard (`name-default`) gesetzt werden.
-        var queueDefaults: Set<String> = []
-        /// Optionen, die nicht gesetzt sein dürfen (leere Start-/Endbefehle).
-        var cleared: Set<String> = []
-        /// Optionen außerhalb der PPD-Auswahl (Druckdialoge zeigen den nächstliegenden Wert).
-        var approximated: [String] = []
-    }
-
-    /// Bildet Einstellungen auf `lpadmin`-Argumente ab:
-    /// * PPD-Optionen mit einem Wert aus der PPD-Auswahl: `-o name=wert` (Standard in der PPD).
-    /// * Ganzzahlen außerhalb der Auswahl: nächstliegende Wahl in der PPD **und** exakter Wert als
-    ///   Warteschlangen-Standard `-o name-default=wert` – cupsd gibt ihn jedem Auftrag mit, der die
-    ///   Option nicht selbst setzt, sodass er in `argv[5]` des Filters ankommt.
-    /// * Start-/Endbefehle (keine PPD-Optionen): `-o name-default=…`, leer `-R name-default`.
-    ///
-    /// `removingStale` entfernt nicht mehr benötigte Warteschlangen-Standards (`-R` wirkt sofort und
-    /// schlägt bei einer noch nicht vorhandenen Warteschlange fehl).
-    ///
-    /// `resolution` bestimmt die Auswahl der Millimeter-Optionen (`lwMarkOffset`, `lwStopOffset`); ohne
-    /// Auflösung werden deren Zahlenwerte stets exakt als Warteschlangen-Standard gesetzt.
+    /// Bildet Einstellungen auf `lpadmin`-Argumente ab (``QueueDefaults/plan(settings:language:removingStale:resolution:labelSize:)``,
+    /// unter Linux getestet).
     static func defaultsPlan(settings: PrintSettings, language: PrinterLanguage?, removingStale: Bool,
-                             resolution: Resolution? = nil) -> DefaultsPlan {
-        var plan = DefaultsPlan()
-        var options = settings.cupsOptions()
-        if let language { options[CUPSOptionName.language] = language.cupsValue }
-        for name in queueOnlyOptions.sorted() where options[name] == nil {
-            if removingStale { plan.arguments += ["-R", "\(name)-default"] }
-            plan.cleared.insert(name)
-        }
-        for (name, value) in options.sorted(by: { $0.key < $1.key }) {
-            plan.expected[name] = value
-            let dependsOnResolution = ppdMillimetreChoices[name] != nil
-            if queueOnlyOptions.contains(name) {
-                plan.arguments += ["-o", "\(name)-default=\(value)"]
-                plan.queueDefaults.insert(name)
-            } else if dependsOnResolution, resolution == nil, Int(value) != nil {
-                // Auswahl der PPD unbekannt: exakter Wert als Warteschlangen-Standard.
-                plan.arguments += ["-o", "\(name)-default=\(value)"]
-                plan.queueDefaults.insert(name)
-            } else if let choices = ppdChoices(name, resolution: resolution), !choices.isEmpty,
-                      let number = Int(value), !choices.contains(number) {
-                let nearest = choices.min { abs($0 - number) < abs($1 - number) } ?? number
-                plan.arguments += ["-o", "\(name)=\(nearest)", "-o", "\(name)-default=\(value)"]
-                plan.queueDefaults.insert(name)
-                plan.approximated.append(name)
-            } else {
-                plan.arguments += ["-o", "\(name)=\(value)"]
-                // Ein früher gesetzter exakter Wert würde die PPD-Wahl sonst überdecken.
-                if removingStale, ppdIntegerChoices[name] != nil || dependsOnResolution {
-                    plan.arguments += ["-R", "\(name)-default"]
-                }
-            }
-        }
-        return plan
-    }
-
-    /// Optionen, die laut `lpoptions` nicht den geplanten Wert haben. PPD-Optionen, die die PPD des
-    /// Modells nicht kennt (z. B. `lwCutEvery` ohne Schneider), werden nicht geprüft.
-    private static func mismatchedOptions(queue: String, plan: DefaultsPlan) async -> [String] {
-        let current = await currentOptions(queue: queue)
-        // `lpoptions` nicht verfügbar oder ohne Ausgabe: nicht prüfbar.
-        guard !current.isEmpty else { return [] }
-        var mismatched: [String] = []
-        for (name, value) in plan.expected.sorted(by: { $0.key < $1.key }) {
-            if let actual = current[name] {
-                if actual != value { mismatched.append(name) }
-            } else if plan.queueDefaults.contains(name) {
-                mismatched.append(name)
-            }
-        }
-        for name in plan.cleared.sorted() {
-            if let actual = current[name], !actual.isEmpty,
-               actual != "None", actual != CUPSOptionName.defaultValue {
-                mismatched.append(name)
-            }
-        }
-        return mismatched
+                             resolution: Resolution? = nil, labelSize: QueueLabelSize? = nil) -> QueueDefaults.Plan {
+        QueueDefaults.plan(settings: settings, language: language, removingStale: removingStale,
+                           resolution: resolution, labelSize: labelSize)
     }
 
     /// Anzeigename einer Treiberoption (wie unter „Druckeinstellungen“).
@@ -358,6 +446,9 @@ enum CUPSService {
         case CUPSOptionName.stopOffset: return tr("Stoppversatz")
         case CUPSOptionName.pauseEvery: return tr("Pausieren")
         case CUPSOptionName.cancelDelay: return tr("Verzögerung")
+        case QueueDefaults.pageSizeOption: return tr("Etikettenformat")
+        case CUPSOptionName.labelWidth, CUPSOptionName.labelHeight: return tr("Etikettengröße")
+        case CUPSOptionName.fitToLabel: return tr("An Etikett anpassen")
         default: return name
         }
     }
@@ -370,30 +461,10 @@ enum CUPSService {
         try await runLpadmin(["-d", name])
     }
 
-    /// Liest die aktuellen Optionen einer Warteschlange (`lpoptions -p <queue> -l`).
+    /// Liest die aktuellen Optionen einer Warteschlange (`lpoptions -p <queue> -l` und die freien
+    /// Werte aus `lpoptions -p <queue>`).
     static func currentOptions(queue: String) async -> [String: String] {
-        guard let result = try? await ProcessRunner.run(lpoptions, ["-p", queue, "-l"]) else { return [:] }
-        var options: [String: String] = [:]
-        for line in result.stdout.split(separator: "\n") {
-            // Format: "lwDarkness/Darkness: Default *15 16 …"
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            let keyPart = line[..<colon]
-            let key = String(keyPart.split(separator: "/").first ?? keyPart)
-            let values = line[line.index(after: colon)...].split(separator: " ")
-            if let marked = values.first(where: { $0.hasPrefix("*") }) {
-                options[key] = String(marked.dropFirst())
-            }
-        }
-        // Freie Werte (nicht in der PPD-Auswahl) stehen in `lpoptions -p <queue>`.
-        if let plain = try? await ProcessRunner.run(lpoptions, ["-p", queue]) {
-            for token in plain.stdout.split(separator: " ") {
-                let pair = token.split(separator: "=", maxSplits: 1)
-                if pair.count == 2, String(pair[0]).hasPrefix("lw") {
-                    options[String(pair[0])] = String(pair[1]).trimmingCharacters(in: CharacterSet(charactersIn: "'\"\n"))
-                }
-            }
-        }
-        return options
+        await queueState(queue).options
     }
 
     /// Sendet eine Testseite über die macOS-Warteschlange (prüft den kompletten Treiberpfad).
@@ -409,12 +480,13 @@ enum CUPSService {
 
     // MARK: intern
 
-    private static func runLpadmin(_ args: [String]) async throws {
+    private static func runLpadmin(_ args: [String], allowAdminPrompt: Bool = true) async throws {
         let result = try await ProcessRunner.run(lpadmin, args)
         if result.succeeded { return }
         let message = (result.stderr + result.stdout).lowercased()
         if message.contains("forbidden") || message.contains("not authorized") || message.contains("nicht autorisiert")
             || message.contains("verboten") || message.contains("unauthorized") {
+            guard allowAdminPrompt else { throw CUPSError.notAuthorized }
             let script = ([lpadmin] + args).map(ProcessRunner.shellQuote).joined(separator: " ")
             try await ProcessRunner.runAsAdministrator(
                 script, prompt: tr("LabelWerk möchte eine Druckerwarteschlange einrichten."))

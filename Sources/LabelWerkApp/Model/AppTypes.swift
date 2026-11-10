@@ -361,12 +361,26 @@ private struct LossyElement<T: Decodable>: Decodable {
 
 // MARK: - Hinweise (Toasts)
 
+/// Schaltfläche in einem Hinweis, z. B. „Erneut versuchen“ (die Übersicht `ToastOverlay` zeigt sie
+/// als Knopf; ein Klick führt `perform` aus und schließt den Hinweis).
+struct ToastAction {
+    var title: String
+    var perform: @MainActor () -> Void
+}
+
 struct Toast: Identifiable, Equatable {
     enum Style: Equatable { case info, success, warning, error }
     let id = UUID()
     var style: Style
     var title: String
     var message: String?
+    /// Optionale Aktion (`nil` = nur Text).
+    var action: ToastAction?
+
+    static func == (lhs: Toast, rhs: Toast) -> Bool {
+        lhs.id == rhs.id && lhs.style == rhs.style && lhs.title == rhs.title && lhs.message == rhs.message
+            && lhs.action?.title == rhs.action?.title
+    }
     var systemImage: String {
         switch style {
         case .info: return "info.circle.fill"

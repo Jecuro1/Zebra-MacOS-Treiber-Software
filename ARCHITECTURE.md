@@ -262,7 +262,26 @@ extension PrintSettings {        // neue gespeicherte Eigenschaften (Standardwer
     var effectiveControlCharacters: ControlCharacters   // controlCharacters?.clamped() ?? .standard
     var hasMediaFeedActions: Bool
 }
+
+// An Etikett anpassen (macOS-Druckdialog schickt A4/Letter/„Andere“ statt der Etikettengröße, §8 „F“)
+public enum LabelFitMode: String, Codable, CaseIterable, Sendable, Identifiable {
+    case auto, off                           // cupsValue "Auto" "Off"; displayName „Automatisch“ „Aus“
+}
+extension PrintSettings {        // neue gespeicherte Eigenschaften (Standardwert), init-Parameter am Ende
+    var fitToLabel: LabelFitMode = .auto            // lwFitToLabel
+    var labelWidthHundredthsMM: Int = 0             // lwLabelWidth, 1/100 mm, 0…100 000 (0 = unbekannt)
+    var labelHeightHundredthsMM: Int = 0            // lwLabelHeight, 1/100 mm, 0…100 000 (0 = unbekannt/endlos)
+    static let maxLabelSizeHundredthsMM = 100_000
+    var labelSizeMM: (width: Double, height: Double)?           // nil, solange die Breite 0 ist
+    mutating func setLabelSize(widthMM: Double, heightMM: Double) // auf 1/100 mm gerundet, ≤ 0/ungültig → 0
+    func withLabelSize(of stock: LabelStock?) -> PrintSettings    // Endlosmaterial: Länge 0; nil → beide 0
+}
 ```
+
+`lwLabelWidth`/`lwLabelHeight` stammen aus dem Etikettenformat der Warteschlange (nicht aus einer
+Benutzereingabe): Wer Warteschlangen-Standards schreibt (App, `lwctl install`, postinstall), setzt sie
+vorher mit `withLabelSize(of:)`; `cupsOptions()` lässt den Wert 0 weg (wie leere Befehle), beide
+stehen in `CUPSOptionName.nonPPD` (Warteschlangen-Standard `-o lwLabelWidth-default=10400`).
 
 `rotate180` (`lwRotate180`) bleibt als veralteter Alias erhalten. `clamped()` begrenzt die neuen
 Zahlen und ersetzt ungültige Steuerzeichen; `init(from:)` dekodiert fehlende/ungültige Werte mit
@@ -359,8 +378,35 @@ public struct JobEncoder: Sendable {
     public var timeStepSeconds: Int64             // Tests: Etikett k sieht now() + k·timeStepSeconds (Standard 0)
     public func encode(pages: [MonoBitmap], copies: Int = 1, collate: Bool = true) throws -> Data
     public func encode(images: [GrayImage], copies: Int = 1, collate: Bool = true) throws -> Data // dithert gemäß settings
+    public func encode(images: [GrayImage], pageSizes: [PageSizePoints?], copies: Int = 1, collate: Bool = true) throws -> Data
+        // wie oben, vorher je Bild Schritt F aus §8 (An Etikett anpassen) mit seiner Seitengröße
+        // (pageSizes.count == images.count, sonst ImagingError.invalidArgument; nil = Etikettengröße)
+    public func fitted(_ image: GrayImage, pageSize: PageSizePoints?) -> GrayImage   // nur Schritt F
     public func preprocess(_ page: MonoBitmap) -> MonoBitmap?     // Schritte (0)–(5) aus §8, z. B. für Vorschauen
     public func cancelPrefixLength() -> Int?      // Länge der ~JA-Zeile am Auftragsanfang (Aufrufer wartet danach)
+}
+
+/// Seitengröße in PostScript-Punkten (1/72 Zoll) – wie `cupsPageSize` im CUPS-Rasterkopf.
+public struct PageSizePoints: Hashable, Sendable, Codable {
+    public var width: Double; public var height: Double
+    public static let a4: PageSizePoints       // 595,28 × 841,89
+    public static let letter: PageSizePoints   // 612 × 792
+}
+
+/// Schritt F aus §8 („An Etikett anpassen“), byte-gleich zu `lw_fit` (C) und `fit_page` (Python).
+public enum LabelFit {
+    public static let contentLevel = 250            // Inhalt ⇔ L < 250
+    public static let toleranceHundredthsMM = 200   // 2 mm
+    public static let maxDots = 32_000
+    public struct Plan: Hashable, Sendable { public var width: Int?; public var height: Int? }  // nil = frei
+    public static func plan(settings: PrintSettings, pageSize: PageSizePoints?, xDPI: Int, yDPI: Int,
+                            imageWidth: Int, imageHeight: Int) -> Plan?   // nil = keine Anpassung
+    public static func hundredthsMM(fromPoints points: Double) -> Int?    // ⌊pt·2540/72 + 0,5⌋, nil wenn ungültig
+    public static func contentBounds(_ image: GrayImage) -> (x: Int, y: Int, width: Int, height: Int)?
+    public static func targetSize(contentWidth: Int, contentHeight: Int, plan: Plan) -> (width: Int, height: Int)
+    public static func areaAverage(_ image: GrayImage, x: Int, y: Int, width: Int, height: Int,
+                                   toWidth: Int, toHeight: Int) -> GrayImage   // Flächenmittel, nur Ganzzahlen
+    public static func apply(_ image: GrayImage, plan: Plan) -> GrayImage
 }
 ```
 
@@ -754,7 +800,11 @@ Treiberoptionen für `print` und `encode` (je eine `PrintSettings`-Eigenschaft, 
 (`feed|calibrate|length|noMotion|shortCal` oder ZPL-Code), `--calibrate`, `--save-settings`,
 `--skip-blank`, `--start-commands`, `--end-commands`. Nur `encode`: `--no-collate`, `--max-width`,
 `--fixed-time <s>` (feste Uhrzeit für `^ST`, Sekunden seit 1970), `--time-step <s>` (Etikett k sieht
-die Zeit + k·s, wie `LW_TIME_STEP_SECONDS`), `--time-zone <id>` (Standard: `TZ` bzw. Systemzeitzone).
+die Zeit + k·s, wie `LW_TIME_STEP_SECONDS`), `--time-zone <id>` (Standard: `TZ` bzw. Systemzeitzone),
+`--fit-to-label auto|off` (`lwFitToLabel`), `--label-size <B>x<H>[mm|in]` (`lwLabelWidth`/`lwLabelHeight`,
+Höhe 0 = frei), `--page-size <B>x<H>[,<B>x<H>…]` (Seitengröße der Bilder in Punkten wie `cupsPageSize`;
+eine Angabe für alle Bilder oder genau eine je Bild; nur mit `--no-layout`; ohne Angabe gilt jedes Bild
+als etikettengroß, Schritt F entfällt).
 Mit `--rotation 90|270` passt `print`/`encode` (ohne `--no-layout`) das Bild in das quer liegende
 Etikett ein; der `JobEncoder` dreht die Seite danach zurück.
 
@@ -778,6 +828,68 @@ Eingang: Seiten als `MonoBitmap` (1 = schwarz). Wirksame Drehung `R = effectiveR
 
 ZPL spiegelt per `^PM`. Zeilenende ZPL: jeder Befehl in eigener Zeile, abgeschlossen mit `\n` (LF);
 Grafikdaten in einer Zeile.
+
+### F. An Etikett anpassen (`lwFitToLabel`, vor dem Rastern)
+
+macOS-Programme schicken oft die Systempapiergröße (A4/Letter, „Andere 210 × 297 mm“) oder die
+Seitengröße des Dokuments statt der Etikettengröße der Warteschlange. Schritt F legt solche Seiten
+automatisch auf das Etikett, **bevor** gerastert wird (Graustufen `L`, 0 = schwarz); danach läuft
+alles wie gewohnt (Rastern über die volle Breite, Schritte 0–5, Abschneiden auf die Druckbreite …),
+als hätte das Programm eine etikettengroße Seite geschickt. Passt die Seitengröße (± 2 mm), bleibt
+die Ausgabe byte-gleich zu der ohne Schritt F. Alle Rechnungen sind Ganzzahlrechnungen (64 Bit,
+Division mit Abschneiden), bis auf die Umrechnung der Seitengröße (IEEE-754 `double`, genau so).
+
+Eingaben je Seite: Luminanz `L(x, y)` (`w × h` Punkte; Seiten ohne Fläche werden wie bisher ohne
+Schritt F übersprungen), Seitengröße `pw × ph` in Punkten (Filter: `cupsPageSize[0/1]`, wenn beide
+> 0, sonst `PageSize[0/1]`, wenn beide > 0, sonst unbekannt; Swift `PageSizePoints`, Python
+`page_sizes`), Auflösung `xdpi`/`ydpi` (Filter `HWResolution[0/1]`; Swift/Python: die Auflösung des
+Auftrags für beide), Einstellungen `lwFitToLabel`, `lwLabelWidth` (`lw`), `lwLabelHeight` (`lh`),
+`lwMediaTracking`, wirksame Drehung `R`.
+
+1. **Ziel bestimmen.** Schritt F entfällt, wenn `lwFitToLabel = Off`, `lw = 0` oder die
+   Seitengröße unbekannt bzw. ungültig ist (nicht `0 < pw ≤ 100000` und `0 < ph ≤ 100000`).
+   Etikettenlänge `le = (lwMediaTracking = Continuous) ? 0 : lh` – 0 heißt **frei** (Endlosmaterial:
+   nur die Breite wird angepasst, lange Belege bleiben lang). In Seitenrichtung: `R` = 90/270 →
+   `(cw, ch) = (le, lw)` (die Seite liegt quer, Schritt 0 dreht sie später), sonst `(cw, ch) = (lw, le)`.
+   Seite in 1/100 mm: `Pw = ⌊pw · 2540 / 72 + 0,5⌋` (genau so in `double`: `floor(pw * 2540.0 / 72.0 + 0.5)`),
+   `Ph` ebenso. Schritt F entfällt, wenn keine feste Seite abweicht: weder `cw > 0 ∧ |Pw − cw| > 200`
+   noch `ch > 0 ∧ |Ph − ch| > 200`. Etikett in Punkten: `W = (cw · xdpi + 1270) / 2540`,
+   `H = (ch · ydpi + 1270) / 2540` (frei: kein Wert). Schritt F entfällt, wenn eine feste Seite
+   `< 1` oder `> 32000` Punkte ergibt oder `xdpi`/`ydpi` 0 ist.
+2. **Inhalt.** Ein Punkt ist Inhalt ⇔ `L < 250`. `x0`/`x1` = kleinste/größte Spalte, `y0`/`y1` =
+   kleinste/größte Zeile mit Inhalt; `bw = x1 − x0 + 1`, `bh = y1 − y0 + 1`. Ohne Inhalt (leere Seite)
+   wird das Ergebnis ein weißes Etikett `W × H` (`L = 255`; freie Seite = 1 Punkt) – weiter mit dem
+   Rastern.
+3. **Zielgröße** `tw × th` (nie vergrößern): beide Seiten fest und `bw ≤ W ∧ bh ≤ H` → `bw × bh`.
+   Beide fest, sonst: `W · bh ≤ H · bw` → `tw = W`, `th = max(1, (2 · bh · W + bw) / (2 · bw))`; andernfalls
+   `th = H`, `tw = max(1, (2 · bw · H + bh) / (2 · bh))`. Nur `W` fest: `bw ≤ W` → `bw × bh`, sonst
+   `tw = W`, `th` wie oben. Nur `H` fest: `bh ≤ H` → `bw × bh`, sonst `th = H`, `tw` wie oben.
+4. **Verkleinern (Flächenmittel).** Für jeden Zielpunkt `(X, Y)`:
+   `S = Σx Σy ax(X, x) · ay(Y, y) · L(x0 + x, y0 + y)` über `0 ≤ x < bw`, `0 ≤ y < bh` mit
+   `ax(X, x) = max(0, min((x + 1) · tw, (X + 1) · bw) − max(x · tw, X · bw))` und
+   `ay(Y, y) = max(0, min((y + 1) · th, (Y + 1) · bh) − max(y · th, Y · bh))`;
+   Wert `= (S + T / 2) / T` mit `T = bw · bh`. Bei `tw = bw ∧ th = bh` ist das genau die Kopie des
+   Ausschnitts (Implementierungen dürfen dann kopieren). Die Summe ist trennbar (erst Zeilen, dann
+   Spalten), darf aber erst am Ende einmal gerundet werden.
+5. **Einsetzen.** Etikett `CW × CH` mit `CW = W` (frei: `tw`), `CH = H` (frei: `th`), weiß (255);
+   das Bild kommt an `ox = (CW − tw) / 2`, `oy = (CH − th) / 2` (waagerecht **und** senkrecht
+   mittig). Dieses Bild ersetzt die Seite.
+
+Folgen: Ein Etikett-PDF, das Vorschau bei 100 % auf A4 oder Letter setzt, wird in Originalgröße und
+ohne den weißen Rand mittig gedruckt; größerer Inhalt (z. B. eine ganze A4-Seite) wird
+seitenverhältnistreu verkleinert; eine leere Seite ergibt ein leeres Etikett (mit
+`skipBlankLabels` übersprungen). `lwLabelWidth`/`lwLabelHeight` sind Warteschlangen-Standards aus
+dem Etikettenformat (§9); ohne sie (ältere Warteschlangen, `lwctl encode` ohne `--label-size`) und mit
+`lwFitToLabel=Off` bleibt alles wie bisher. Der Filter puffert nur in Schritt F eine ganze Seite
+(`w · h` Bytes, höchstens 1 GiB); ist sie größer oder fehlt Speicher, druckt er sie mit `WARNING:`
+unverändert (die einzige Stelle, an der Filter und `JobEncoder` absichtlich abweichen können).
+
+Entscheidungen (gegenüber dem ersten Entwurf präzisiert): Bei Endlosmaterial
+(`lwMediaTracking=Continuous`) bzw. `lwLabelHeight=0` ist die Länge frei – sonst würde ein langer
+Beleg auf die Abschnittslänge des Formats geschrumpft. Bei `R` = 90/270 gilt das Etikett quer (wie
+`lwctl print` die Seite für eine Drehung quer einpasst). Die Inhaltsschwelle 250 ignoriert
+JPEG-/Scanner-Rauschen nahe Weiß; dunklere Punkte gehören zum Inhalt, auch wenn das gewählte
+Rasterverfahren sie weiß drucken würde.
 
 ### ZPL
 
@@ -925,11 +1037,14 @@ Etikett entfallen ebenso wie alle ZPL-Optionen.
 | `lwCalibrate` `lwSaveSettings` `lwSkipBlank` | `False` `True` | |
 | `lwStartCmd` `lwEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle vor/nach dem Auftrag |
 | `lwLabelStartCmd` `lwLabelEndCmd` | Base64url (UTF-8, ohne Padding) | Rohbefehle am Anfang/Ende jedes Etiketts |
+| `lwFitToLabel` | `Auto` `Off` | „An Etikett anpassen“ (Standard `Auto`; der Wert „Default“ bedeutet `Auto`): Seiten, deren Größe um mehr als 2 mm vom Etikett abweicht (A4/Letter aus dem macOS-Druckdialog), legt der Treiber vor dem Rastern auf das Etikett – zugeschnitten auf den Inhalt, nur verkleinert, mittig (§8 „F“) |
+| `lwLabelWidth` `lwLabelHeight` | `0`…`100000` (1/100 mm, nicht in der PPD; `0` = unbekannt) | Etikettengröße der Warteschlange für `lwFitToLabel` (aus dem Etikettenformat; Endlosmaterial: Länge `0` = frei); ohne `lwLabelWidth` keine Anpassung |
 
 Nicht in der PPD (frei wählbare Werte bzw. veraltet; nur als Warteschlangen-Standard per `lpadmin`
 oder Auftragsoption): `lwStartCmd`, `lwEndCmd`, `lwLabelStartCmd`, `lwLabelEndCmd`, `lwFormatPrefix`,
-`lwControlPrefix`, `lwDelimiter`, `lwRotate180`. Die PPD gruppiert die übrigen Optionen wie der
-Windows-Treiber: „Seite einrichten“ (Seitengröße, `lwMediaTracking`, `lwMarkOffset`, `lwRotation`,
+`lwControlPrefix`, `lwDelimiter`, `lwRotate180`, `lwLabelWidth`, `lwLabelHeight`. Die PPD gruppiert die
+übrigen Optionen wie der Windows-Treiber: „Seite einrichten“ (Seitengröße, `lwFitToLabel`,
+`lwMediaTracking`, `lwMarkOffset`, `lwRotation`,
 `lwMirror`, `lwNegative`, `lwStopAtLast`, `lwStopOffset`), „Druckoptionen“ (`lwSpeed`, `lwDarkness`,
 `lwMediaType`, `lwLabelTop`, `lwLabelLeft`, `lwBackfeed`, `lwPauseEvery`, `lwControlChars`, `lwRTC`,
 `lwCancelBefore`, `lwCancelDelay`), „Bedienermodus“ (`lwPrintMode`, `lwTearOff`, `lwCutEvery`),
@@ -944,9 +1059,11 @@ Ganzzahlen optional mit `Custom.`-Präfix und Vorzeichen, sonst nur Ziffern (`12
 `lwRotation` nur exakt `0`/`90`/`180`/`270` (`+90`, `090` ungültig → 0); `lwControlChars`: nur
 `Printer` aktiviert `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` (je fehlend, `Default` oder außerhalb
 33…126 → Standardzeichen `^`/`~`/`,`); Zahlen außerhalb des Bereichs werden begrenzt (`lwMarkOffset`
-−80…283, `lwStopOffset` 0…32000, `lwPauseEvery` 0…9999, `lwCancelDelay` 0…10000). `cupsOptions()`
-schreibt `lwRotation` und `lwRotate180` unverändert (Rundreise exakt), `lwFormatPrefix`… nur bei
-`Printer`, leere Befehle (`lwLabelStartCmd`, `lwLabelEndCmd`) gar nicht.
+−80…283, `lwStopOffset` 0…32000, `lwPauseEvery` 0…9999, `lwCancelDelay` 0…10000, `lwLabelWidth` und
+`lwLabelHeight` je 0…100000); `lwFitToLabel` kennt nur `Auto`/`Off` (ungültig → nächste Ebene,
+zuletzt `Auto`). `cupsOptions()` schreibt `lwRotation` und `lwRotate180` unverändert (Rundreise
+exakt), `lwFormatPrefix`… nur bei `Printer`, leere Befehle (`lwLabelStartCmd`, `lwLabelEndCmd`) und
+`lwLabelWidth`/`lwLabelHeight` = 0 gar nicht.
 
 Vorrang im Filter: Wert aus `argv[5]` (Job-/Warteschlangen-Optionen) **vor** markierter PPD-Auswahl
 **vor** PPD-Default. Ganzzahlen außerhalb der PPD-Auswahl sind erlaubt. Warteschlangen-Standardwerte

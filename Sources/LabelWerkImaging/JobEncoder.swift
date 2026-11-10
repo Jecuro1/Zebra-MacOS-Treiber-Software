@@ -7,6 +7,9 @@ import LabelWerkCore
 /// CUPS-Filter `rastertolabelwerk`. Ein Druckauftrag aus der App (`PrinterClient.printImages`)
 /// und einer über CUPS sind dadurch byte-gleich.
 ///
+/// Vor dem Rastern (nur ``encode(images:pageSizes:copies:collate:)``): Schritt F „An Etikett
+/// anpassen“ (``LabelFit``) für Seiten, deren Größe nicht zum Etikett passt.
+///
 /// Ablauf je Seite (Vorverarbeitung):
 /// 0. Wirksame Drehung (``PrintSettings/effectiveRotation``) 90° bzw. 270° → Bitmap im
 ///    Uhrzeigersinn drehen (alle Sprachen), **vor** dem Abschneiden.
@@ -112,6 +115,30 @@ public struct JobEncoder: Sendable {
         let s = settings.clamped()
         let pages = images.map { Ditherer.dither($0, algorithm: s.dither, threshold: s.threshold) }
         return try encode(pages: pages, copies: copies, collate: collate)
+    }
+
+    /// Wie ``encode(images:copies:collate:)``, legt aber jedes Bild vorher mit seiner Seitengröße
+    /// auf das Etikett (Schritt F aus ARCHITECTURE.md §8, ``LabelFit``) – wie der CUPS-Filter mit
+    /// `cupsPageSize`. `nil` = Bild ist etikettengroß (keine Anpassung).
+    ///
+    /// - Throws: `ImagingError.invalidArgument`, wenn `pageSizes` nicht genau ein Element je Bild hat.
+    public func encode(images: [GrayImage], pageSizes: [PageSizePoints?], copies: Int = 1,
+                       collate: Bool = true) throws -> Data {
+        guard pageSizes.count == images.count else {
+            throw ImagingError.invalidArgument("\(pageSizes.count) Seitengrößen für \(images.count) Bilder")
+        }
+        let fittedImages = zip(images, pageSizes).map { fitted($0, pageSize: $1) }
+        return try encode(images: fittedImages, copies: copies, collate: collate)
+    }
+
+    /// Schritt F aus §8 für ein Bild: legt eine Seite, deren Größe (`pageSize`, Punkte) um mehr als
+    /// 2 mm vom Etikett (`settings.labelWidthHundredthsMM` × `labelHeightHundredthsMM`) abweicht,
+    /// auf das Etikett (Auflösung des Encoders in beide Richtungen). Sonst unverändert.
+    public func fitted(_ image: GrayImage, pageSize: PageSizePoints?) -> GrayImage {
+        guard let plan = LabelFit.plan(settings: settings, pageSize: pageSize, xDPI: resolution.dpi,
+                                       yDPI: resolution.dpi, imageWidth: image.width, imageHeight: image.height)
+        else { return image }
+        return LabelFit.apply(image, plan: plan)
     }
 
     /// Wendet die Vorverarbeitung (Schritte 0–5) auf eine Seite an, z. B. für eine

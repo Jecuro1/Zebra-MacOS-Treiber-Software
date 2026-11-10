@@ -683,7 +683,8 @@ class GeneratedSetTests(unittest.TestCase):
                             "lwCutEvery": "0", "lwMirror": "False", "lwNegative": "False",
                             "lwCalibrate": "False", "lwSaveSettings": "False", "lwSkipBlank": "False",
                             "lwRotation": "0", "lwStopAtLast": "False", "lwStopOffset": "0", "lwPauseEvery": "0",
-                            "lwControlChars": "Standard", "lwCancelBefore": "False", "lwCancelDelay": "1000"}
+                            "lwControlChars": "Standard", "lwCancelBefore": "False", "lwCancelDelay": "1000",
+                            "lwFitToLabel": "Auto"}
                 for keyword, value in expected.items():
                     if keyword in ppd.options:
                         self.assertEqual(ppd.options[keyword].default, value, keyword)
@@ -744,7 +745,7 @@ class GeneratedSetTests(unittest.TestCase):
                 for keyword in ("lwCancelBefore", "lwCancelDelay"):
                     self.assertEqual(keyword in ppd.options, bool({"zpl", "epl"} & set(target.languages)), keyword)
                 for keyword in ("lwRotation", "lwStopAtLast", "lwStopOffset", "lwMediaTracking", "lwMirror",
-                                "lwNegative"):
+                                "lwNegative", "lwFitToLabel"):
                     self.assertIn(keyword, ppd.options)
                 self.assertNotIn("lwRotate180", ppd.options)
                 cutter = any(m in ("cutter", "delayedCut") for m in target.print_modes)
@@ -861,6 +862,9 @@ class TranslationTests(unittest.TestCase):
             ("lwPrintMode", "Cutter"): "Abschneider",
             ("Translation", "lwTearOff"): "Versatz",
             ("Translation", "lwCutEvery"): "Schneiden alle",
+            ("Translation", "lwFitToLabel"): "An Etikett anpassen",
+            ("lwFitToLabel", "Auto"): "Automatisch",
+            ("lwFitToLabel", "Off"): "Aus",
         }
         for (key, spec), text in windows.items():
             self.assertEqual(t[("de", key, spec)], text, (key, spec))
@@ -897,7 +901,7 @@ class ArchitectureContractTests(unittest.TestCase):
         cls.spec = parse_architecture_options()
 
     def test_architecture_table_parsed(self):
-        self.assertEqual(len(self.spec), 38)
+        self.assertEqual(len(self.spec), 41)
         self.assertEqual(self.spec["lwDarkness"].ppd_values, list(range(1, 31)))
         self.assertEqual(self.spec["lwPauseEvery"].ppd_values, [0, 1, 2, 5, 10, 25, 50, 100])
         self.assertEqual(self.spec["lwCancelDelay"].ppd_values, [0, 250, 500, 1000, 2000, 3000, 5000, 10000])
@@ -908,8 +912,12 @@ class ArchitectureContractTests(unittest.TestCase):
         self.assertEqual(self.spec["lwRotation"].tokens, ["0", "90", "180", "270"])
         self.assertIn("Notch", self.spec["lwMediaTracking"].tokens)
         self.assertIn("LinerlessTear", self.spec["lwPrintMode"].tokens)
-        for name in ("lwFormatPrefix", "lwControlPrefix", "lwDelimiter", "lwRotate180"):
+        for name in ("lwFormatPrefix", "lwControlPrefix", "lwDelimiter", "lwRotate180", "lwLabelWidth",
+                     "lwLabelHeight"):
             self.assertTrue(self.spec[name].not_in_ppd, name)
+        self.assertEqual(self.spec["lwLabelWidth"].int_range, (0, 100000))
+        self.assertEqual(self.spec["lwFitToLabel"].tokens, ["Auto", "Off"])
+        self.assertFalse(self.spec["lwFitToLabel"].has_default)
         self.assertEqual(self.spec["lwFormatPrefix"].int_range, (33, 126))
         self.assertTrue(self.spec["lwLabelStartCmd"].free_form)
         self.assertEqual({k for k, v in self.spec.items() if v.free_form or v.not_in_ppd}, set(gen.NON_PPD_OPTIONS))
@@ -1000,11 +1008,12 @@ class ArchitectureContractTests(unittest.TestCase):
         self.assertEqual(list(ppd["lwPrintMode"].choices),
                          ["Default", "TearOff", "PeelOff", "Cutter", "DelayedCut", "Rewind", "Applicator"])
         self.assertEqual(list(ppd["lwMediaType"].choices), ["Default", "ThermalTransfer", "DirectThermal"])
+        self.assertEqual(list(ppd["lwFitToLabel"].choices), ["Auto", "Off"])
 
     def test_free_form_options_are_not_ppd_options(self):
         for ppd in PPDS.values():
             for keyword in ("lwStartCmd", "lwEndCmd", "lwLabelStartCmd", "lwLabelEndCmd", "lwFormatPrefix",
-                            "lwControlPrefix", "lwDelimiter", "lwRotate180"):
+                            "lwControlPrefix", "lwDelimiter", "lwRotate180", "lwLabelWidth", "lwLabelHeight"):
                 self.assertNotIn(keyword, ppd.options)
 
     def test_groups(self):
@@ -1027,8 +1036,8 @@ class ArchitectureContractTests(unittest.TestCase):
                 self.assertEqual(lw, [k for k in gen.OPTION_ORDER if k in ppd.options])
         groups = {k: o.group for k, o in PPDS["LabelWerk-zt410-203dpi"].options.items()}
         self.assertEqual([k for k, g in groups.items() if g == "PageSetup" and k.startswith("lw")],
-                         ["lwMediaTracking", "lwMarkOffset", "lwRotation", "lwMirror", "lwNegative", "lwStopAtLast",
-                          "lwStopOffset"])
+                         ["lwFitToLabel", "lwMediaTracking", "lwMarkOffset", "lwRotation", "lwMirror", "lwNegative",
+                          "lwStopAtLast", "lwStopOffset"])
         self.assertEqual([k for k, g in groups.items() if g == "PrintOptions"],
                          ["lwSpeed", "lwDarkness", "lwMediaType", "lwLabelTop", "lwLabelLeft", "lwBackfeed",
                           "lwPauseEvery", "lwControlChars", "lwRTC", "lwCancelBefore", "lwCancelDelay"])

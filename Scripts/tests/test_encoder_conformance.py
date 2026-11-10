@@ -23,10 +23,14 @@ die Druckbreite, Auflösungen und Etikettenlücken ab – dazu die Optionen der 
 Drehung 0/90/180/270°, Markenversatz, Seitenkerben, Linerless-Modi, Bei letztem Element stoppen,
 Pausieren, eigene Steuerzeichen, RTC (``^ST`` mit fester Uhr, Schritt je Etikett und Zeitzone:
 ``lwctl --fixed-time/--time-step/--time-zone`` ↔ Filter ``LW_FIXED_TIME``/``LW_TIME_STEP_SECONDS``/``TZ``
-↔ Referenz ``now``/``time_step``), ``~JA``, Etikettenbefehle und ``^MF``. Kennt das gebaute ``lwctl``
-eine der neuen Optionen noch nicht, werden genau die Fälle, die sie brauchen, mit Hinweis übersprungen.
-Bei einer Abweichung nennt die Meldung die
-erste abweichende Befehlszeile (Zeile, Spalte, Auszug) und – bei Grafikdaten – das erste
+↔ Referenz ``now``/``time_step``), ``~JA``, Etikettenbefehle und ``^MF`` – und „An Etikett anpassen“
+(§8 „F“: ``lwctl --label-size/--page-size/--fit-to-label`` ↔ Filter ``lwLabelWidth``/``lwLabelHeight``/
+``lwFitToLabel`` mit ``cupsPageSize`` aus ``mkraster pw=/ph=`` ↔ Referenz ``page_sizes``): A4/Letter
+mit kleinem Etikett in der Ecke, Letter, leere Seite, passende Größe (byte-gleich zu ohne Anpassung),
+Querformat-Inhalt auf Hochformat-Etikett, ``Off``, Drehung, Endlosmaterial und zufällige Kombinationen.
+Kennt das gebaute ``lwctl`` eine der neuen Optionen noch nicht, werden genau die Fälle, die sie
+brauchen, mit Hinweis übersprungen. Bei einer Abweichung nennt die Meldung die erste abweichende
+Befehlszeile (Zeile, Spalte, Auszug) und – bei Grafikdaten – das erste
 abweichende Pixel; die Dateien des Falls bleiben erhalten.
 
 Programme (relativ zum Repository, überschreibbar per Umgebung):
@@ -108,20 +112,46 @@ PYTHON = "Python (Referenz)"
 
 @dataclass(frozen=True)
 class Page:
-    """Eine Seite als mkraster-Muster (8 Bit Graustufen)."""
+    """Eine Seite als mkraster-Muster (8 Bit Graustufen); optional mit Seitengröße in Punkten
+    (``cupsPageSize``, sonst ``w · 72 / dpi`` ganzzahlig wie bisher) und Inhaltsrechteck."""
 
     width: int
     height: int
     pattern: str
     seed: int = 0
+    points: Optional[Tuple[float, float]] = None          # mkraster pw=/ph=
+    box: Optional[Tuple[int, int, int, int]] = None       # mkraster bx/by/bw/bh
 
     def spec(self, dpi: int) -> str:
-        return "w=%d,h=%d,pattern=%s,seed=%d,res=%d,cs=SW,bpc=8" % (
+        text = "w=%d,h=%d,pattern=%s,seed=%d,res=%d,cs=SW,bpc=8" % (
             self.width, self.height, self.pattern, self.seed, dpi)
+        if self.points is not None:
+            text += ",pw=%r,ph=%r" % self.points
+        if self.box is not None:
+            text += ",bx=%d,by=%d,bw=%d,bh=%d" % self.box
+        return text
 
     @property
     def key(self) -> str:
-        return "%s%d-%dx%d" % (self.pattern, self.seed, self.width, self.height)
+        key = "%s%d-%dx%d" % (self.pattern, self.seed, self.width, self.height)
+        if self.box is not None:
+            key += "-box%d_%d_%d_%d" % self.box
+        return key
+
+
+def sized(points: Tuple[float, float], dpi: int, pattern: str, seed: int = 0,
+          box: Optional[Tuple[int, int, int, int]] = None) -> Page:
+    """Seite mit Seitengröße in Punkten und passender Rastergröße bei ``dpi`` (wie cgpdftoraster)."""
+    return Page(int(points[0] * dpi / 72.0 + 0.5), int(points[1] * dpi / 72.0 + 0.5), pattern, seed, points, box)
+
+
+#: Seitengrößen in Punkten (Programme schicken sie statt der Etikettengröße).
+A4 = (595.2756, 841.8898)
+LETTER = (612.0, 792.0)
+A5 = (419.5276, 595.2756)
+A6 = (297.6378, 419.5276)
+#: Etikett 104 × 76,2 mm (ZD421 wie mit ZDesigner) als Seite: w295h216.
+LABEL_PAGE = (295.0, 216.0)
 
 
 P_GRAD = Page(203, 96, "gradient")
@@ -150,6 +180,7 @@ class Case:
     fixed_time: Optional[int] = None         # Uhr für ^ST (lwRTC): --fixed-time / LW_FIXED_TIME / now
     time_step: int = 0                       # Sekunden je Etikett (--time-step / LW_TIME_STEP_SECONDS)
     time_zone: str = "UTC"                   # --time-zone / TZ
+    same_as_unfitted: bool = False           # §8 „F“ darf hier nichts ändern (passende Größe, Off)
 
     def image_format(self, index: int) -> str:
         if self.formats:
@@ -162,11 +193,12 @@ def build_cases() -> List[Case]:
 
     def add(name: str, pages: Sequence[Page], copies: int = 1, collate: bool = True, dpi: int = 203,
             max_width: Optional[int] = None, stock: Optional[str] = None, formats: Tuple[str, ...] = (),
-            fixed_time: Optional[int] = None, time_step: int = 0, time_zone: str = "UTC", **settings) -> None:
+            fixed_time: Optional[int] = None, time_step: int = 0, time_zone: str = "UTC",
+            same_as_unfitted: bool = False, **settings) -> None:
         if settings.get("rtc") and fixed_time is None:
             fixed_time = FIXED_TIME            # ^ST nur mit fester Uhr reproduzierbar
         cases.append(Case(name, tuple(pages), dict(settings), copies, collate, dpi, max_width, stock, formats,
-                          fixed_time, time_step, time_zone))
+                          fixed_time, time_step, time_zone, same_as_unfitted))
 
     # 1. Sprache × Kompression × Rasterverfahren
     for lang in LANGS:
@@ -353,6 +385,7 @@ def build_cases() -> List[Case]:
             start_commands=rng.choice(raw_commands), end_commands=rng.choice(raw_commands))
 
     windows_cases(add)
+    fit_cases(add)
 
     names = [case.name for case in cases]
     assert len(names) == len(set(names)), "doppelte Fallnamen"
@@ -478,6 +511,74 @@ def windows_cases(add) -> None:
             label_start_commands=rng.choice((b"", b"^FX start", b"A10,10,0,1,1,1,N,\"x\"")),
             label_end_commands=rng.choice((b"", b"^FX ende,~")), negative=rng.random() < 0.3,
             mirror=rng.random() < 0.3, skip_blank=rng.random() < 0.3, darkness=maybe(range(0, 31)))
+
+
+def fit_cases(add) -> None:
+    """15. An Etikett anpassen (§8 „F“): Seitengröße ≠ Etikett der Warteschlange."""
+    label = dict(label_width=10400, label_height=7620)                  # 104 × 76,2 mm (ZD421)
+    corner = (40, 50, 600, 420)                                         # Etikett-PDF bei 100 % oben links
+    for lang in LANGS:
+        add("anpassen_a4_ecke_%s" % lang, [sized(A4, 203, "text", 4, corner)], max_width=832, language=lang,
+            compression="ACS" if lang == "ZPL" else "Z64", **label)
+    add("anpassen_letter_ecke", [sized(LETTER, 203, "dots", 3, (10, 10, 500, 300))], max_width=832,
+        dither="Ordered", **label)
+    add("anpassen_a4_voll_verkleinert", [sized(A4, 203, "gradient")], max_width=832, dither="FloydSteinberg",
+        compression="Hex", **label)
+    add("anpassen_quer_inhalt_hochformat_etikett", [sized(A4, 203, "text", 9, (20, 400, 1600, 600))],
+        max_width=832, dither="Atkinson", **label)
+    add("anpassen_hoch_inhalt_querformat_etikett", [sized(LETTER, 203, "bars", 1, (100, 50, 400, 1500))],
+        max_width=832, **label)
+    add("anpassen_a4_leer", [sized(A4, 203, "blank")], max_width=832, compression="Hex", **label)
+    add("anpassen_a4_leer_ueberspringen", [sized(A4, 203, "blank"), sized(A6, 203, "text", 2, (5, 5, 300, 200))],
+        copies=2, max_width=832, skip_blank=True, **label)
+    add("anpassen_passende_groesse", [sized(LABEL_PAGE, 203, "text", 6)], max_width=832, same_as_unfitted=True,
+        **label)
+    add("anpassen_fast_passend_2mm", [sized((300.0, 220.0), 203, "noise", 5)], max_width=832,
+        same_as_unfitted=True, **label)
+    add("anpassen_aus", [sized(A4, 203, "text", 4, corner)], max_width=832, fit_to_label="Off",
+        same_as_unfitted=True, **label)
+    add("anpassen_ohne_etikett", [sized(A4, 203, "text", 4, corner)], max_width=832, same_as_unfitted=True)
+    add("anpassen_gemischt_sortiert", [sized(LABEL_PAGE, 203, "text", 7), sized(A4, 203, "text", 4, corner),
+                                       sized(LETTER, 203, "checker", 0, (300, 200, 900, 900))],
+        copies=2, max_width=832, compression="Z64", **label)
+    for rotation in (90, 270):
+        add("anpassen_drehung_%d" % rotation, [sized(A4, 203, "text", 4, corner)], max_width=832,
+            rotation=rotation, **label)
+    add("anpassen_drehung_90_passend", [sized((LABEL_PAGE[1], LABEL_PAGE[0]), 203, "text", 8)], max_width=832,
+        rotation=90, same_as_unfitted=True, **label)
+    add("anpassen_endlos_nur_breite", [sized(A4, 203, "bars", 2, (30, 100, 1500, 900))], max_width=640,
+        tracking="Continuous", stop_at_last=True, label_width=8000, label_height=15000)
+    add("anpassen_hoehe_frei", [sized(A5, 203, "text", 3, (10, 20, 1100, 300))], max_width=832,
+        label_width=5000, label_height=0)
+    for lang in ("EPL", "CPCL"):
+        add("anpassen_300dpi_%s" % lang, [sized(LETTER, 300, "checker", 0, (100, 80, 900, 500))], dpi=300,
+            max_width=1248, language=lang, **label)
+    add("anpassen_152dpi_negativ_spiegeln", [sized(A6, 152, "text", 1, (5, 5, 400, 500))], dpi=152,
+        negative=True, mirror=True, label_width=5000, label_height=3000)
+
+    # Zufällige Kombinationen (eigener Zufallsgenerator – die übrigen Abschnitte bleiben gleich)
+    rng = random.Random(20261112)
+    page_sizes = (A4, LETTER, A5, A6, LABEL_PAGE, (288.0, 432.0), (162.0, 90.0), (300.0, 219.0))
+    labels = ((10400, 7620), (10160, 15240), (5700, 3200), (5000, 0), (8000, 20000), (2540, 1270))
+    patterns = ("gradient", "text", "checker", "noise", "bars", "dots", "blank", "black", "vgrad")
+    for index in range(24):
+        dpi = rng.choice((152, 203, 203))
+        pages = []
+        for _ in range(rng.choice((1, 1, 2))):
+            points = rng.choice(page_sizes)
+            page = sized(points, dpi, rng.choice(patterns), rng.randint(0, 99))
+            if rng.random() < 0.6 and page.width > 4 and page.height > 4:
+                bw, bh = rng.randint(1, page.width - 2), rng.randint(1, page.height - 2)
+                page = sized(points, dpi, page.pattern, page.seed,
+                             (rng.randint(0, page.width - bw), rng.randint(0, page.height - bh), bw, bh))
+            pages.append(page)
+        width, height = rng.choice(labels)
+        add("anpassen_zufall_%02d" % index, pages, copies=rng.choice((1, 2)), collate=rng.random() < 0.5, dpi=dpi,
+            max_width=rng.choice((None, 832, 640)), language=rng.choice(LANGS), compression=rng.choice(COMPRESSIONS),
+            dither=rng.choice(DITHERS), rotation=rng.choice((0, 0, 90, 180, 270)),
+            tracking=rng.choice((None, None, "Gap", "Continuous")), negative=rng.random() < 0.2,
+            skip_blank=rng.random() < 0.3, fit_to_label=rng.choice(("Auto", "Auto", "Auto", "Off")),
+            label_width=width, label_height=height)
 
 
 CASES = build_cases()
@@ -654,6 +755,8 @@ def cups_options(s, collate: bool) -> str:
         ("lwRTC", opt(s.rtc)), ("lwCancelBefore", flag(s.cancel_before)), ("lwCancelDelay", str(s.cancel_delay)),
         ("lwLabelStartCmd", commands(s.label_start_commands)), ("lwLabelEndCmd", commands(s.label_end_commands)),
         ("lwPowerUpAction", opt(s.power_up_action)), ("lwHeadCloseAction", opt(s.head_close_action)),
+        ("lwFitToLabel", s.fit_to_label), ("lwLabelWidth", str(s.label_width)),
+        ("lwLabelHeight", str(s.label_height)),
     ]
     chars = s.control_chars or ref.STANDARD_CONTROL_CHARS
     pairs += [("lwFormatPrefix", str(chars[0])), ("lwControlPrefix", str(chars[1])), ("lwDelimiter", str(chars[2]))]
@@ -698,11 +801,17 @@ def needed_flags(case: Case, s) -> List[str]:
         flags.append("--head-close-action")
     if s.tracking == "Notch" or (s.print_mode or "").startswith("Linerless"):
         flags.append("--rotation")   # Stellvertreter: lwctl ohne neue Optionen kennt auch Notch/Linerless nicht
+    if s.label_width or s.label_height or s.fit_to_label != "Auto":
+        flags += ["--label-size", "--page-size", "--fit-to-label"]
     return flags
 
 
-def lwctl_arguments(case: Case, s, files: Sequence[Path], output: Path) -> List[str]:
-    """``lwctl encode``-Aufruf mit denselben Einstellungen (Bilder unverändert, ohne Skalierung)."""
+def lwctl_arguments(case: Case, s, files: Sequence[Path], output: Path,
+                    page_sizes: Sequence[Tuple[float, float]] = ()) -> List[str]:
+    """``lwctl encode``-Aufruf mit denselben Einstellungen (Bilder unverändert, ohne Skalierung).
+
+    ``page_sizes``: Seitengröße je Bild in Punkten, wie der Filter sie aus dem Rasterkopf liest
+    (exakt, ``repr``) – nur für Fälle mit Etikettengröße, sonst bleibt der Aufruf wie bisher."""
     args = ["--language", s.language.lower(), "encode", *[str(f) for f in files], "--no-layout",
             "--dpi", str(case.dpi), "--dither", s.dither, "--threshold", str(s.threshold),
             "--compression", s.compression.lower(), "--copies", str(case.copies), "-o", str(output)]
@@ -760,6 +869,12 @@ def lwctl_arguments(case: Case, s, files: Sequence[Path], output: Path) -> List[
         args += ["--fixed-time", str(case.fixed_time), "--time-zone", case.time_zone]
         if case.time_step:
             args += ["--time-step", str(case.time_step)]
+    if s.label_width or s.label_height:
+        args += ["--label-size", "%d.%02dx%d.%02dmm" % (s.label_width // 100, s.label_width % 100,
+                                                        s.label_height // 100, s.label_height % 100)]
+        args += ["--page-size", ",".join("%rx%r" % size for size in page_sizes)]
+    if s.fit_to_label != "Auto":
+        args += ["--fit-to-label", s.fit_to_label.lower()]
     return args
 
 
@@ -932,6 +1047,8 @@ def describe_mismatch(name_a: str, a: bytes, name_b: str, b: bytes, language: st
 class PreparedInput:
     raster: Path
     images: List[Tuple[int, int, bytes]]
+    #: Seitengröße je Seite in Punkten, wie libcups sie dem Filter liefert (cupsPageSize bzw. PageSize).
+    page_sizes: List[Tuple[float, float]] = field(default_factory=list)
 
 
 class EncoderConformanceTest(unittest.TestCase):
@@ -974,8 +1091,12 @@ class EncoderConformanceTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, "mkraster: %s" % result.stderr.strip())
         records = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
         infos = [record for record in records if "page" in record]
-        readable = next(record["readable_pages"] for record in records if "readable_pages" in record)
+        summary = next(record for record in records if "readable_pages" in record)
+        readable = summary["readable_pages"]
         self.assertEqual(readable, len(pages), "libcups liest nicht alle Seiten der Testeingabe")
+        page_sizes = [tuple(size) for size in summary.get("page_sizes", [])]
+        self.assertEqual(len(page_sizes), len(pages),
+                         "mkraster ohne Seitengrößen – „make -C Driver/filter tests“ ausführen")
         raw = dump.read_bytes()
         images = []
         for page, info in zip(pages, infos):
@@ -988,7 +1109,7 @@ class EncoderConformanceTest(unittest.TestCase):
             known = self._luminance.setdefault(page.key, lum)
             self.assertEqual(known, lum, "mkraster-Muster %s ist nicht deterministisch" % page.key)
             images.append((page.width, page.height, lum))
-        prepared = PreparedInput(raster, images)
+        prepared = PreparedInput(raster, images, page_sizes)
         self._rasters[key] = prepared
         return prepared
 
@@ -1040,7 +1161,7 @@ class EncoderConformanceTest(unittest.TestCase):
 
         # (1) Swift
         swift_out = directory / "swift.out"
-        args = lwctl_arguments(case, s, files, swift_out)
+        args = lwctl_arguments(case, s, files, swift_out, prepared.page_sizes)
         result = subprocess.run([str(self.tools.lwctl)] + args, capture_output=True, timeout=TIMEOUT)
         self.assertEqual(result.returncode, 0, "lwctl %s\n%s" % (" ".join(args), result.stderr.decode("utf-8", "replace")))
         swift = swift_out.read_bytes()
@@ -1062,17 +1183,25 @@ class EncoderConformanceTest(unittest.TestCase):
 
         # (3) Python-Referenz
         with time_zone(case.time_zone):
-            python = ref.encode_job_from_luminance(prepared.images, s, resolution_dpi=case.dpi,
-                                                   max_width=case.max_width or 0, gap_dots=gap,
-                                                   copies=case.copies, collate=case.collate,
+            python = ref.encode_job_from_luminance(prepared.images, s, page_sizes=prepared.page_sizes,
+                                                   resolution_dpi=case.dpi, max_width=case.max_width or 0,
+                                                   gap_dots=gap, copies=case.copies, collate=case.collate,
                                                    now=case.fixed_time, time_step=case.time_step)
+            if case.same_as_unfitted:
+                # §8 „F“: passende Größe bzw. Off – byte-gleich zur Ausgabe ohne Seitengrößen.
+                plain = ref.encode_job_from_luminance(prepared.images, s, resolution_dpi=case.dpi,
+                                                      max_width=case.max_width or 0, gap_dots=gap,
+                                                      copies=case.copies, collate=case.collate,
+                                                      now=case.fixed_time, time_step=case.time_step)
+                self.assertEqual(python, plain, "%s: Anpassung hat die Ausgabe verändert" % case.name)
         (directory / "python.out").write_bytes(python)
 
         # Gegen triviale Übereinstimmung (z. B. alle leer): Die Referenz muss genau die erwarteten
         # Etiketten enthalten (Seiten nach Vorverarbeitung × Kopienregel).
+        fitted = ref.fit_images(prepared.images, s, prepared.page_sizes, case.dpi)
         processed = [bm for bm in (ref.preprocess(ref.dither(lum, w, h, s.dither, s.threshold), s.clamped(),
                                                   case.max_width or 0)
-                                   for w, h, lum in prepared.images) if bm is not None]
+                                   for w, h, lum in fitted) if bm is not None]
         labels = len(ref.label_sequence(len(processed), case.copies, case.collate))
         self.assertEqual(len(label_starts(python, s.language, s.clamped().control_chars)), labels,
                          "Referenz: Anzahl Etiketten in %s" % case.name)
@@ -1136,6 +1265,16 @@ class EncoderConformanceTest(unittest.TestCase):
         self.assertTrue(any(page.height >= 3000 for case in CASES for page in case.pages))
         self.assertTrue(any(not case.collate and case.copies > 1 for case in CASES))
         self.assertTrue({152, 203, 300, 600} <= {case.dpi for case in CASES})
+        # §8 „F“: Etikettengrößen, Off, freie Länge, Drehung, passende Größe, A4/Letter
+        fit = [case for case in CASES if case.settings.get("label_width")]
+        self.assertGreaterEqual(len(fit), 40)
+        self.assertIn("Off", values("fit_to_label"))
+        self.assertTrue(any(case.settings.get("label_height") == 0 for case in fit))
+        self.assertTrue(any(case.settings.get("tracking") == "Continuous" for case in fit))
+        self.assertTrue({90, 270} <= {case.settings.get("rotation") for case in fit})
+        self.assertTrue(any(case.same_as_unfitted for case in fit))
+        self.assertTrue({A4, LETTER, LABEL_PAGE} <= {page.points for case in fit for page in case.pages})
+        self.assertTrue(set(LANGS) <= {case.settings.get("language", "ZPL") for case in fit})
 
 
 def _make_test(case: Case):

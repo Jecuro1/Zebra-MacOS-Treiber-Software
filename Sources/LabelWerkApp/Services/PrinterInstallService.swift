@@ -583,7 +583,10 @@ final class PrinterInstallService {
             : tr("„%@“ wird angelegt – macOS fragt ggf. nach einem Administratorpasswort …", queueName)))
         let installed: String
         do {
-            installed = try await CUPSService.installQueue(for: saved, queueName: queueName)
+            // Eigene Formate (z. B. „Vom Drucker: 104 × 76,2 mm“) kennt nur das AppModel: die Größe wird
+            // benannte Standard-Papiergröße der Warteschlange (CUPSService ergänzt sie in der PPD).
+            installed = try await CUPSService.installQueue(for: saved, queueName: queueName,
+                                                           stock: model?.stock(id: request.stockID))
         } catch {
             let message = Self.describe(error)
             if PrinterSetupPlanning.isAdministratorCancellation(message) {
@@ -622,7 +625,7 @@ final class PrinterInstallService {
                 return .unsupportedConnection()
             case .ambiguousUSBDevice:
                 return .ambiguousUSB()
-            case .invalidQueueName, .optionsNotApplied:
+            case .invalidQueueName, .optionsNotApplied, .notAuthorized, .queueMissing:
                 return .queueFailed(message)
             }
         }

@@ -512,4 +512,11 @@
 *lwHeadCloseAction ShortCal/Short Calibration: ""
 *CloseUI: *lwHeadCloseAction
 
+*OpenUI *lwFitToLabel/Fit to Label: PickOne
+*OrderDependency: 20 AnySetup *lwFitToLabel
+*DefaultlwFitToLabel: Auto
+*lwFitToLabel Auto/Automatic: ""
+*lwFitToLabel Off/Off: ""
+*CloseUI: *lwFitToLabel
+
 *% Ende der Test-PPD

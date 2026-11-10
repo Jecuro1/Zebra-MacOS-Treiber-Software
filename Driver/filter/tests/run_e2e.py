@@ -22,6 +22,10 @@ schrittweiser Uhr (``LW_FIXED_TIME``/``LW_TIME_STEP_SECONDS``, auch mit anderer 
 ``~JA`` samt Wartezeit (``LW_CANCEL_DELAY_SCALE``; ohne Angabe setzt der Testrahmen 0, damit kein
 Fall wirklich wartet – nur die Zeitmessung wartet kurz), Etikettenbefehle und ``^MF``.
 
+An Etikett anpassen (§8 „F“, ``lwFitToLabel``/``lwLabelWidth``/``lwLabelHeight``): A4/Letter-Seiten mit
+kleinem Etikett in der Ecke, volle Seiten (verkleinert), leere Seiten, passende Größen (unverändert),
+Drehung, Endlosmaterial (nur Breite), ``PageSize`` statt ``cupsPageSize``, PPD-Standard ``Off``.
+
 Aufruf:
     run_e2e.py --bindir build [--quick] [--wrapper "valgrind -q …"] [--only MUSTER] [--keep]
 """
@@ -247,9 +251,13 @@ class Runner:
             raise RuntimeError("mkraster fehlgeschlagen: %s" % result.stderr.strip())
         records = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
         infos = [rec for rec in records if "page" in rec]
-        readable = next(rec["readable_pages"] for rec in records if "readable_pages" in rec)
+        summary = next(rec for rec in records if "readable_pages" in rec)
+        readable = summary["readable_pages"]
+        sizes = summary.get("page_sizes", [])
         for index, info in enumerate(infos):
             info["readable"] = index < readable   # liefert libcups diese Seite vollständig?
+            # Seitengröße in Punkten, wie der Filter sie liest (cupsPageSize bzw. PageSize)
+            info["page_size"] = tuple(sizes[index]) if index < len(sizes) else None
         with open(dump, "rb") as f:
             return raster, infos, f.read()
 
@@ -386,30 +394,49 @@ class Runner:
                        now=int(fixed) if fixed is not None else None, time_step=int(step) if step else 0)
 
     @staticmethod
-    def images(ctx: Context):
-        """Luminanzbilder der Seiten, die libcups dem Filter liefert (Gegenprobe von mkraster);
-        Seiten ohne Fläche überspringt der Filter."""
+    def readable_infos(ctx: Context):
+        """Seiten, die libcups dem Filter liefert (Gegenprobe von mkraster); Seiten ohne Fläche
+        überspringt der Filter."""
         result = []
         for info in ctx.infos:
             if not info["readable"]:
                 break   # abgeschnittene Seite bzw. von libcups abgelehnter Kopf beendet den Strom
             if info["w"] == 0 or info["h"] == 0:
                 continue
+            result.append(info)
+        return result
+
+    @classmethod
+    def images(cls, ctx: Context):
+        """Luminanzbilder der gelieferten Seiten."""
+        result = []
+        for info in cls.readable_infos(ctx):
             raw = ctx.dump[info["dump_offset"]:info["dump_offset"] + info["dump_size"]]
             result.append((info["w"], info["h"], ref.luminance_from_samples(raw, info)))
         return result
 
+    @classmethod
+    def page_sizes(cls, ctx: Context):
+        """Seitengröße (Punkte) und Auflösung je gelieferter Seite – für §8 „F“."""
+        sizes = []
+        for info in cls.readable_infos(ctx):
+            size = info.get("page_size")
+            valid = size is not None and size[0] > 0 and size[1] > 0
+            sizes.append((size[0], size[1], info["xres"], info["yres"]) if valid else None)
+        return sizes
+
     def expected(self, ctx: Context) -> bytes:
         res = ctx.infos[0]["xres"] if ctx.infos else 203
-        return ref.encode_job_from_luminance(self.images(ctx), ctx.settings, resolution_dpi=res,
-                                             max_width=ctx.max_width, gap_dots=ctx.gap,
+        return ref.encode_job_from_luminance(self.images(ctx), ctx.settings, page_sizes=self.page_sizes(ctx),
+                                             resolution_dpi=res, max_width=ctx.max_width, gap_dots=ctx.gap,
                                              copies=ctx.copies, collate=ctx.collate,
                                              now=ctx.now, time_step=ctx.time_step)
 
     def processed_pages(self, ctx: Context):
         s = ctx.settings
         pages = []
-        for index, (w, h, lum) in enumerate(self.images(ctx)):
+        images = ref.fit_images(self.images(ctx), s, self.page_sizes(ctx))
+        for index, (w, h, lum) in enumerate(images):
             bm = ref.preprocess(ref.dither(lum, w, h, s.dither, s.threshold), s, ctx.max_width)
             if bm is not None:
                 pages.append((index + 1, bm))
@@ -827,6 +854,7 @@ def windows_cases() -> List[Case]:
         add(Case("abbrechen-%s" % lang, [P_ODD], {"lwLanguage": lang, "lwCancelBefore": "True",
                                                   "lwStartCmd": b64u("~JR"), "lwEndCmd": b64u("END")}))
     add(Case("abbrechen-ohne-seiten", [P_BLANK], {"lwCancelBefore": "True", "lwSkipBlank": "True"}))
+    cases += fit_cases()
 
     # Etikettenbefehle (Anfang/Ende jedes Etiketts)
     start, end = "^FO10,10^A0N,20,20^FDÄnfang €^FS", "^FX Ende,~"
@@ -854,6 +882,73 @@ def windows_cases() -> List[Case]:
                     lwFormatPrefix="36", lwRTC="EveryMinute", lwCompression="ACS")
         add(Case("windows-alle-%s" % lang, [P_TEXT, P_TOP, P_ODD], opts, copies=2,
                  env=dict(FIXED, LW_TIME_STEP_SECONDS="40"), quick=True))
+    return cases
+
+
+def sized_page(width_pt: float, height_pt: float, dpi: int = 203, extra: str = "pattern=blank") -> str:
+    """mkraster-Seite mit Seitengröße in Punkten (cupsPageSize) und passender Rastergröße."""
+    width = int(width_pt * dpi / 72.0 + 0.5)
+    height = int(height_pt * dpi / 72.0 + 0.5)
+    return "w=%d,h=%d,res=%d,pw=%r,ph=%r,%s" % (width, height, dpi, width_pt, height_pt, extra)
+
+
+def unfitted(ctx: Context) -> bytes:
+    """Erwartung ohne Schritt F (Seiten unverändert) – Gegenprobe für „passt“ und „Off“."""
+    res = ctx.infos[0]["xres"] if ctx.infos else 203
+    return ref.encode_job_from_luminance(Runner.images(ctx), ctx.settings, resolution_dpi=res,
+                                         max_width=ctx.max_width, gap_dots=ctx.gap, copies=ctx.copies,
+                                         collate=ctx.collate, now=ctx.now, time_step=ctx.time_step)
+
+
+def fit_cases() -> List[Case]:
+    """An Etikett anpassen (§8 „F“): Etikett 104 × 76,2 mm wie beim ZD421 mit ZDesigner."""
+    cases: List[Case] = []
+    add = cases.append
+    label = {"lwLabelWidth": "10400", "lwLabelHeight": "7620"}
+    a4, letter = (595.2756, 841.8898), (612.0, 792.0)
+    corner = "pattern=text,seed=4,bx=40,by=50,bw=600,bh=420"           # Etikett-PDF bei 100 % in der Ecke
+    note = ["automatisch auf das Etikett"]
+
+    for lang in LANGS:
+        add(Case("anpassen-a4-etikett-ecke-%s" % lang, [sized_page(*a4, extra=corner)],
+                 dict(label, lwLanguage=lang), stderr_has=note, quick=(lang == "ZPL")))
+    add(Case("anpassen-a4-voll-verkleinert", [sized_page(*a4, extra="pattern=gradient")],
+             dict(label, lwDither="FloydSteinberg")))
+    add(Case("anpassen-letter-breit-verkleinert", [sized_page(*letter, extra="pattern=text,seed=2,bx=10,by=300,"
+                                                                             "bw=1600,bh=700")],
+             dict(label, lwCompression="ACS")))
+    add(Case("anpassen-a4-quer", [sized_page(a4[1], a4[0], extra="pattern=dots,bx=900,by=600,bw=700,bh=500")],
+             label))
+    add(Case("anpassen-a4-leer", [sized_page(*a4)], dict(label, lwCompression="Hex"), stderr_has=note))
+    add(Case("anpassen-a4-leer-ueberspringen", [sized_page(*a4), sized_page(*a4, extra=corner)],
+             dict(label, lwSkipBlank="True"), copies=2))
+    add(Case("anpassen-gemischt-sortiert", [sized_page(294.8, 216.0, extra="pattern=text,seed=6"),
+                                            sized_page(*a4, extra=corner)], label, copies=2))
+    add(Case("anpassen-drehung-90", [sized_page(*a4, extra=corner)], dict(label, lwRotation="90")))
+    add(Case("anpassen-drehung-270-passt", [sized_page(216.0, 294.8, extra="pattern=text,seed=8")],
+             dict(label, lwRotation="270"), expect=unfitted, stderr_lacks=note))
+    add(Case("anpassen-endlos-nur-breite", [sized_page(*a4, extra="pattern=bars,bx=30,by=100,bw=1500,bh=900")],
+             {"lwLabelWidth": "8000", "lwLabelHeight": "15000", "lwMediaTracking": "Continuous",
+              "lwStopAtLast": "True"}))
+    add(Case("anpassen-hoehe-null", [sized_page(*a4, extra=corner)], {"lwLabelWidth": "5000"}))
+    add(Case("anpassen-pagesize-statt-cupspagesize", [sized_page(*letter, extra=corner + ",cps=0")], label))
+    add(Case("anpassen-pwg", [sized_page(*letter, extra=corner)], label, mode="pwg"))
+    add(Case("anpassen-300dpi", [sized_page(*letter, dpi=300, extra="pattern=checker,bx=100,by=80,bw=300,bh=200")],
+             dict(label, lwLanguage="CPCL")))
+    add(Case("anpassen-negativ-spiegeln-180", [sized_page(*a4, extra=corner)],
+             dict(label, lwNegative="True", lwMirror="True", lwRotation="180", lwLanguage="EPL")))
+    # Unverändert: passende Seite (± 2 mm), Off, kein Etikett, PPD-Standard Off
+    add(Case("anpassen-passend-unveraendert", [sized_page(296.0, 218.0, extra="pattern=text,seed=6")], label,
+             expect=unfitted, stderr_lacks=note, quick=True))
+    add(Case("anpassen-aus", [sized_page(*a4, extra=corner)], dict(label, lwFitToLabel="Off"), expect=unfitted,
+             stderr_lacks=note))
+    add(Case("anpassen-ohne-etikett", [sized_page(*a4, extra=corner)], {"lwFitToLabel": "Auto"},
+             expect=unfitted, stderr_lacks=note))
+    add(Case("anpassen-ppd-aus", [sized_page(*a4, extra=corner)], label, ppd={"defaults": {"lwFitToLabel": "Off"}},
+             expect=unfitted, stderr_lacks=note))
+    add(Case("anpassen-ungueltig-faellt-auf-ppd", [sized_page(*a4, extra=corner)],
+             dict(label, lwFitToLabel="Vielleicht"), ppd={"defaults": {"lwFitToLabel": "Off"}}, expect=unfitted,
+             stderr_has=["lwFitToLabel"]))
     return cases
 
 

@@ -84,6 +84,19 @@ public struct PrintSettings: Codable, Hashable, Sendable {
     /// Aktion nach dem Schließen des Druckkopfs (`^MF`, nur zusammen mit ``powerUpAction``).
     public var headCloseAction: MediaFeedAction?
 
+    // MARK: An Etikett anpassen (macOS-Druckdialog)
+
+    /// „An Etikett anpassen“ (`lwFitToLabel`): Seiten, deren Größe um mehr als 2 mm vom Etikett
+    /// abweicht (z. B. A4 aus Vorschau), legt der Treiber automatisch auf das Etikett (§8).
+    public var fitToLabel: LabelFitMode
+    /// Etikettenbreite der Warteschlange in 1/100 mm (`lwLabelWidth`, 0…100 000; 0 = unbekannt).
+    /// Kommt aus dem Etikettenformat, nicht aus einer Benutzereingabe: vor `cupsOptions()` mit
+    /// ``withLabelSize(of:)`` bzw. ``setLabelSize(widthMM:heightMM:)`` setzen.
+    public var labelWidthHundredthsMM: Int
+    /// Etikettenlänge in 1/100 mm (`lwLabelHeight`, 0…100 000; 0 = unbekannt bzw. Endlosmaterial:
+    /// dann passt der Treiber nur die Breite an).
+    public var labelHeightHundredthsMM: Int
+
     public init(
         darkness: Int? = nil,
         speed: Int? = nil,
@@ -118,7 +131,10 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         labelStartCommands: String = "",
         labelEndCommands: String = "",
         powerUpAction: MediaFeedAction? = nil,
-        headCloseAction: MediaFeedAction? = nil
+        headCloseAction: MediaFeedAction? = nil,
+        fitToLabel: LabelFitMode = .auto,
+        labelWidthHundredthsMM: Int = 0,
+        labelHeightHundredthsMM: Int = 0
     ) {
         self.darkness = darkness
         self.speed = speed
@@ -154,6 +170,9 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         self.labelEndCommands = labelEndCommands
         self.powerUpAction = powerUpAction
         self.headCloseAction = headCloseAction
+        self.fitToLabel = fitToLabel
+        self.labelWidthHundredthsMM = labelWidthHundredthsMM
+        self.labelHeightHundredthsMM = labelHeightHundredthsMM
     }
 
     /// Standard: Alle Druckerwerte beibehalten, Schwellenwert-Rasterung, Z64.
@@ -174,6 +193,43 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         s.pauseEvery = min(max(pauseEvery, 0), 9999)
         s.controlCharacters = controlCharacters?.clamped()
         s.cancelDelayMs = min(max(cancelDelayMs, 0), 10_000)
+        s.labelWidthHundredthsMM = min(max(labelWidthHundredthsMM, 0), Self.maxLabelSizeHundredthsMM)
+        s.labelHeightHundredthsMM = min(max(labelHeightHundredthsMM, 0), Self.maxLabelSizeHundredthsMM)
+        return s
+    }
+
+    /// Obergrenze von `lwLabelWidth`/`lwLabelHeight` in 1/100 mm (1 m).
+    public static let maxLabelSizeHundredthsMM = 100_000
+
+    /// Etikettengröße in Millimetern (`nil`, solange die Breite unbekannt ist; Höhe 0 = Endlosmaterial
+    /// bzw. unbekannt).
+    public var labelSizeMM: (width: Double, height: Double)? {
+        guard labelWidthHundredthsMM > 0 else { return nil }
+        return (Double(labelWidthHundredthsMM) / 100, Double(labelHeightHundredthsMM) / 100)
+    }
+
+    /// Setzt die Etikettengröße der Warteschlange (auf 1/100 mm gerundet, begrenzt auf 0…1 m;
+    /// ungültige oder negative Werte → 0 = unbekannt).
+    public mutating func setLabelSize(widthMM: Double, heightMM: Double) {
+        func hundredths(_ mm: Double) -> Int {
+            guard mm.isFinite, mm > 0 else { return 0 }
+            return min(Int((mm * 100).rounded()), Self.maxLabelSizeHundredthsMM)
+        }
+        labelWidthHundredthsMM = hundredths(widthMM)
+        labelHeightHundredthsMM = hundredths(heightMM)
+    }
+
+    /// Kopie mit der Etikettengröße des Formats (`lwLabelWidth`/`lwLabelHeight` für die Warteschlange).
+    /// Endlosmaterial erhält die Länge 0: Der Treiber passt dort nur die Breite an (§8), lange Belege
+    /// bleiben lang. `nil` = Größe unbekannt (beide 0).
+    public func withLabelSize(of stock: LabelStock?) -> PrintSettings {
+        var s = self
+        guard let stock else {
+            s.labelWidthHundredthsMM = 0
+            s.labelHeightHundredthsMM = 0
+            return s
+        }
+        s.setLabelSize(widthMM: stock.widthMM, heightMM: stock.isContinuous ? 0 : stock.heightMM)
         return s
     }
 
@@ -234,6 +290,12 @@ public enum CUPSOptionName {
     public static let labelEndCommands = "lwLabelEndCmd"
     public static let powerUpAction = "lwPowerUpAction"
     public static let headCloseAction = "lwHeadCloseAction"
+    /// „An Etikett anpassen“: `Auto` (Standard) | `Off` (PPD-Option, Gruppe „Seite einrichten“).
+    public static let fitToLabel = "lwFitToLabel"
+    /// Etikettenbreite der Warteschlange in 1/100 mm (nur Warteschlangen-Standard, nicht in der PPD).
+    public static let labelWidth = "lwLabelWidth"
+    /// Etikettenlänge der Warteschlange in 1/100 mm (nur Warteschlangen-Standard, nicht in der PPD).
+    public static let labelHeight = "lwLabelHeight"
 
     /// `lwControlChars`: Standardzeichen (`^ ~ ,`).
     public static let controlCharsStandard = "Standard"
@@ -249,14 +311,15 @@ public enum CUPSOptionName {
         saveSettings, skipBlank, startCommands, endCommands,
         rotation, markOffset, stopAtLast, stopOffset, pauseEvery, controlChars, formatPrefix, controlPrefix,
         delimiter, rtc, cancelBefore, cancelDelay, labelStartCommands, labelEndCommands, powerUpAction,
-        headCloseAction,
+        headCloseAction, fitToLabel, labelWidth, labelHeight,
     ]
 
-    /// Optionen ohne PPD-Eintrag (Base64url-Rohbefehle, Steuerzeichen und die veraltete
-    /// `lwRotate180`): nur als Warteschlangen-Standard (`-o name-default=…`) bzw. Auftragsoption möglich.
+    /// Optionen ohne PPD-Eintrag (Base64url-Rohbefehle, Steuerzeichen, die veraltete `lwRotate180`
+    /// und die Etikettengröße `lwLabelWidth`/`lwLabelHeight`): nur als Warteschlangen-Standard
+    /// (`-o name-default=…`) bzw. Auftragsoption möglich.
     public static let nonPPD: [String] = [
         startCommands, endCommands, labelStartCommands, labelEndCommands, formatPrefix, controlPrefix, delimiter,
-        rotate180,
+        rotate180, labelWidth, labelHeight,
     ]
 }
 
@@ -264,7 +327,8 @@ extension PrintSettings {
     /// Wandelt die Einstellungen in CUPS-Optionen um (`lpoptions`/`lpadmin -o name=value`).
     ///
     /// Leere Start-/Endbefehle (auch je Etikett) werden weggelassen, ebenso `lwFormatPrefix`,
-    /// `lwControlPrefix` und `lwDelimiter` bei Standard-Steuerzeichen.
+    /// `lwControlPrefix` und `lwDelimiter` bei Standard-Steuerzeichen und `lwLabelWidth`/`lwLabelHeight`
+    /// mit dem Wert 0 (unbekannt).
     public func cupsOptions() -> [String: String] {
         let s = clamped()
         var o: [String: String] = [:]
@@ -318,6 +382,13 @@ extension PrintSettings {
         }
         o[CUPSOptionName.powerUpAction] = s.powerUpAction?.cupsValue ?? d
         o[CUPSOptionName.headCloseAction] = s.headCloseAction?.cupsValue ?? d
+        o[CUPSOptionName.fitToLabel] = s.fitToLabel.cupsValue
+        if s.labelWidthHundredthsMM > 0 {
+            o[CUPSOptionName.labelWidth] = String(s.labelWidthHundredthsMM)
+        }
+        if s.labelHeightHundredthsMM > 0 {
+            o[CUPSOptionName.labelHeight] = String(s.labelHeightHundredthsMM)
+        }
         return o
     }
 
@@ -393,6 +464,9 @@ extension PrintSettings {
         labelEndCommands = commands(CUPSOptionName.labelEndCommands)
         powerUpAction = text(CUPSOptionName.powerUpAction).flatMap(MediaFeedAction.init(cupsValue:))
         headCloseAction = text(CUPSOptionName.headCloseAction).flatMap(MediaFeedAction.init(cupsValue:))
+        fitToLabel = text(CUPSOptionName.fitToLabel).flatMap(LabelFitMode.init(cupsValue:)) ?? .auto
+        labelWidthHundredthsMM = int(CUPSOptionName.labelWidth) ?? 0
+        labelHeightHundredthsMM = int(CUPSOptionName.labelHeight) ?? 0
         self = clamped()
     }
 }
@@ -461,7 +535,10 @@ extension PrintSettings {
             labelStartCommands: value(String.self, .labelStartCommands) ?? "",
             labelEndCommands: value(String.self, .labelEndCommands) ?? "",
             powerUpAction: value(MediaFeedAction.self, .powerUpAction),
-            headCloseAction: value(MediaFeedAction.self, .headCloseAction)
+            headCloseAction: value(MediaFeedAction.self, .headCloseAction),
+            fitToLabel: value(LabelFitMode.self, .fitToLabel) ?? .auto,
+            labelWidthHundredthsMM: value(Int.self, .labelWidthHundredthsMM) ?? 0,
+            labelHeightHundredthsMM: value(Int.self, .labelHeightHundredthsMM) ?? 0
         )
         self = clamped()
     }

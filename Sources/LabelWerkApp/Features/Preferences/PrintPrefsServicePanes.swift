@@ -295,22 +295,20 @@ struct PrintPrefsMaintenancePane: View {
 
 // MARK: - Standardwerte der macOS-Warteschlange
 
-/// Überträgt die gespeicherten Treiber-Standardwerte als Standard der macOS-Warteschlange
-/// (`CUPSService.setDefaults`) und meldet das Ergebnis als Hinweis.
+/// Überträgt die gespeicherten Treiber-Standardwerte samt Etikettengröße als Standard der
+/// macOS-Warteschlange (`AppModel.queueSync`, `CUPSService.apply`) und meldet das Ergebnis als Hinweis.
+/// Das Etikettenformat – auch ein eigenes wie 104 × 76,2 mm – wird benannte Standard-Papiergröße der
+/// Warteschlange; im Druckdialog muss nichts gewählt werden.
 @MainActor
 enum PrintPrefsQueueDefaults {
     @discardableResult
     static func apply(queue: String, session: PrinterSession, model: AppModel) async -> Bool {
-        let settings = session.saved.settings
         let stock = session.stock
-        let language = session.saved.language
         do {
-            let approximated = try await CUPSService.setDefaults(queue: queue, settings: settings,
-                                                                 stock: stock.isCustom ? nil : stock,
-                                                                 language: language, resolution: session.resolution)
-            var message = stock.isCustom
-                ? tr("Alle Programme drucken auf „%@“ mit diesen Einstellungen. Eigene Etikettenformate im Druckdialog als Papiergröße wählen.", queue)
-                : tr("Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen.", queue)
+            let outcome = try await model.queueSync.syncNow(session, force: true, allowAdminPrompt: true)
+            let approximated = (outcome?.approximated ?? []).map(CUPSService.optionTitle)
+            var message = tr("Alle Programme drucken auf „%@“ jetzt mit diesen Einstellungen und dem Etikett %@ – ohne Auswahl im Druckdialog.",
+                             queue, LabelSizing.sizeText(widthMM: stock.widthMM, heightMM: stock.heightMM))
             if !approximated.isEmpty {
                 // Exakte Werte gelten als Warteschlangen-Standard; der Druckdialog kennt nur die PPD-Auswahl.
                 message += " " + tr("Im macOS-Druckdialog steht für %@ nur der nächstliegende Wert zur Auswahl.",

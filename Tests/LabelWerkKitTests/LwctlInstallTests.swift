@@ -25,6 +25,11 @@ struct LwctlInstallTests {
         var genericPPD: Bool
         var stock: String?
         var pageSize: String?
+        var labelSize: String?
+        var labelWidth: Int?
+        var labelHeight: Int?
+        var addedPageSize: Bool
+        var queuePPD: String
         var setDefault: Bool
         var testPage: Bool
         var dryRun: Bool
@@ -106,10 +111,16 @@ struct LwctlInstallTests {
             try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         }
         for tool in ["lpadmin", "lp"] {
+            // lpadmin legt eine Kopie der übergebenen PPD (-P) als „lpadmin-P.ppd“ ab.
             try executable(tool, """
             #!/bin/sh
             printf '%s\\n' "\(tool)" >> '\(log.path)'
-            for argument in "$@"; do printf '%s\\n' "$argument" >> '\(log.path)'; done
+            previous=""
+            for argument in "$@"; do
+                printf '%s\\n' "$argument" >> '\(log.path)'
+                if [ "$previous" = "-P" ] && [ -f "$argument" ]; then cp "$argument" '\(directory.path)/lpadmin-P.ppd'; fi
+                previous="$argument"
+            done
             printf -- '--\\n' >> '\(log.path)'
             echo "\(tool): Printer drivers are deprecated and will stop working in a future version of CUPS." >&2
             exit 0
@@ -279,7 +290,8 @@ struct LwctlInstallTests {
         let lines = commandLines(result.output)
         #expect(lines.count == 3)
         #expect(lines.first == "lpadmin -p Lager_1 -E -v socket://192.0.2.10:9100 -P \(ppd) -D 'Lager 1' "
-                + "-L 'Halle 2, Tor 3' -o printer-is-shared=false -o PageSize=\(stock.ppdKeyword)")
+                + "-L 'Halle 2, Tor 3' -o printer-is-shared=false -o PageSize=\(stock.ppdKeyword) "
+                + "-o lwLabelWidth-default=10160 -o lwLabelHeight-default=15240")
         #expect(lines.dropFirst().first == "lpadmin -d Lager_1")
         #expect(lines.last?.hasPrefix("lp -d Lager_1 -t LabelWerk-Testseite ") == true)
         #expect(!result.output.contains("Erkannt:"), "ohne Verbindung keine Erkennung")
@@ -593,8 +605,9 @@ struct LwctlInstallTests {
         #expect(explicit.status == 0, "\(explicit.errors)")
         let explicitPlan = try decodePlan(explicit)
         #expect(explicitPlan.keptSettings == ["lwDarkness=15", "lwRotation=180"])
-        #expect(explicitPlan.commands.first.map { Array($0.suffix(8)) } == [
-            "-o", "lwDarkness=15", "-o", "lwRotation=180", "-o", "PageSize=\(stock.ppdKeyword)", "-o", "lwLanguage=EPL",
+        #expect(explicitPlan.commands.first.map { Array($0.suffix(12)) } == [
+            "-o", "lwDarkness=15", "-o", "lwRotation=180", "-o", "PageSize=\(stock.ppdKeyword)",
+            "-o", "lwLabelWidth-default=10160", "-o", "lwLabelHeight-default=15240", "-o", "lwLanguage=EPL",
         ])
 
         // PPD der Warteschlange nicht lesbar: Hinweis statt stillem Zurücksetzen.
@@ -605,6 +618,116 @@ struct LwctlInstallTests {
         #expect(unreadablePlan.queue == "Ohne_PPD" && unreadablePlan.keptSettings.isEmpty)
         #expect(unreadablePlan.warnings.contains { $0.contains("Die bisherigen Einstellungen von „Ohne_PPD“ sind nicht lesbar") },
                 "\(unreadablePlan.warnings)")
+    }
+
+    // MARK: - Eigene Etikettengröße (--size)
+
+    /// Ordner mit einer LabelWerk-PPD im Aufbau des Generators (ergänzbar).
+    private func patchablePPDDirectory(_ name: String = "LabelWerk-zd421t-203dpi.ppd.gz") throws -> URL {
+        let directory = try temporaryDirectory()
+        try Data(QueuePPDSample.text.utf8).write(to: directory.appendingPathComponent(name))
+        return directory
+    }
+
+    @Test("--size 104x76.2mm: benannte Seitengröße in einer Kopie der PPD, lwLabelWidth/lwLabelHeight")
+    func customSizeDryRun() async throws {
+        let ppds = try patchablePPDDirectory()
+        defer { try? FileManager.default.removeItem(at: ppds) }
+        let ppd = ppds.appendingPathComponent("LabelWerk-zd421t-203dpi.ppd.gz").path
+        let result = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--size", "104x76.2mm",
+                                              "--ppd-dir", ppds.path, "--dry-run", "--json"])
+        #expect(result.status == 0, "\(result.errors)")
+        let plan = try decodePlan(result)
+        #expect(plan.pageSize == "w295h216")
+        #expect(plan.labelSize == "104x76.2mm")
+        #expect(plan.labelWidth == 10400 && plan.labelHeight == 7620)
+        #expect(plan.addedPageSize)
+        #expect(plan.ppd == ppd && plan.queuePPD != ppd && plan.queuePPD.hasSuffix("-w295h216.ppd"))
+        #expect(plan.stock == nil)
+        let command = try #require(plan.commands.first)
+        #expect(command.contains(plan.queuePPD))
+        #expect(Array(command.suffix(6)) == ["-o", "PageSize=w295h216", "-o", "lwLabelWidth-default=10400",
+                                             "-o", "lwLabelHeight-default=7620"])
+        #expect(!FileManager.default.fileExists(atPath: plan.queuePPD), "Probelauf legt keine Datei an")
+
+        let text = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--size", "104 x 76,2 mm",
+                                            "--ppd-dir", ppds.path, "--dry-run"])
+        #expect(text.status == 0, "\(text.errors)")
+        #expect(text.output.contains("Etikett:        Etikett 104 × 76,2 mm (PageSize w295h216, als benannte Seitengröße ergänzt)"))
+
+        // Steht die Größe schon in der Modell-PPD (4 × 6 Zoll), genügt -o PageSize ohne Kopie.
+        let catalog = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--size", "4x6in",
+                                               "--ppd-dir", ppds.path, "--dry-run", "--json"])
+        #expect(catalog.status == 0, "\(catalog.errors)")
+        let catalogPlan = try decodePlan(catalog)
+        #expect(catalogPlan.pageSize == "w288h432" && !catalogPlan.addedPageSize && catalogPlan.queuePPD == ppd)
+    }
+
+    @Test("--size richtet die Warteschlange mit der ergänzten PPD ein und räumt die Kopie auf")
+    func customSizeInstall() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ppds = try patchablePPDDirectory()
+        defer { try? FileManager.default.removeItem(at: ppds) }
+        let (environment, log) = try stubCUPS(in: directory, queues: [])
+        let result = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--size", "104x76.2mm",
+                                              "--name", "Versand", "--ppd-dir", ppds.path, "--json"], environment: environment)
+        #expect(result.status == 0, "\(result.errors)")
+        let plan = try decodePlan(result)
+        #expect(plan.installed && plan.addedPageSize)
+        let calls = try loggedCalls(log)
+        #expect(calls.count == 1)
+        #expect(calls.first?.contains(plan.queuePPD) == true)
+        let copy = try String(contentsOf: directory.appendingPathComponent("lpadmin-P.ppd"), encoding: .utf8)
+        #expect(copy == (try QueuePPD.patched(QueuePPDSample.text, adding: QueueLabelSize(widthMM: 104, heightMM: 76.2))))
+        #expect(QueuePPD.defaultPageSize(in: copy) == "w295h216")
+        #expect(!FileManager.default.fileExists(atPath: plan.queuePPD), "Kopie wird nach lpadmin entfernt")
+    }
+
+    @Test("Aktualisieren ohne --size behält eine früher ergänzte Etikettengröße")
+    func keepsAddedSize() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ppds = try patchablePPDDirectory()
+        defer { try? FileManager.default.removeItem(at: ppds) }
+        let size = QueueLabelSize(widthMM: 104, heightMM: 76.2)
+        let queuePPD = try QueuePPD.patched(QueuePPDSample.text, adding: size)
+        let (environment, _) = try stubCUPS(in: directory, queues: [
+            StubQueue(name: "Etiketten", uri: "socket://192.0.2.10:9100", makeAndModel: "", info: "Etiketten", ppd: queuePPD),
+        ])
+        let result = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--ppd-dir", ppds.path,
+                                              "--json"], environment: environment)
+        #expect(result.status == 0, "\(result.errors)")
+        let plan = try decodePlan(result)
+        #expect(plan.existing && plan.reused && plan.addedPageSize)
+        #expect(plan.pageSize == "w295h216" && plan.labelWidth == nil)
+        #expect(plan.keptSettings.contains("PageSize=w295h216"))
+        let copy = try String(contentsOf: directory.appendingPathComponent("lpadmin-P.ppd"), encoding: .utf8)
+        #expect(QueuePPD.addedPageSize(in: copy) == "w295h216")
+    }
+
+    @Test("--size: Fehler bei ungültiger, zu großer oder doppelter Angabe")
+    func customSizeErrors() async throws {
+        let ppds = try patchablePPDDirectory()
+        defer { try? FileManager.default.removeItem(at: ppds) }
+        for (arguments, message) in [
+            (["--size", "104"], "Ungültige Etikettengröße"),
+            (["--size", "120x76mm"], "passt nicht auf Zebra ZD421t"),
+            (["--size", "8x3mm"], "mindestens 10 mm breit"),
+            (["--size", "104x76mm", "--stock", "w4h6in"], "schließen sich aus"),
+        ] {
+            let result = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--ppd-dir", ppds.path,
+                                                  "--dry-run"] + arguments)
+            #expect(result.status == 2, "\(arguments): \(result.errors)")
+            #expect(result.errors.contains(message), "\(arguments): \(result.errors)")
+        }
+        // Keine LabelWerk-PPD (Attrappe ohne *lwModel): Fehler statt einer Warteschlange ohne Größe.
+        let dummy = try ppdDirectory(["LabelWerk-zd421t-203dpi.ppd.gz"])
+        defer { try? FileManager.default.removeItem(at: dummy) }
+        let foreign = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--size", "104x76.2mm",
+                                               "--ppd-dir", dummy.path, "--dry-run"])
+        #expect(foreign.status == 1, "\(foreign.errors)")
+        #expect(foreign.errors.contains("kann nicht in"))
     }
 
     @Test("queues und uninstall-queue lesen die Warteschlangen mit lpstat/lpoptions aus $PATH")
@@ -662,7 +785,8 @@ struct LwctlInstallTests {
     func help() async throws {
         let help = try await CLIRunner.run(["help", "install"])
         #expect(help.status == 0)
-        for text in ["--ppd-dir", "--dry-run", "--test-page", "--model <auto|id|generic>", "Netzwerkdrucker", "lwctl models"] {
+        for text in ["--ppd-dir", "--dry-run", "--test-page", "--model <auto|id|generic>", "Netzwerkdrucker", "lwctl models",
+                     "--size <BxH(mm|in)>", "104x76.2mm"] {
             #expect(help.output.contains(text), "\(text)")
         }
         let overview = try await CLIRunner.run(["help"])

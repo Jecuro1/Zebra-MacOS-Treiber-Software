@@ -62,6 +62,9 @@ void lw_settings_init(lw_settings *s)
     s->label_end_commands_len = 0;
     s->power_up_action = LW_MEDIA_ACTION_UNSET;
     s->head_close_action = LW_MEDIA_ACTION_UNSET;
+    s->fit_to_label = LW_FIT_AUTO;
+    s->label_width = 0;
+    s->label_height = 0;
 }
 
 void lw_settings_free(lw_settings *s)
@@ -99,6 +102,10 @@ void lw_settings_clamp(lw_settings *s)
     s->stop_offset = clamp_int(s->stop_offset, 0, 32000);
     s->pause_every = clamp_int(s->pause_every, 0, 9999);
     s->cancel_delay = clamp_int(s->cancel_delay, 0, 10000);
+    s->label_width = clamp_int(s->label_width, 0, LW_LABEL_SIZE_MAX);
+    s->label_height = clamp_int(s->label_height, 0, LW_LABEL_SIZE_MAX);
+    if (s->fit_to_label != LW_FIT_AUTO && s->fit_to_label != LW_FIT_OFF)
+        s->fit_to_label = LW_FIT_AUTO;
     /* Steuerzeichen außerhalb von 33…126 gelten als Standardzeichen dieser Stelle. */
     if (s->format_prefix < LW_CONTROL_CHAR_MIN || s->format_prefix > LW_CONTROL_CHAR_MAX)
         s->format_prefix = LW_FORMAT_PREFIX_STANDARD;
@@ -199,6 +206,11 @@ static const enum_entry media_action_table[] = {
     { NULL, 0 }
 };
 
+static const enum_entry fit_mode_table[] = {
+    { "Auto", LW_FIT_AUTO }, { "Off", LW_FIT_OFF },
+    { NULL, 0 }
+};
+
 static const enum_entry control_chars_table[] = {
     { "Standard", 0 }, { "Printer", 1 },
     { NULL, 0 }
@@ -295,6 +307,7 @@ DEFINE_ENUM_PARSER(lw_parse_compression, lw_compression, compression_table)
 DEFINE_ENUM_PARSER(lw_parse_rotation, int, rotation_table)
 DEFINE_ENUM_PARSER(lw_parse_rtc, lw_rtc, rtc_table)
 DEFINE_ENUM_PARSER(lw_parse_media_action, lw_media_action, media_action_table)
+DEFINE_ENUM_PARSER(lw_parse_fit_mode, lw_fit_mode, fit_mode_table)
 
 lw_parse_result lw_parse_control_chars(const char *text, bool *printer)
 {
@@ -439,6 +452,14 @@ char lw_media_action_code(lw_media_action a)
     return 0;
 }
 
+const char *lw_fit_mode_name(lw_fit_mode m)
+{
+    for (const enum_entry *e = fit_mode_table; e->name != NULL; e++)
+        if (e->value == (int)m)
+            return e->name;
+    return "?";
+}
+
 const char *lw_rtc_name(lw_rtc r)
 {
     for (const enum_entry *e = rtc_table; e->name != NULL; e++)
@@ -478,7 +499,8 @@ typedef enum value_kind {
     KIND_RTC,
     KIND_MEDIA_ACTION,
     KIND_CONTROL_CHARS,
-    KIND_CONTROL_CHAR
+    KIND_CONTROL_CHAR,
+    KIND_FIT_MODE
 } value_kind;
 
 typedef struct resolver {
@@ -590,6 +612,12 @@ static lw_parse_result parse_kind(value_kind kind, const char *text, int *value)
     case KIND_CONTROL_CHAR:
         r = lw_parse_control_char(text, value);
         break;
+    case KIND_FIT_MODE: {
+        lw_fit_mode v = LW_FIT_AUTO;
+        r = lw_parse_fit_mode(text, &v);
+        *value = (int)v;
+        break;
+    }
     }
     return r;
 }
@@ -725,6 +753,9 @@ int lw_settings_resolve(lw_settings *s, lw_option_lookup_fn lookup, void *ctx, c
                                                         LW_MEDIA_ACTION_UNSET);
     s->head_close_action = (lw_media_action)resolve_value(&r, LW_OPT_HEAD_CLOSE_ACTION, KIND_MEDIA_ACTION,
                                                           LW_MEDIA_ACTION_UNSET);
+    s->fit_to_label = (lw_fit_mode)resolve_value(&r, LW_OPT_FIT_TO_LABEL, KIND_FIT_MODE, (int)def.fit_to_label);
+    s->label_width = resolve_value(&r, LW_OPT_LABEL_WIDTH, KIND_INT, def.label_width);
+    s->label_height = resolve_value(&r, LW_OPT_LABEL_HEIGHT, KIND_INT, def.label_height);
 
     lw_settings_clamp(s);
     return r.invalid;
@@ -773,4 +804,6 @@ void lw_settings_log(const lw_settings *s, const lw_logger *log)
            s->control_printer ? "Drucker" : "Standard", s->format_prefix, s->control_prefix, s->delimiter,
            lw_rtc_name(s->rtc), s->cancel_before, s->cancel_delay, s->label_start_commands_len,
            s->label_end_commands_len, pu ? pu : '-', hc ? hc : '-', sgd);
+    lw_log(log, LW_LOG_DEBUG, "Einstellungen (Etikett): AnEtikettAnpassen=%s Etikett=%d × %d (1/100 mm)",
+           lw_fit_mode_name(s->fit_to_label), s->label_width, s->label_height);
 }

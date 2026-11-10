@@ -209,7 +209,8 @@ struct DriverOptionsTests {
         controlCharacters: ControlCharacters(formatPrefix: 0x24, controlPrefix: 0x23, delimiter: 0x3B),
         rtcUpdate: .everyMinute, cancelJobsBeforePrint: true, cancelDelayMs: 2500,
         labelStartCommands: "^FXStart äöü", labelEndCommands: "^FX Ende\n^PQ1",
-        powerUpAction: .shortCalibration, headCloseAction: .noMotion)
+        powerUpAction: .shortCalibration, headCloseAction: .noMotion,
+        fitToLabel: .off, labelWidthHundredthsMM: 10400, labelHeightHundredthsMM: 7620)
 
     @Test("CUPS-Optionen: alle neuen Werte und Rundreise")
     func fullCUPSRoundTrip() {
@@ -232,6 +233,9 @@ struct DriverOptionsTests {
         #expect(o[CUPSOptionName.labelEndCommands] == "XkZYIEVuZGUKXlBRMQ")
         #expect(o[CUPSOptionName.powerUpAction] == "ShortCal")
         #expect(o[CUPSOptionName.headCloseAction] == "NoMotion")
+        #expect(o[CUPSOptionName.fitToLabel] == "Off")
+        #expect(o[CUPSOptionName.labelWidth] == "10400")
+        #expect(o[CUPSOptionName.labelHeight] == "7620")
         #expect(PrintSettings(cupsOptions: o) == Self.everything)
 
         for tracking in MediaTracking.allCases {
@@ -335,7 +339,9 @@ struct DriverOptionsTests {
         for name in new { #expect(CUPSOptionName.all.contains(name), "\(name)") }
         #expect(Set(CUPSOptionName.all).count == CUPSOptionName.all.count)
         #expect(Set(CUPSOptionName.nonPPD) == ["lwStartCmd", "lwEndCmd", "lwLabelStartCmd", "lwLabelEndCmd",
-                                                "lwFormatPrefix", "lwControlPrefix", "lwDelimiter", "lwRotate180"])
+                                                "lwFormatPrefix", "lwControlPrefix", "lwDelimiter", "lwRotate180",
+                                                "lwLabelWidth", "lwLabelHeight"])
+        for name in ["lwFitToLabel", "lwLabelWidth", "lwLabelHeight"] { #expect(CUPSOptionName.all.contains(name)) }
         // Jede erzeugte Option ist bekannt.
         for key in Self.everything.cupsOptions().keys { #expect(CUPSOptionName.all.contains(key), "\(key)") }
     }

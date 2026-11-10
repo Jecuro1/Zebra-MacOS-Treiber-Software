@@ -518,6 +518,42 @@ public enum RTCUpdate: String, Codable, CaseIterable, Sendable, Identifiable {
     }
 }
 
+// MARK: - An Etikett anpassen
+
+/// „An Etikett anpassen“ (`lwFitToLabel`): Schickt ein Programm eine Seite, deren Größe nicht zum
+/// Etikett der Warteschlange passt (z. B. A4 aus Vorschau), legt der Treiber den Seiteninhalt
+/// automatisch auf das Etikett – verkleinert, aber nie vergrößert (ARCHITECTURE.md §8).
+public enum LabelFitMode: String, Codable, CaseIterable, Sendable, Identifiable {
+    /// Seiten mit abweichender Größe automatisch auf das Etikett legen (Standard).
+    case auto
+    /// Seiten unverändert drucken (wie bis Version 1.0: nur auf die Druckbreite abschneiden).
+    case off
+
+    public var id: String { rawValue }
+
+    /// Wert der CUPS-Option `lwFitToLabel`.
+    public var cupsValue: String {
+        switch self {
+        case .auto: return "Auto"
+        case .off: return "Off"
+        }
+    }
+
+    /// Umkehrung von ``cupsValue`` (ASCII ohne Groß-/Kleinschreibung, Leerraum am Rand egal).
+    public init?(cupsValue: String) {
+        guard let match = CUPSValueMatching.first(of: LabelFitMode.self, cupsValue, \.cupsValue) else { return nil }
+        self = match
+    }
+
+    /// Deutsche Bezeichnung (Druckeinstellungen, PPD).
+    public var displayName: String {
+        switch self {
+        case .auto: return "Automatisch"
+        case .off: return "Aus"
+        }
+    }
+}
+
 // MARK: - Medienvorschub beim Einschalten / Kopf schließen
 
 /// Aktion beim Einschalten bzw. nach dem Schließen des Druckkopfs (`^MF`, SGD

@@ -84,6 +84,15 @@ enum CommandCatalog {
         OptionSpec("time-step", value: "sekunden",
                    "Für Tests: Etikett k sieht die Uhrzeit + k · sekunden (wie LW_TIME_STEP_SECONDS beim Filter; Standard: 0)"),
         OptionSpec("time-zone", value: "id", "Zeitzone für ^ST, z. B. UTC oder Europe/Berlin (Standard: Systemzeitzone bzw. TZ)"),
+        OptionSpec("fit-to-label", value: "auto|off",
+                   "An Etikett anpassen (lwFitToLabel): Bilder, deren --page-size um mehr als 2 mm von --label-size abweicht, "
+                   + "auf den Inhalt zuschneiden, nur verkleinern und mittig auf das Etikett setzen – wie der CUPS-Filter (Standard: auto)"),
+        OptionSpec("label-size", value: "BxH[mm|in]",
+                   "Etikettengröße der Warteschlange (lwLabelWidth/lwLabelHeight), z. B. 104x76.2mm oder 4x6in; Höhe 0 = frei "
+                   + "(Endlosmaterial). Ohne Angabe keine Anpassung"),
+        OptionSpec("page-size", value: "BxH[,BxH…]",
+                   "Seitengröße der Bilder in Punkten (1/72 Zoll, wie cupsPageSize), z. B. 595.28x841.89 für A4: eine Angabe für "
+                   + "alle Bilder oder genau eine je Bild; nur mit --no-layout. Ohne Angabe gilt jedes Bild als etikettengroß"),
     ]
 
     static let commands: [CommandSpec] = [
@@ -121,6 +130,14 @@ enum CommandCatalog {
             ohne --name wird sie auch unter anderem Namen gefunden (etwa vom Assistenten der App), statt
             den Drucker ein zweites Mal einzurichten. Andere Warteschlangen gleichen Namens – auch in
             anderer Groß-/Kleinschreibung – nur mit --replace. Die Prüfung läuft auch mit --dry-run.
+
+            Etikettengröße: --stock wählt ein Katalogformat, --size eine beliebige Größe wie im
+            Windows-Treiber (z. B. --size 104x76.2mm oder --size 4x3in). Sie wird Standard-Papiergröße
+            der Warteschlange und steht im Druckdialog als „Etikett 104 × 76,2 mm“; fehlt sie in der
+            Modell-PPD, erhält die Warteschlange eine Kopie der PPD mit dieser Seitengröße. Zusätzlich
+            gehen lwLabelWidth/lwLabelHeight (1/100 mm) als Warteschlangen-Standard an den Filter, der
+            Seiten anderer Größe (A4, Letter …) automatisch an das Etikett anpasst. Eine früher
+            ergänzte Größe bleibt bei einer Aktualisierung ohne --stock/--size erhalten.
             """,
             options: [
                 OptionSpec("model", short: "m", value: "auto|id|generic",
@@ -131,6 +148,8 @@ enum CommandCatalog {
                 OptionSpec("replace", "Vorhandene Warteschlange gleichen Namens ersetzen (auch ohne LabelWerk-Treiber)"),
                 OptionSpec("location", value: "text", "Standort, z. B. „Lager, Tor 3“"),
                 OptionSpec("stock", short: "s", value: "id", "Etikettenformat als Standard-Papiergröße (Liste: lwctl stocks)"),
+                OptionSpec("size", value: "BxH(mm|in)",
+                           "Eigene Etikettengröße als Standard-Papiergröße, z. B. 104x76.2mm oder 4x3in (statt --stock)"),
                 OptionSpec("default", "Als Standarddrucker festlegen"),
                 OptionSpec("test-page", "Danach eine Testseite über die neue Warteschlange drucken"),
                 OptionSpec("ppd-dir", value: "ordner", "Ordner mit den LabelWerk-PPDs (Standard: \(InstallCommands.defaultPPDDirectory))"),
@@ -141,6 +160,7 @@ enum CommandCatalog {
                 "lwctl install --printer tcp://192.168.1.50",
                 "lwctl install -p tcp://192.168.1.51 --name Versand --location \"Lager, Tor 3\" --stock w4h6in --default --test-page",
                 "lwctl install -p tcp://etiketten-2.local:9100 --model zt410 --dpi 300 --dry-run",
+                "lwctl install -p tcp://192.168.1.52 --size 104x76.2mm",
                 "for ip in 192.168.1.50 192.168.1.51; do lwctl install -p tcp://$ip --json; done",
             ]),
         CommandSpec(
@@ -206,7 +226,8 @@ enum CommandCatalog {
             options: imageOptions + encodeOptions,
             needsPrinter: false, minimumArguments: 1, maximumArguments: nil,
             examples: ["lwctl encode logo.png -o logo.zpl --stock w2h1in", "lwctl --language epl encode logo.png > logo.epl",
-                       "lwctl encode a.png b.png --no-layout --copies 2 --no-collate --cut-every 2 -o auftrag.zpl"]),
+                       "lwctl encode a.png b.png --no-layout --copies 2 --no-collate --cut-every 2 -o auftrag.zpl",
+                       "lwctl encode a4-seite.png --no-layout --page-size 595.28x841.89 --label-size 104x76.2mm -o etikett.zpl"]),
         CommandSpec(
             name: "render", usage: "render <zpl-datei|-> -o out.png [--dpmm 8]",
             summary: "ZPL in ein PNG-Vorschaubild umwandeln",
