@@ -110,4 +110,10 @@ extension Character {
         guard let ascii = asciiValue else { return false }
         return ascii >= 0x30 && ascii <= 0x39
     }
+
+    /// Hexziffer 0–9, a–f, A–F (ohne andere Unicode-Zeichen).
+    var isASCIIHexDigit: Bool {
+        guard let ascii = asciiValue else { return false }
+        return (ascii >= 0x30 && ascii <= 0x39) || (ascii >= 0x41 && ascii <= 0x46) || (ascii >= 0x61 && ascii <= 0x66)
+    }
 }
