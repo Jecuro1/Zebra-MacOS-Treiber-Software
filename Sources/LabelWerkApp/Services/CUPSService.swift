@@ -185,7 +185,8 @@ enum CUPSService {
         let name = existing.contains { $0.name == requested } ? requested : sanitizedQueueName(requested)
         // `-R` wirkt sofort und nur auf vorhandene Warteschlangen: Veraltete Standards nur dann entfernen.
         let exists = existing.contains { $0.name == name }
-        let plan = defaultsPlan(settings: printer.settings, language: printer.language, removingStale: exists)
+        let plan = defaultsPlan(settings: printer.settings, language: printer.language, removingStale: exists,
+                                resolution: printer.resolution)
         var args = ["-p", name, "-E", "-v", uri, "-P", ppd.path,
                     "-D", printer.name, "-o", "printer-is-shared=false"]
         if !printer.location.isEmpty { args += ["-L", printer.location] }
@@ -210,8 +211,8 @@ enum CUPSService {
     /// - Throws: `CUPSError.optionsNotApplied`, wenn die Warteschlange Werte nicht übernommen hat.
     @discardableResult
     static func setDefaults(queue: String, settings: PrintSettings, stock: LabelStock?,
-                            language: PrinterLanguage?) async throws -> [String] {
-        let plan = defaultsPlan(settings: settings, language: language, removingStale: true)
+                            language: PrinterLanguage?, resolution: Resolution? = nil) async throws -> [String] {
+        let plan = defaultsPlan(settings: settings, language: language, removingStale: true, resolution: resolution)
         var args = ["-p", queue] + plan.arguments
         if let stock { args += ["-o", "PageSize=\(stock.ppdKeyword)"] }
         try await runLpadmin(args)
@@ -226,15 +227,39 @@ enum CUPSService {
     /// übernimmt nur PPD-Schlüsselwörter mit einem Wert aus ihrer Auswahl – andere Werte verwirft es
     /// stillschweigend.
     static let ppdIntegerChoices: [String: [Int]] = [
+        CUPSOptionName.darkness: Array(1...30),
         CUPSOptionName.labelTop: Array(stride(from: -120, through: 120, by: 10)),
         CUPSOptionName.tearOff: Array(stride(from: -120, through: 120, by: 10)),
         CUPSOptionName.labelLeft: Array(stride(from: -200, through: 200, by: 10)),
         CUPSOptionName.threshold: [64, 96, 128, 160, 192],
         CUPSOptionName.cutEvery: [0, 1, 2, 5, 10, 25, 50, 100],
+        CUPSOptionName.pauseEvery: [0, 1, 2, 5, 10, 25, 50, 100],
+        CUPSOptionName.cancelDelay: [0, 250, 500, 1000, 2000, 3000, 5000, 10000],
     ]
 
-    /// Optionen ohne PPD-Eintrag (freie Base64url-Werte): nur als Warteschlangen-Standard möglich.
-    static let queueOnlyOptions: Set<String> = [CUPSOptionName.startCommands, CUPSOptionName.endCommands]
+    /// Ganzzahlige PPD-Optionen, deren Auswahl Millimeter in Punkten der Auflösung sind
+    /// (Driver/ppd/generate_ppds.py: `MARK_OFFSET_MM`, `STOP_OFFSET_MM`).
+    static let ppdMillimetreChoices: [String: (millimetres: [Int], range: ClosedRange<Int>)] = [
+        CUPSOptionName.markOffset: ([-10, -5, -3, -2, -1, 0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35], -80...283),
+        CUPSOptionName.stopOffset: ([0, 1, 2, 3, 5, 10], 0...32_000),
+    ]
+
+    /// Auswahl einer ganzzahligen PPD-Option für die Auflösung (`nil` = keine Ganzzahl-Option bzw.
+    /// Auflösung unbekannt bei auflösungsabhängigen Optionen).
+    static func ppdChoices(_ name: String, resolution: Resolution?) -> [Int]? {
+        if let fixed = ppdIntegerChoices[name] { return fixed }
+        guard let resolution, let spec = ppdMillimetreChoices[name] else { return nil }
+        var seen = Set<Int>()
+        return spec.millimetres.compactMap { mm -> Int? in
+            let dots = resolution.dots(fromMM: Double(mm))
+            guard spec.range.contains(dots), seen.insert(dots).inserted else { return nil }
+            return dots
+        }
+    }
+
+    /// Optionen ohne PPD-Eintrag (freie Base64url-Werte, eigene Steuerzeichen und das veraltete
+    /// `lwRotate180`): nur als Warteschlangen-Standard möglich.
+    static let queueOnlyOptions: Set<String> = Set(CUPSOptionName.nonPPD)
 
     /// `lpadmin`-Argumente für die Treiber-Standardwerte und die danach erwarteten Werte.
     struct DefaultsPlan: Equatable {
@@ -258,7 +283,11 @@ enum CUPSService {
     ///
     /// `removingStale` entfernt nicht mehr benötigte Warteschlangen-Standards (`-R` wirkt sofort und
     /// schlägt bei einer noch nicht vorhandenen Warteschlange fehl).
-    static func defaultsPlan(settings: PrintSettings, language: PrinterLanguage?, removingStale: Bool) -> DefaultsPlan {
+    ///
+    /// `resolution` bestimmt die Auswahl der Millimeter-Optionen (`lwMarkOffset`, `lwStopOffset`); ohne
+    /// Auflösung werden deren Zahlenwerte stets exakt als Warteschlangen-Standard gesetzt.
+    static func defaultsPlan(settings: PrintSettings, language: PrinterLanguage?, removingStale: Bool,
+                             resolution: Resolution? = nil) -> DefaultsPlan {
         var plan = DefaultsPlan()
         var options = settings.cupsOptions()
         if let language { options[CUPSOptionName.language] = language.cupsValue }
@@ -268,10 +297,16 @@ enum CUPSService {
         }
         for (name, value) in options.sorted(by: { $0.key < $1.key }) {
             plan.expected[name] = value
+            let dependsOnResolution = ppdMillimetreChoices[name] != nil
             if queueOnlyOptions.contains(name) {
                 plan.arguments += ["-o", "\(name)-default=\(value)"]
                 plan.queueDefaults.insert(name)
-            } else if let choices = ppdIntegerChoices[name], let number = Int(value), !choices.contains(number) {
+            } else if dependsOnResolution, resolution == nil, Int(value) != nil {
+                // Auswahl der PPD unbekannt: exakter Wert als Warteschlangen-Standard.
+                plan.arguments += ["-o", "\(name)-default=\(value)"]
+                plan.queueDefaults.insert(name)
+            } else if let choices = ppdChoices(name, resolution: resolution), !choices.isEmpty,
+                      let number = Int(value), !choices.contains(number) {
                 let nearest = choices.min { abs($0 - number) < abs($1 - number) } ?? number
                 plan.arguments += ["-o", "\(name)=\(nearest)", "-o", "\(name)-default=\(value)"]
                 plan.queueDefaults.insert(name)
@@ -279,7 +314,9 @@ enum CUPSService {
             } else {
                 plan.arguments += ["-o", "\(name)=\(value)"]
                 // Ein früher gesetzter exakter Wert würde die PPD-Wahl sonst überdecken.
-                if removingStale, ppdIntegerChoices[name] != nil { plan.arguments += ["-R", "\(name)-default"] }
+                if removingStale, ppdIntegerChoices[name] != nil || dependsOnResolution {
+                    plan.arguments += ["-R", "\(name)-default"]
+                }
             }
         }
         return plan
@@ -316,6 +353,11 @@ enum CUPSService {
         case CUPSOptionName.tearOff: return tr("Abreißposition (~TA)")
         case CUPSOptionName.threshold: return tr("Schwelle")
         case CUPSOptionName.cutEvery: return tr("Schneiden nach je")
+        case CUPSOptionName.darkness: return tr("Temperatur")
+        case CUPSOptionName.markOffset: return tr("Markierung Versatz")
+        case CUPSOptionName.stopOffset: return tr("Stoppversatz")
+        case CUPSOptionName.pauseEvery: return tr("Pausieren")
+        case CUPSOptionName.cancelDelay: return tr("Verzögerung")
         default: return name
         }
     }
