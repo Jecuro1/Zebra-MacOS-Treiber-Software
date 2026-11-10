@@ -171,7 +171,7 @@ final class PrinterSetupWizardModel {
     @ObservationIgnored private var preparedDeviceID: String?
 
     init() {
-        discovery = DiscoveryController(sources: [.bonjour, .network, .usb], persistsSources: false)
+        discovery = DiscoveryController(sources: [.bonjour, .zebra, .network, .usb], persistsSources: false)
         service = PrinterInstallService()
     }
 
@@ -183,11 +183,26 @@ final class PrinterSetupWizardModel {
         started = true
         accentHue = AppModel.nextAccentHue(after: app.sessions.count)
         interfaces = SubnetScanner.localIPv4Interfaces()
-        discovery.start()
+        // Wie „Drucker suchen“: auch die Netze bekannter Drucker und die eigenen Netze (VPN).
+        discovery.start(options: app.networkDiscovery.discoveryOptions())
         Task { [weak self] in
             if DriverInstaller.shared.snapshot == nil { await DriverInstaller.shared.refresh() }
             await self?.reloadMacQueues()
         }
+    }
+
+    /// Übernimmt einen schon gefundenen Drucker (Seitenleiste „Im Netzwerk“) als Suchtreffer und wählt
+    /// ihn aus – die Erkennung beginnt dann mit dem, was die Suche schon weiß (eine Antwort auf die
+    /// Zebra-Suche bestätigt den Zebra-Drucker auch ohne SNMP, etwa hinter einem VPN). Ohne Fund bzw.
+    /// für andere Verbindungen bleibt nur die Adresse als manuelle Eingabe.
+    func prefill(_ prefill: InstallWizardPrefill) {
+        if let printer = prefill.printer, PrinterInstallRequest.supports(printer.descriptor) {
+            discovery.inject(printer)
+            select(printer)
+            return
+        }
+        manualPort = prefill.port
+        manualHost = prefill.host
     }
 
     func stop() {
@@ -203,7 +218,7 @@ final class PrinterSetupWizardModel {
     }
 
     func rescan() {
-        discovery.start()
+        discovery.start(options: app?.networkDiscovery.discoveryOptions() ?? PrinterDiscovery.Options())
         Task { [weak self] in await self?.reloadMacQueues() }
     }
 
@@ -287,9 +302,13 @@ final class PrinterSetupWizardModel {
     var canContinueFromChoose: Bool { currentDescriptor != nil && !isDetecting }
 
     /// Hinweis, wenn die eingegebene IP-Adresse nicht im Subnetz dieses Macs liegt.
+    /// Kein Hinweis für Adressen in einem Netz, das die Suche ohnehin durchsucht (VPN-Netz, Netz eines
+    /// bekannten Druckers, eigenes Netz) – dort ist ein Drucker außerhalb des eigenen Subnetzes gewollt.
     var subnetNote: String? {
         guard let target = manualTarget,
               PrinterSetupPlanning.isInLocalSubnet(host: target.host, interfaces: interfaces) == false else { return nil }
+        let searched = (discovery.plan?.networks ?? []) + (app?.networkDiscovery.plan.networks ?? [])
+        if searched.contains(where: { $0.range.contains(host: target.host) }) { return nil }
         return tr("%@ liegt nicht im Netz dieses Macs. Das funktioniert nur, wenn ein Router zwischen den Netzen vermittelt – sonst die IP-Adresse am Drucker prüfen.", target.host)
     }
 

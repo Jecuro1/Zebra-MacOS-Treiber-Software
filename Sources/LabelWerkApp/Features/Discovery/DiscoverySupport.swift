@@ -11,14 +11,15 @@ import LabelWerkKit
 /// Mehrdeutigkeit mit eventuellen Erweiterungen des Transport-Moduls gibt.
 enum DiscoverySourceStyle {
     /// Reihenfolge der Schalter in der Oberfläche.
-    static let ordered: [DiscoverySource] = [.bonjour, .usb, .network, .cups, .bluetooth, .ble]
+    static let ordered: [DiscoverySource] = [.bonjour, .zebra, .usb, .network, .cups, .bluetooth, .ble]
 
     /// Standardauswahl: schnelle Quellen ohne Systemabfrage (Bluetooth fragt nach Erlaubnis).
-    static let defaultSources: Set<DiscoverySource> = [.bonjour, .usb, .network, .cups]
+    static let defaultSources: Set<DiscoverySource> = [.bonjour, .zebra, .usb, .network, .cups]
 
     static func title(_ source: DiscoverySource) -> String {
         switch source {
         case .bonjour: return tr("Bonjour")
+        case .zebra: return tr("Zebra-Suche")
         case .usb: return tr("USB")
         case .network: return tr("Netzwerk-Scan")
         case .cups: return tr("macOS-Warteschlangen")
@@ -30,8 +31,9 @@ enum DiscoverySourceStyle {
     static func detail(_ source: DiscoverySource) -> String {
         switch source {
         case .bonjour: return tr("Netzwerkdrucker, die sich per Bonjour (mDNS) melden")
+        case .zebra: return tr("Zebras eigene Suche (UDP 4201) wie die Zebra-Programme unter Windows – findet Zebra-Drucker auch in anderen Netzen und über VPN")
         case .usb: return tr("Direkt per USB angeschlossene Zebra-Drucker")
-        case .network: return tr("Durchsucht das lokale Subnetz nach Port 9100 (RAW)")
+        case .network: return tr("Prüft Port 9100 (RAW) in den lokalen Netzen und den Netzen unter „Netze …“")
         case .cups: return tr("Bereits in macOS eingerichtete Etikettendrucker")
         case .bluetooth: return tr("Klassisches Bluetooth (SPP), z. B. mobile ZQ-Drucker")
         case .ble: return tr("Bluetooth Low Energy (Link-OS-Drucker)")
@@ -41,6 +43,7 @@ enum DiscoverySourceStyle {
     static func systemImage(_ source: DiscoverySource) -> String {
         switch source {
         case .bonjour: return "bonjour"
+        case .zebra: return "z.circle.fill"
         case .usb: return "cable.connector"
         case .network: return "network"
         case .cups: return "printer.filled.and.paper"
@@ -52,6 +55,7 @@ enum DiscoverySourceStyle {
     static func tint(_ source: DiscoverySource) -> Color {
         switch source {
         case .bonjour: return Theme.teal
+        case .zebra: return Theme.paused
         case .usb: return Theme.violet
         case .network: return Theme.printing
         case .cups: return Theme.indigo
@@ -60,12 +64,25 @@ enum DiscoverySourceStyle {
         }
     }
 
-    /// Erwartete Suchdauer in Sekunden (Subnetz-Scan und Bluetooth-Inquiry brauchen länger).
-    static func duration(for sources: Set<DiscoverySource>) -> Double {
+    /// Erwartete Suchdauer in Sekunden (Subnetz-Scan und Bluetooth-Inquiry brauchen länger; der
+    /// Netzwerk-Scan je nach Zahl der Adressen im Suchplan, z. B. Netze hinter einem VPN).
+    static func duration(for sources: Set<DiscoverySource>, plan: DiscoveryPlan? = nil) -> Double {
         var seconds = 6.0
-        if sources.contains(.network) { seconds = max(seconds, 10) }
+        if sources.contains(.zebra) { seconds = max(seconds, 7) }
+        if sources.contains(.network) {
+            let scan = plan?.estimatedScanDuration().timeIntervalSeconds ?? 10
+            seconds = max(seconds, scan)
+        }
         if sources.contains(.bluetooth) || sources.contains(.ble) { seconds = max(seconds, 12) }
         return seconds
+    }
+}
+
+extension Duration {
+    /// Dauer in Sekunden (Gleitkomma).
+    var timeIntervalSeconds: Double {
+        let parts = components
+        return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
     }
 }
 
@@ -87,6 +104,10 @@ final class DiscoveryController {
     private(set) var isScanning = false
     /// Quellen der laufenden Suche (leer, wenn keine läuft).
     private(set) var activeSources: Set<DiscoverySource> = []
+    /// Quellen der zuletzt gestarteten Suche (bleiben nach dem Ende erhalten).
+    private(set) var lastSources: Set<DiscoverySource> = []
+    /// Durchsuchte Netze der zuletzt gestarteten Suche (Netzwerk-Scan, Zebra-Suche).
+    private(set) var plan: DiscoveryPlan?
     private(set) var startedAt: Date?
     private(set) var duration: Double = 8
     /// Anzahl abgeschlossener Suchläufe.
@@ -101,8 +122,13 @@ final class DiscoveryController {
     @ObservationIgnored private var lastInsertion: Date?
     @ObservationIgnored private var lastDelay: Double = 0
     @ObservationIgnored private var generation = 0
+    /// Vorgegebene Funde (``inject(_:)``), die jeden Suchlauf überdauern.
+    @ObservationIgnored private var injected: [DiscoveredPrinter] = []
 
     private static let sourcesKey = "LabelWerk.discovery.sources"
+    /// Stand der gemerkten Auswahl: 2 = mit „Zebra-Suche“ (wird älteren Auswahlen einmal hinzugefügt).
+    private static let sourcesVersionKey = "LabelWerk.discovery.sourcesVersion"
+    private static let sourcesVersion = 2
 
     init(sources: Set<DiscoverySource>? = nil, persistsSources: Bool = true) {
         self.persistsSources = persistsSources
@@ -124,25 +150,32 @@ final class DiscoveryController {
         isScanning && !activeSources.isDisjoint(with: candidates)
     }
 
-    /// Startet eine neue Suche (eine laufende wird beendet). `override` ersetzt die gewählten Quellen.
-    func start(sources override: Set<DiscoverySource>? = nil) {
+    /// Startet eine neue Suche (eine laufende wird beendet). `override` ersetzt die gewählten Quellen;
+    /// `options` bringt die Netze bekannter Drucker und die eigenen Netze mit
+    /// (`NetworkDiscoveryService.discoveryOptions()`).
+    func start(sources override: Set<DiscoverySource>? = nil,
+               options: PrinterDiscovery.Options = PrinterDiscovery.Options()) {
         // Ohne Quellen nichts tun – vor allem eine laufende Suche nicht abbrechen, ohne sie zu beenden
         // (sonst bliebe `isScanning` hängen und das Radar liefe weiter).
         let selected = override ?? sources
         guard !selected.isEmpty else { return }
         cancelRunningTask()
         let currentGeneration = generation
-        let seconds = DiscoverySourceStyle.duration(for: selected)
-        found = []
+        let searchesNetworks = selected.contains(.network) || selected.contains(.zebra)
+        let plan = searchesNetworks ? PrinterDiscovery.plan(options: options) : nil
+        let seconds = DiscoverySourceStyle.duration(for: selected, plan: plan)
+        found = injected
         appearanceDelays = [:]
         lastInsertion = nil
         lastDelay = 0
         duration = seconds
         startedAt = Date()
         activeSources = selected
+        lastSources = selected
+        self.plan = plan
         isScanning = true
 
-        let discovery = PrinterDiscovery()
+        let discovery = PrinterDiscovery(options: options)
         self.discovery = discovery
         let stream = discovery.discover(sources: selected, timeout: .seconds(seconds))
         task = Task { [weak self] in
@@ -180,9 +213,24 @@ final class DiscoveryController {
         task = nil
     }
 
+    /// Nimmt einen schon anderswo gefundenen Drucker auf (z. B. aus der automatischen Suche, „Im
+    /// Netzwerk“ › „Hinzufügen“). Er bleibt über neue Suchläufe erhalten; ein schwächerer Fund desselben
+    /// Geräts (etwa ein offener Port ohne Identifikation) verdrängt seine Angaben nicht.
+    func inject(_ printer: DiscoveredPrinter) {
+        injected.removeAll { $0.id == printer.id }
+        injected.append(printer)
+        insert(printer)
+    }
+
     private func insert(_ printer: DiscoveredPrinter) {
         if let index = found.firstIndex(where: { $0.id == printer.id }) {
-            found[index] = printer
+            let existing = found[index]
+            if injected.contains(where: { $0.id == printer.id }),
+               DiscoveryRegistry.identificationRank(printer) < DiscoveryRegistry.identificationRank(existing) {
+                found[index] = DiscoveryRegistry.merged(existing: printer, with: existing)
+            } else {
+                found[index] = printer
+            }
             return
         }
         // Treffer, die kurz nacheinander eintreffen, fliegen gestaffelt ein.
@@ -200,15 +248,22 @@ final class DiscoveryController {
     // MARK: Gemerkte Quellen
 
     private static func loadSources() -> Set<DiscoverySource> {
-        guard let stored = UserDefaults.standard.array(forKey: sourcesKey) as? [String] else {
+        let defaults = UserDefaults.standard
+        guard let stored = defaults.array(forKey: sourcesKey) as? [String] else {
             return DiscoverySourceStyle.defaultSources
         }
-        let parsed = Set(stored.compactMap(DiscoverySource.init(rawValue:)))
+        var parsed = Set(stored.compactMap(DiscoverySource.init(rawValue:)))
+        // Auswahl aus einer Version ohne „Zebra-Suche“: einmal hinzufügen (danach gilt die Auswahl).
+        if defaults.integer(forKey: sourcesVersionKey) < sourcesVersion, !parsed.isEmpty {
+            parsed.insert(.zebra)
+            storeSources(parsed)
+        }
         return parsed.isEmpty ? DiscoverySourceStyle.defaultSources : parsed
     }
 
     private static func storeSources(_ sources: Set<DiscoverySource>) {
         UserDefaults.standard.set(sources.map(\.rawValue).sorted(), forKey: sourcesKey)
+        UserDefaults.standard.set(sourcesVersion, forKey: sourcesVersionKey)
     }
 }
 
@@ -423,10 +478,11 @@ enum DiscoveryFeatureText {
 enum DiscoveryDetailText {
     /// Anzeigereihenfolge bekannter Schlüssel; unbekannte folgen alphabetisch.
     private static let order: [String] = [
-        "name", "sysName", "serviceName", "productName", "makeAndModel", "sysDescr",
-        "host", "port", "servicePort", "serviceType", "deviceURI", "isDefault",
+        "name", "sysName", "serviceName", "productName", "printServer", "makeAndModel", "sysDescr",
+        "host", "port", "reportedAddress", "subnetMask", "gateway", "macAddress",
+        "servicePort", "serviceType", "deviceURI", "isDefault",
         "address", "identifier", "rssi",
-        "serialNumber", "vendorID", "productID", "locationID",
+        "serialNumber", "printServerSerial", "productNumber", "vendorID", "productID", "locationID",
         "firmware", "dotsPerMM", "memory", "location", "adminURL", "identifiedBy",
     ]
 
@@ -462,11 +518,18 @@ enum DiscoveryDetailText {
         case "productID": return tr("Produkt-ID")
         case "vendorID": return tr("Hersteller-ID")
         case "serialNumber": return tr("Seriennummer")
+        case "printServerSerial": return tr("Seriennr. Druckserver")
         case "locationID": return tr("USB-Anschluss")
         case "address": return tr("Bluetooth-Adresse")
         case "name": return tr("Gerätename")
         case "identifier": return tr("Kennung")
         case "rssi": return tr("Signalstärke")
+        case "macAddress": return tr("MAC-Adresse")
+        case "productNumber": return tr("Produktnummer")
+        case "subnetMask": return tr("Subnetzmaske")
+        case "gateway": return tr("Gateway")
+        case "printServer": return tr("Druckserver")
+        case "reportedAddress": return tr("Gemeldete Adresse")
         default: return key
         }
     }
@@ -484,6 +547,7 @@ enum DiscoveryDetailText {
                 switch part.lowercased() {
                 case "snmp": return "SNMP"
                 case "hi": return tr("Host-Identifikation (~HI)")
+                case "zebra": return tr("Zebra-Suche (UDP 4201)")
                 default: return String(part)
                 }
             }

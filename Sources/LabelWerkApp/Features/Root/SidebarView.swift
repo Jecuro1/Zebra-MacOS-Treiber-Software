@@ -1,7 +1,8 @@
+import AppKit
 import SwiftUI
 import LabelWerkKit
 
-/// Seitenleiste: Drucker mit Live-Status und globale Bereiche.
+/// Seitenleiste: Drucker mit Live-Status, gefundene Zebra-Drucker im Netzwerk und globale Bereiche.
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @State private var printerToRemove: PrinterSession?
@@ -10,6 +11,7 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var model = model
+        let networkPrinters = model.networkDiscovery.newPrinters
         List(selection: $model.selection) {
             Section(tr("Drucker")) {
                 if model.sessions.isEmpty && model.preferences.showDemoPrinter {
@@ -28,6 +30,28 @@ struct SidebarView: View {
                 }
                 .onMove { source, destination in
                     model.movePrinters(fromOffsets: source, toOffset: destination)
+                }
+            }
+
+            // Wie unter Windows: Zebra-Drucker im Netzwerk, die noch nicht eingerichtet sind
+            // (automatische Suche, `NetworkDiscoveryService`).
+            if !networkPrinters.isEmpty {
+                Section {
+                    ForEach(networkPrinters) { printer in
+                        NetworkPrinterSidebarRow(printer: printer) {
+                            model.openInstallWizard(for: printer)
+                        }
+                        .contextMenu { networkContextMenu(for: printer) }
+                    }
+                } header: {
+                    HStack(spacing: 6) {
+                        Text(tr("Im Netzwerk"))
+                        if model.networkDiscovery.isSearching {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .transition(.opacity)
+                        }
+                    }
                 }
             }
 
@@ -106,6 +130,92 @@ struct SidebarView: View {
         }
         Divider()
         Button(tr("Entfernen …"), role: .destructive) { printerToRemove = session }
+    }
+
+    @ViewBuilder
+    private func networkContextMenu(for printer: DiscoveredPrinter) -> some View {
+        Button(tr("Hinzufügen …")) { model.openInstallWizard(for: printer) }
+        Button(tr("Nur in LabelWerk hinzufügen")) { model.addPrinter(from: printer) }
+        Divider()
+        Button(tr("In „Drucker suchen“ anzeigen")) { model.selection = .discover }
+        if let host = NetworkPrinterSidebarRow.host(of: printer) {
+            Button(tr("Adresse kopieren")) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(host, forType: .string)
+            }
+        }
+    }
+}
+
+/// Zeile eines gefundenen, noch nicht eingerichteten Zebra-Druckers („Im Netzwerk“): Name, Modell und
+/// Adresse, „Hinzufügen“ öffnet den Installationsassistenten mit dieser Adresse.
+struct NetworkPrinterSidebarRow: View {
+    let printer: DiscoveredPrinter
+    let onAdd: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appReduceMotion) private var appReduceMotion
+    @State private var hovering = false
+
+    private var reduceMotion: Bool { systemReduceMotion || appReduceMotion }
+
+    var body: some View {
+        let tint = DiscoverySourceStyle.tint(printer.source)
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(tint.opacity(0.16))
+                .frame(width: 30, height: 30)
+                .overlay {
+                    Image(systemName: DiscoveryMatcher.model(for: printer)?.systemImage ?? "printer")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(tint)
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white, Theme.accent)
+                        .offset(x: 3, y: 3)
+                }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(printer.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 4)
+            Button(action: onAdd) {
+                Text(tr("Hinzufügen"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(hovering ? Color.white : Theme.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(hovering ? Theme.accent : Theme.accent.opacity(0.14)))
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: hovering)
+            .help(tr("Drucker einrichten – der Installationsassistent öffnet sich mit dieser Adresse"))
+        }
+        .padding(.vertical, 3)
+        .help(DiscoveryDetailText.title(for: "identifiedBy") + ": "
+              + DiscoveryDetailText.value(for: "identifiedBy", raw: printer.details["identifiedBy"] ?? ""))
+    }
+
+    /// „ZD621 · 10.62.13.20“.
+    private var subtitle: String {
+        let model = DiscoveryMatcher.model(for: printer)?.displayName
+            ?? printer.modelHint.flatMap(ZebraIdentifiers.shortModelName(from:))
+        return [model, Self.host(of: printer)].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    static func host(of printer: DiscoveredPrinter) -> String? {
+        guard case .tcp(let host, _) = printer.descriptor else { return nil }
+        return host
     }
 }
 

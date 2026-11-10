@@ -4,8 +4,14 @@ import Foundation
 ///
 /// * **bonjour** – DNS-SD `_pdl-datastream._tcp`, `_printer._tcp`, `_ipp._tcp` (macOS:
 ///   Network.framework, Linux: `avahi-browse`), aufgelöst auf IP-Adresse; nur Zebra-Geräte.
+/// * **zebra** – Zebras eigene Suche über UDP 4201 wie Zebra Setup Utilities und das Link-OS-SDK
+///   (``ZebraUDPDiscovery``, Paketformat ``ZebraDiscoveryPacket``): Broadcast, Multicast 224.0.1.55
+///   und – für Netze hinter Routern und VPN – einzeln an jede Adresse der entfernten Netze des
+///   Suchplans (``DiscoveryPlan``). Es antworten nur Zebra-Druckserver, mit Modell, Seriennummer,
+///   MAC-Adresse und Systemname; fremde Geräte erhalten nur das sechs Byte lange UDP-Paket.
 /// * **usb** – IOKit, Hersteller-ID 0x0A5F (nur macOS).
-/// * **network** – Portsuche (9100) in den lokalen Subnetzen, danach Identifikation per SNMP
+/// * **network** – Portsuche (9100) in den Netzen des Suchplans (lokale Subnetze, private VPN-Netze,
+///   Netze bekannter Drucker und eigene Netze: `Options.extraNetworks`), danach Identifikation per SNMP
 ///   (`sysDescr`/`sysName`, gefahrlos). Nur Geräte, die SNMP **eindeutig als Zebra** meldet,
 ///   erhalten zusätzlich `~HI` (Firmware, Auflösung, Speicher). Alle anderen Geräte bekommen
 ///   standardmäßig **keinerlei Daten**: Fremde Drucker (JetDirect, PCL/PJL …) würden Text an
@@ -19,13 +25,39 @@ import Foundation
 ///   Zebra-Namen (nur macOS).
 /// * **ble** – BLE-Geräte mit Zebra-Dienstkennung (nur macOS).
 ///
-/// Ergebnisse werden nach `id` (`ConnectionDescriptor.stableID`) dedupliziert: Jeder Drucker wird
-/// genau einmal geliefert (der erste Fund gewinnt).
+/// Ergebnisse werden zusammengeführt (``DiscoveryRegistry``): gleiche `id`
+/// (`ConnectionDescriptor.stableID`), gleiche Seriennummer oder gleiche Netzwerkadresse ergeben einen
+/// Drucker. Der erste Fund wird geliefert; bringt ein späterer Fund desselben Geräts eine sicherere
+/// Erkennung (Zebra-Suche vor SNMP/`~HI`/Bonjour vor unerkanntem offenem Port), wird der Eintrag
+/// **mit derselben `id`** erneut geliefert – Verbraucher ersetzen ihn.
 public final class PrinterDiscovery: Sendable {
     /// Feineinstellungen der Suche.
     public struct Options: Sendable, Hashable {
-        /// Zu prüfende Hosts für die Netzwerksuche; `nil` = alle Hosts der lokalen IPv4-Subnetze.
+        /// Zu prüfende Hosts für Netzwerk-Scan und Zebra-Suche; `nil` = Suchplan (lokale Subnetze,
+        /// private VPN-Netze, `extraNetworks`). Bei expliziten Hosts fragt die Zebra-Suche nur diese
+        /// einzeln ab (kein Broadcast/Multicast).
         public var networkHosts: [String]?
+        /// Zusätzlich zu durchsuchende Netze: Netze bekannter Drucker und eigene Angaben
+        /// („10.62.13.0/24“, „10.62.13.1-10.62.13.254“ …, siehe ``DiscoveryNetworks/parse(_:)``).
+        public var extraNetworks: [DiscoveryNetworkEntry] = []
+        /// /24 von VPN-Tunneln mit privater Adresse (RFC 1918) mit durchsuchen.
+        public var includePrivateVPNNetworks: Bool = true
+        /// Höchstzahl der Adressen je zusätzlichem Netz.
+        public var maxHostsPerNetwork: Int = DiscoveryNetworks.maxHostsPerEntry
+        /// Verbindungsfrist für Adressen außerhalb der lokalen Subnetze (VPN, Router dazwischen).
+        public var remoteConnectTimeout: Duration = .milliseconds(900)
+        /// Zebra-Suche: Zielport (Standard 4201; abweichend nur für Tests).
+        public var zebraDiscoveryPort: Int = ZebraDiscoveryPacket.port
+        /// Zebra-Suche: Wartezeit auf Antworten nach der letzten Anfrage.
+        public var zebraReplyWindow: Duration = .milliseconds(2500)
+        /// Zebra-Suche: Broadcast (255.255.255.255 und Directed Broadcast je Netz).
+        public var zebraUseBroadcast: Bool = true
+        /// Zebra-Suche: Multicast an 224.0.1.55 über jede multicastfähige Schnittstelle.
+        public var zebraUseMulticast: Bool = true
+        /// Zebra-Suche: Reichweite des Multicasts in Routersprüngen (TTL).
+        public var zebraMulticastHops: Int = ZebraDiscoveryPacket.defaultMulticastHops
+        /// Zebra-Suche: auch jede Adresse der lokalen Subnetze einzeln abfragen (sonst genügt Broadcast).
+        public var zebraUnicastToLocalSubnets: Bool = false
         /// Zu prüfende TCP-Ports (Standard: 9100).
         public var networkPorts: [Int] = [ZebraIdentifiers.rawPort]
         /// Höchstzahl der Hosts je Netzwerkschnittstelle (siehe `SubnetScanner.hosts(in:limit:)`).
@@ -122,6 +154,8 @@ public final class PrinterDiscovery: Sendable {
             await discoverCUPS(options: options, sink: sink)
         case .bonjour:
             await discoverBonjour(options: options, timeout: timeout, sink: sink)
+        case .zebra:
+            await discoverZebra(options: options, timeout: timeout, sink: sink)
         case .usb:
             #if os(macOS) && canImport(IOKit)
             await discoverUSB(sink: sink)
@@ -137,32 +171,78 @@ public final class PrinterDiscovery: Sendable {
         }
     }
 
-    /// Zu durchsuchende Hosts (explizit oder aus den lokalen Schnittstellen), ohne Duplikate.
-    static func networkHosts(options: Options) -> [String] {
-        let raw = options.networkHosts ?? SubnetScanner.localIPv4Interfaces().flatMap {
-            SubnetScanner.hosts(in: $0, limit: options.hostLimitPerInterface)
-        }
+    // MARK: Suchplan
+
+    /// Was Netzwerk-Scan und Zebra-Suche mit diesen Optionen durchsuchen (für Anzeige und Tests).
+    public static func plan(options: Options,
+                            interfaces: [NetworkInterfaceInfo] = SubnetScanner.allIPv4Interfaces()) -> DiscoveryPlan {
+        DiscoveryPlan.make(
+            interfaces: interfaces,
+            entries: options.extraNetworks,
+            includePrivateVPNNetworks: options.includePrivateVPNNetworks,
+            localHostLimit: options.hostLimitPerInterface,
+            maxHostsPerEntry: options.maxHostsPerNetwork
+        )
+    }
+
+    /// Suchplan dieser Suche (aktuelle Schnittstellen).
+    public func plan() -> DiscoveryPlan {
+        Self.plan(options: options)
+    }
+
+    /// Zu durchsuchende Hosts (explizit oder aus dem Suchplan), ohne Duplikate.
+    static func networkHosts(options: Options, plan: DiscoveryPlan? = nil) -> [String] {
+        let raw = options.networkHosts ?? (plan ?? Self.plan(options: options)).hosts
         var seen = Set<String>()
         return raw.filter { seen.insert($0.lowercased()).inserted }
     }
 
+    /// Ziele der Zebra-Suche: explizite Hosts einzeln, sonst Broadcast, Multicast und die Adressen
+    /// der entfernten Netze des Suchplans.
+    static func zebraTargets(options: Options, plan: DiscoveryPlan,
+                             interfaces: [NetworkInterfaceInfo]) -> ZebraUDPDiscovery.Targets {
+        var targets = ZebraUDPDiscovery.Targets()
+        if let explicit = options.networkHosts {
+            var seen = Set<String>()
+            targets.unicast = explicit.filter { SubnetScanner.parseIPv4($0) != nil && seen.insert($0).inserted }
+            return targets
+        }
+        if options.zebraUseBroadcast { targets.broadcast = plan.broadcastTargets }
+        if options.zebraUseMulticast {
+            targets.multicastInterfaces = interfaces.filter { !$0.isPointToPoint && $0.supportsMulticast }.map(\.address)
+        }
+        targets.unicast = options.zebraUnicastToLocalSubnets ? plan.hosts : plan.remoteHosts
+        return targets
+    }
+
     static func discoverNetwork(options: Options, sink: DiscoverySink) async {
-        let hosts = networkHosts(options: options)
+        let plan = options.networkHosts == nil ? Self.plan(options: options) : nil
+        let hosts = networkHosts(options: options, plan: plan)
         let ports = Array(Set(options.networkPorts.filter { (1...65535).contains($0) })).sorted()
         guard !hosts.isEmpty, !ports.isEmpty else { return }
+        // Adressen hinter Routern bzw. VPN antworten langsamer: eigene, längere Verbindungsfrist.
+        let local = plan.map { plan in hosts.filter { plan.isLocal(host: $0) } } ?? hosts
+        let localSet = Set(local)
+        let remote = hosts.filter { !localSet.contains($0) }
+        let groups: [(hosts: [String], timeout: Duration)] = [
+            (hosts: local, timeout: options.connectTimeout),
+            (hosts: remote, timeout: max(options.connectTimeout, options.remoteConnectTimeout)),
+        ].filter { !$0.hosts.isEmpty }
         await withTaskGroup(of: Void.self) { group in
             for port in ports {
-                group.addTask {
-                    await withTaskGroup(of: Void.self) { identifications in
-                        let found = SubnetScanner.scan(
-                            hosts: hosts, port: port,
-                            timeout: options.connectTimeout,
-                            maxConcurrent: options.maxConcurrentProbes
-                        )
-                        for await host in found {
-                            identifications.addTask {
-                                if let printer = await identifyNetworkDevice(host: host, port: port, options: options) {
-                                    sink.emit(printer)
+                for scanGroup in groups {
+                    group.addTask {
+                        await withTaskGroup(of: Void.self) { identifications in
+                            let found = SubnetScanner.scan(
+                                hosts: scanGroup.hosts, port: port,
+                                timeout: scanGroup.timeout,
+                                maxConcurrent: options.maxConcurrentProbes
+                            )
+                            for await host in found {
+                                identifications.addTask {
+                                    if let printer = await identifyNetworkDevice(host: host, port: port, options: options) {
+                                        sink.emit(printer)
+                                    }
                                 }
                             }
                         }
@@ -170,6 +250,73 @@ public final class PrinterDiscovery: Sendable {
                 }
             }
         }
+    }
+
+    /// Zebra-Suche (UDP 4201). Antworten mit lesbarem Produkt- oder Systemnamen werden sofort
+    /// gemeldet; Antworten ohne (abweichender Paketaufbau älterer Druckserver) werden über SNMP und –
+    /// da nur Zebra-Druckserver auf diese Anfrage antworten – `~HI` identifiziert.
+    static func discoverZebra(options: Options, timeout: Duration, sink: DiscoverySink) async {
+        let interfaces = SubnetScanner.allIPv4Interfaces()
+        let plan = Self.plan(options: options, interfaces: interfaces)
+        let targets = zebraTargets(options: options, plan: plan, interfaces: interfaces)
+        guard !targets.isEmpty else { return }
+        let rawPort = options.networkPorts.first { (1...65535).contains($0) } ?? ZebraIdentifiers.rawPort
+        var incomplete: [(reply: ZebraDiscoveryPacket.Reply, host: String)] = []
+        _ = await ZebraUDPDiscovery.run(
+            targets: targets,
+            port: options.zebraDiscoveryPort,
+            multicastHops: options.zebraMulticastHops,
+            replyWindow: min(options.zebraReplyWindow, timeout)
+        ) { reply, host in
+            if reply.productName != nil || reply.systemName != nil {
+                sink.emit(ZebraDiscoveryPacket.makeDiscoveredPrinter(reply, host: host, port: rawPort))
+            } else {
+                incomplete.append((reply: reply, host: host))
+            }
+        }
+        await withTaskGroup(of: Void.self) { group in
+            for item in incomplete {
+                group.addTask {
+                    sink.emit(await identifyZebraResponder(reply: item.reply, host: item.host, port: rawPort,
+                                                           options: options))
+                }
+            }
+        }
+    }
+
+    /// Ergänzt eine unvollständige Antwort der Zebra-Suche per SNMP bzw. `~HI`.
+    static func identifyZebraResponder(reply: ZebraDiscoveryPacket.Reply, host: String, port: Int,
+                                       options: Options) async -> DiscoveredPrinter {
+        var printer = ZebraDiscoveryPacket.makeDiscoveredPrinter(reply, host: host, port: port)
+        var methods = ["zebra"]
+        if options.useSNMP, let values = await querySNMPIdentity(host: host, options: options) {
+            if let description = values[SNMPProbe.sysDescrOID], !description.isEmpty {
+                printer.details["sysDescr"] = description
+                if ZebraIdentifiers.looksLikeZebra(description) { printer.modelHint = cleanedSysDescr(description) }
+                methods.append("snmp")
+            }
+            if let systemName = values[SNMPProbe.sysNameOID], !systemName.isEmpty {
+                printer.details["sysName"] = systemName
+                printer.name = systemName
+            }
+        }
+        if printer.modelHint == nil, options.useHostIdentification,
+           let identification = await HostIdentificationProbe.probe(
+               host: host, port: port,
+               connectTimeout: max(options.connectTimeout, options.remoteConnectTimeout),
+               responseTimeout: options.hostIdentificationTimeout
+           ) {
+            printer.modelHint = identification.model
+            methods.append("hi")
+            if let firmware = identification.firmware { printer.details["firmware"] = firmware }
+            if let dpmm = identification.dotsPerMM { printer.details["dotsPerMM"] = String(dpmm) }
+            if let memory = identification.memory { printer.details["memory"] = memory }
+            if printer.details["sysName"] == nil, let short = ZebraIdentifiers.shortModelName(from: identification.model) {
+                printer.name = "Zebra \(short)"
+            }
+        }
+        printer.details["identifiedBy"] = methods.joined(separator: "+")
+        return printer
     }
 
     /// Identifiziert ein Gerät mit offenem Port. `nil` = ausblenden (gemäß Optionen).
@@ -310,24 +457,26 @@ public final class PrinterDiscovery: Sendable {
     }
 }
 
-/// Sammelstelle für Funde aller Quellen: dedupliziert nach `id` und reicht an den Strom weiter.
+/// Sammelstelle für Funde aller Quellen: führt sie zusammen (``DiscoveryRegistry``) und reicht neue
+/// bzw. ergänzte Einträge an den Strom weiter.
 final class DiscoverySink: Sendable {
     private let continuation: AsyncStream<DiscoveredPrinter>.Continuation
-    private let state = LockedValue<(seen: Set<String>, finished: Bool)>((seen: [], finished: false))
+    private let state = LockedValue<(registry: DiscoveryRegistry, finished: Bool)>((registry: DiscoveryRegistry(), finished: false))
 
     init(_ continuation: AsyncStream<DiscoveredPrinter>.Continuation) {
         self.continuation = continuation
     }
 
-    /// Liefert `printer`, falls die `id` noch nicht gemeldet wurde; `true` bei Weitergabe.
+    /// Liefert `printer`, falls das Gerät neu ist, bzw. den ergänzten Eintrag (gleiche `id` wie zuvor),
+    /// falls `printer` es sicherer erkennt; `true` bei Weitergabe.
     @discardableResult
     func emit(_ printer: DiscoveredPrinter) -> Bool {
-        let isNew = state.withLock { state -> Bool in
-            guard !state.finished else { return false }
-            return state.seen.insert(printer.id).inserted
+        let output = state.withLock { state -> DiscoveredPrinter? in
+            guard !state.finished else { return nil }
+            return state.registry.insert(printer).printer
         }
-        if isNew { continuation.yield(printer) }
-        return isNew
+        if let output { continuation.yield(output) }
+        return output != nil
     }
 
     func finish() {

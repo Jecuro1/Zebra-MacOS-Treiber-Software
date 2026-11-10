@@ -250,6 +250,14 @@ enum Commands {
         if let hosts = context.arguments.value("hosts") {
             options.networkHosts = hosts.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         }
+        if let networks = context.arguments.value("networks") {
+            for entry in DiscoveryNetworks.splitList(networks) {
+                if case .failure = DiscoveryNetworks.parse(entry) {
+                    throw CLIError.usage("Netz „\(entry)“ nicht verstanden (z. B. 10.62.13.0/24, 10.62.13.1-10.62.13.254, 10.62.13.*).")
+                }
+                options.extraNetworks.append(DiscoveryNetworkEntry(entry, origin: .user))
+            }
+        }
         var sources = Set(DiscoverySource.allCases)
         if let raw = context.arguments.value("sources") {
             sources = []
@@ -267,7 +275,12 @@ enum Commands {
         var found: [DiscoveredPrinter] = []
         for await printer in PrinterDiscovery(options: options).discover(sources: sources, timeout: timeout) {
             try Task.checkCancellation()
-            found.append(printer)
+            // Ein späterer, genauer erkannter Fund desselben Geräts kommt mit derselben Kennung.
+            if let index = found.firstIndex(where: { $0.id == printer.id }) {
+                found[index] = printer
+            } else {
+                found.append(printer)
+            }
         }
         found.sort { ($0.name, $0.id) < ($1.name, $1.id) }
         if context.json {

@@ -9,8 +9,13 @@
       Administratorrechte (osascript „with administrator privileges“) – in der Sandbox unmöglich.
     • USB-Drucker werden direkt über IOKit (Bulk-Endpunkte) angesprochen, auch wenn sie keiner
       CUPS-Warteschlange zugeordnet sind.
-    • Netzwerkdrucker werden per Subnetz-Scan, SNMP und rohen TCP-Sockets (Port 9100) gefunden
-      und angesprochen; der virtuelle Demo-Drucker lauscht als TCP-Server.
+    • Netzwerkdrucker werden per Zebra-Suche (UDP 4201: Broadcast, Multicast 224.0.1.55 und
+      Einzelabfrage), Subnetz-Scan, SNMP und rohen TCP-Sockets (Port 9100) gefunden und
+      angesprochen; der virtuelle Demo-Drucker lauscht als TCP-Server.
+    • Kein „com.apple.developer.networking.multicast“: Diese verwaltete Berechtigung verlangt nur
+      iOS; unter macOS ist sie laut Apple TN3179 nicht nötig. Broadcast und Multicast ins lokale
+      Netz unterliegen ab macOS 15 der Freigabe „Lokales Netzwerk“ (NSLocalNetworkUsageDescription),
+      Ziele hinter VPN-Tunneln nicht.
   Die Geräte- und Netzwerkschlüssel unten wirken nur in der Sandbox; sie sind trotzdem gesetzt,
   damit die Absicht dokumentiert ist und ein späterer Sandbox-Build ohne Änderungen funktioniert.
   Ausnahmen der gehärteten Laufzeit (JIT, unsignierter Speicher, Bibliotheksprüfung aus …)

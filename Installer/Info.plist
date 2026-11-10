@@ -64,7 +64,7 @@
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>LabelWerk verwendet Bluetooth, um mobile Zebra-Etikettendrucker zu finden, ihren Status anzuzeigen und Etiketten an sie zu senden.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>LabelWerk sucht im lokalen Netzwerk nach Zebra-Etikettendruckern (Bonjour und Port 9100), zeigt ihren Status an und sendet Druckaufträge und Einstellungen.</string>
+	<string>LabelWerk sucht im lokalen Netzwerk nach Zebra-Etikettendruckern (Bonjour, Zebra-Suche über UDP 4201 und Port 9100), zeigt ihren Status an und sendet Druckaufträge und Einstellungen.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_pdl-datastream._tcp</string>

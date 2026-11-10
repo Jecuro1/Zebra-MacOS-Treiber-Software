@@ -17,8 +17,11 @@ struct NetworkPrinterInstallWizard: View {
 
     /// Wird beim Schließen aufgerufen (z. B. damit ein umgebendes Sheet sich mit schließt).
     private let onExit: ((PrinterSetupExit) -> Void)?
+    /// Adresse eines schon gefundenen Druckers (Seitenleiste „Im Netzwerk“ › Hinzufügen).
+    private let prefill: InstallWizardPrefill?
 
-    init(onExit: ((PrinterSetupExit) -> Void)? = nil) {
+    init(prefill: InstallWizardPrefill? = nil, onExit: ((PrinterSetupExit) -> Void)? = nil) {
+        self.prefill = prefill
         self.onExit = onExit
     }
 
@@ -42,7 +45,10 @@ struct NetworkPrinterInstallWizard: View {
         .background { AnimatedBackground(style: .subtle).ignoresSafeArea() }
         .environment(\.appReduceMotion, model.preferences.reduceMotion)
         .interactiveDismissDisabled(wizard.service.isRunning)
-        .onAppear { wizard.start(app: model) }
+        .onAppear {
+            wizard.start(app: model)
+            if let prefill { wizard.prefill(prefill) }
+        }
         .onDisappear { wizard.stop() }
     }
 

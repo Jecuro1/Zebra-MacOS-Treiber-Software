@@ -46,8 +46,11 @@ struct RootView: View {
             AddPrinterView()
                 .environment(model)
         }
-        .sheet(isPresented: $model.isInstallWizardPresented) {
-            NetworkPrinterInstallWizard()
+        .sheet(isPresented: $model.isInstallWizardPresented, onDismiss: {
+            // Die Vorbelegung („Im Netzwerk“ › Hinzufügen) gilt nur für dieses eine Öffnen.
+            model.installWizardPrefill = nil
+        }) {
+            NetworkPrinterInstallWizard(prefill: model.installWizardPrefill)
                 .environment(model)
         }
         .preferredColorScheme(colorScheme(for: model.preferences.appearance))

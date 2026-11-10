@@ -399,7 +399,9 @@ PostScript-Drucker“.
 ### In der App (empfohlen)
 
 1. LabelWerk öffnen. Beim ersten Start sucht der Einrichtungsassistent gleichzeitig per Bonjour,
-   USB, Netzwerk-Scan, in den vorhandenen macOS-Warteschlangen und – nach Freigabe – per Bluetooth.
+   Zebra-Suche, USB, Netzwerk-Scan, in den vorhandenen macOS-Warteschlangen und – nach Freigabe – per
+   Bluetooth (wie das funktioniert und wie Drucker in anderen Netzen gefunden werden:
+   [Drucker im Netzwerk finden](#drucker-im-netzwerk-finden)).
    Später geht das jederzeit mit **Ablage › Drucker hinzufügen …** (⇧⌘N); **Ablage ›
    Demo-Drucker hinzufügen** legt einen simulierten ZD421t zum Ausprobieren an.
 2. Den gefundenen Drucker mit **„Hinzufügen“** übernehmen. Modell, Auflösung und Druckersprache
@@ -426,6 +428,76 @@ vorhandene macOS-Warteschlange als Drucker in LabelWerk übernehmen; über sie k
 allerdings nur senden und keine Antworten lesen. Status, Dateien, Netzwerk, Sicherung & Wartung,
 RFID und Firmware-Updates benötigen deshalb eine direkte Verbindung (USB, Netzwerk oder
 Bluetooth).
+
+### Drucker im Netzwerk finden
+
+Wie die Zebra-Programme unter Windows (Zebra Setup Utilities, ZebraNet Bridge) zeigt LabelWerk die
+Zebra-Drucker im Netzwerk von selbst an – ohne IP-Adressen eintippen zu müssen.
+
+**Automatisch.** 5 Sekunden nach dem Start sucht LabelWerk vollständig (Zebra-Suche, Bonjour,
+Netzwerk-Scan), danach alle 10 Minuten im Hintergrund mit der Zebra-Suche, und erneut vollständig,
+wenn man nach mehr als 10 Minuten zur App zurückkehrt. Gefundene Zebra-Drucker, die noch nicht
+eingerichtet sind, erscheinen in der Seitenleiste unter **„Im Netzwerk“** mit Name, Modell und
+IP-Adresse. **„Hinzufügen“** öffnet den Installationsassistenten mit diesem Drucker (Modell und Name
+aus der Suche – auch hinter einem VPN, das SNMP sperrt, gilt er damit als Zebra-Drucker); das Kontextmenü
+bietet außerdem **„Nur in LabelWerk hinzufügen“**, **„In „Drucker suchen“ anzeigen“** und
+**„Adresse kopieren“**. Ein Drucker, der schon eingerichtet ist – auch nur über seine
+macOS-Warteschlange (z. B. „10.62.13.19“ aus „Drucker & Scanner“) –, erscheint dort nicht.
+Drucker, die nur der Netzwerk-Scan (Port 9100) gefunden hat – etwa weil VPN oder Firewall die
+Zebra-Suche sperren –, prüft die Suche im Hintergrund einzeln nach, damit sie nicht aus der Liste
+verschwinden.
+Abschalten: **Einstellungen › Allgemein › Druckersuche** bzw. im Editor **„Netze …“**.
+
+**So sucht LabelWerk:**
+
+* **Zebra-Suche** (wie unter Windows): eine kurze Anfrage an UDP-Port 4201, auf die nur
+  Zebra-Druckserver antworten – mit Modell, Firmware, Seriennummer des Druckservers, MAC-Adresse und
+  Systemnamen. Sie
+  geht als Broadcast und Multicast (224.0.1.55) ins eigene Netz und **einzeln an jede Adresse** der
+  übrigen Netze (siehe unten). Fremde Geräte erhalten nur dieses UDP-Paket und drucken nichts.
+* **Netzwerk-Scan:** Port 9100 an denselben Adressen; erkannt wird per SNMP. Geräte, die sich nicht als
+  Zebra-Drucker zu erkennen geben, erscheinen in „Drucker suchen“ gesondert mit Warnung.
+* **Bonjour**, **USB**, **macOS-Warteschlangen** und **Bluetooth** wie bisher in „Drucker suchen“.
+
+**Welche Netze?** Der Schalter **„Netze …“** in „Drucker suchen“ zeigt die Netze der Suche und wie
+viele Adressen jeweils geprüft werden:
+
+* das eigene Netz (WLAN bzw. Ethernet),
+* das Netz eines VPN-Tunnels (z. B. FortiClient), wenn er eine private Adresse hat (10.x, 172.16–31.x,
+  192.168.x),
+* das Netz (/24) jedes Druckers, den LabelWerk oder macOS schon kennt – auch eines Druckers, der nur
+  als macOS-Warteschlange eingerichtet ist (`socket://`, `ipp://`, `lpd://…/Warteschlange`) oder unter
+  einem Hostnamen (der dafür aufgelöst wird). Das gilt für private Adressen (10.x, 172.16–31.x,
+  192.168.x); von einem Drucker mit öffentlicher Adresse wird nur diese eine Adresse geprüft, nie ein
+  fremdes Netz,
+* **eigene Netze**, die man dort einträgt.
+
+**Drucker hinter VPN oder Router.** Ist der Mac per VPN (z. B. FortiClient) mit dem Firmennetz
+verbunden, liegen die Drucker in einem anderen Netz als der Mac: Broadcast und Multicast kommen dort
+nicht an – deshalb fand die Suche bisher nur Drucker, die man per IP-Adresse hinzugefügt hatte. Jetzt
+gilt:
+
+1. Ist schon **ein** Drucker dieses Netzes eingerichtet (z. B. 10.62.13.19), durchsucht LabelWerk
+   dessen ganzes Netz 10.62.13.0/24 automatisch und zeigt alle weiteren Zebra-Drucker darin an.
+2. Sonst in **„Drucker suchen“ › „Netze …“** das Netz eintragen und **„Hinzufügen“** wählen. Das
+   Eingabefeld ist mit dem Netz eines bekannten Druckers vorbelegt. Verstanden werden z. B.
+   `10.62.13.0/24`, `10.62.13.19/24`, `10.62.13.0/255.255.255.0`, `10.62.13.1-10.62.13.254`,
+   `10.62.13.37-42`, `10.62.13.*` und einzelne Adressen; mehrere Angaben mit Komma trennen. Je
+   Eintrag werden höchstens **4096 Adressen** durchsucht (z. B. ein /20); bei größeren Netzen zeigt
+   LabelWerk den Hinweis „Großes Netz: Nur die ersten 4096 Adressen werden durchsucht.“
+3. **„Jetzt suchen“** – neue Netze durchsucht LabelWerk sofort mit der Zebra-Suche.
+
+Die Netzwerk-IT muss UDP 4201 (Zebra-Suche) bzw. TCP 9100 (Netzwerk-Scan, Drucken) und UDP 161 (SNMP)
+vom VPN zum Druckernetz durchlassen. Im Terminal geht dasselbe mit
+`lwctl discover --sources zebra,network --networks 10.62.13.0/24`.
+
+**Berechtigung „Lokales Netzwerk“ (macOS 15 und neuer).** Für Suchen im eigenen Netz fragt macOS
+einmal nach der Freigabe; sie steht unter **Systemeinstellungen › Datenschutz & Sicherheit › Lokales
+Netzwerk** und muss für LabelWerk eingeschaltet sein. Netze hinter einem VPN-Tunnel gelten laut Apple
+nicht als lokales Netz und sind davon nicht betroffen. Eine eigene Multicast-Berechtigung braucht
+LabelWerk unter macOS nicht (sie gibt es nur für iOS). Bei selbst gebauten, ad hoc signierten Versionen
+merkt sich macOS die Freigabe nicht zuverlässig über neue Builds hinweg – dann fragt macOS erneut,
+oder die Freigabe muss in den Systemeinstellungen wieder eingeschaltet werden.
 
 ### In den macOS-Systemeinstellungen
 
@@ -877,7 +949,9 @@ Vorschau; `lwctl render etikett.zpl -o vorschau.png` wandelt ZPL in ein PNG um, 
 
 * **Netzwerk:** Mac und Drucker im selben Netz? Port 9100 erreichbar (`nc -vz 192.168.1.50 9100`)?
   LabelWerk benötigt die Freigabe unter **Systemeinstellungen › Datenschutz & Sicherheit › Lokales
-  Netzwerk**.
+  Netzwerk**. Drucker in einem anderen Netz (VPN, Router dazwischen): das Netz unter **„Drucker
+  suchen“ › „Netze …“** eintragen, siehe [Drucker im Netzwerk finden](#drucker-im-netzwerk-finden);
+  Test im Terminal: `lwctl discover --sources zebra --networks 10.62.13.0/24`.
 * **USB:** Kabel direkt (ohne Hub) anschließen; `system_profiler SPUSBDataType | grep -A6 -i zebra`
   bzw. `lpinfo -v` zeigt, ob macOS das Gerät sieht. Meldet die App beim Einrichten der
   Warteschlange, dass sich ein USB-Drucker keinem Gerät eindeutig zuordnen lässt, sind mehrere

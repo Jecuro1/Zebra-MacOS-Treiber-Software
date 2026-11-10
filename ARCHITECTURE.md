@@ -674,7 +674,7 @@ public enum ConnectionFactory {
     public static func registerVirtualFactory(_ factory: @escaping @Sendable (String) -> any PrinterConnection)
 }
 
-public enum DiscoverySource: String, Codable, Sendable, CaseIterable { case bonjour, usb, network, cups, bluetooth, ble }
+public enum DiscoverySource: String, Codable, Sendable, CaseIterable { case bonjour, zebra, usb, network, cups, bluetooth, ble }
 public struct DiscoveredPrinter: Identifiable, Hashable, Codable, Sendable {
     public var id: String                    // stabil, aus dem Deskriptor abgeleitet
     public var name: String
@@ -685,15 +685,50 @@ public struct DiscoveredPrinter: Identifiable, Hashable, Codable, Sendable {
 }
 public final class PrinterDiscovery: Sendable {
     public init()
-    /// Liefert gefundene Drucker (dedupliziert nach `id`) und endet nach `timeout`.
+    public init(options: Options)            // u. a. extraNetworks, includePrivateVPNNetworks, zebra…-Optionen
+    /// Liefert gefundene Drucker (zusammengeführt, siehe DiscoveryRegistry) und endet nach `timeout`.
+    /// Ein genauer erkannter späterer Fund desselben Geräts kommt mit derselben `id` erneut.
     public func discover(sources: Set<DiscoverySource> = Set(DiscoverySource.allCases),
                          timeout: Duration = .seconds(6)) -> AsyncStream<DiscoveredPrinter>
+    public static func plan(options: Options, interfaces: [NetworkInterfaceInfo] = SubnetScanner.allIPv4Interfaces()) -> DiscoveryPlan
 }
-public struct NetworkInterfaceInfo: Hashable, Sendable { public var name: String; public var address: String; public var netmask: String }
+public struct NetworkInterfaceInfo: Hashable, Sendable {
+    public var name: String, address: String, netmask: String
+    public var isPointToPoint: Bool, supportsMulticast: Bool   // VPN-Tunnel (utun/ppp), IFF_MULTICAST
+    public var broadcastAddress: String?                       // nil bei Punkt-zu-Punkt, /31, /32
+}
 public enum SubnetScanner {
-    public static func localIPv4Interfaces() -> [NetworkInterfaceInfo]   // getifaddrs, ohne Loopback
+    public static func localIPv4Interfaces() -> [NetworkInterfaceInfo]   // getifaddrs, ohne Loopback und VPN-Tunnel
+    public static func allIPv4Interfaces() -> [NetworkInterfaceInfo]     // getifaddrs, ohne Loopback, mit VPN-Tunneln
     public static func hosts(in iface: NetworkInterfaceInfo, limit: Int = 1024) -> [String]
     public static func scan(hosts: [String], port: Int = 9100, timeout: Duration = .milliseconds(400), maxConcurrent: Int = 64) -> AsyncStream<String>
+}
+public enum ZebraDiscoveryPacket {                       // Zebra-Suche (UDP 4201), reine Paketlogik
+    public static let port = 4201, multicastGroup = "224.0.1.55", defaultMulticastHops = 3
+    public static let request: [UInt8]                   // 2E 2C 3A 01 00 00
+    public struct Reply: Hashable, Sendable, Codable { productName, firmware, macAddress, serialNumber, ipAddress, systemName … }
+    public static func parse(_ bytes: [UInt8]) -> Reply?
+    public static func encode(_ reply: Reply, length: Int = 376) -> [UInt8]
+    public static func makeDiscoveredPrinter(_ reply: Reply, host: String, port: Int = 9100) -> DiscoveredPrinter
+}
+public struct IPv4Range: Hashable, Sendable, Comparable { first, last; hostCount; hosts(limit:); broadcastAddress; description }
+public struct DiscoveryNetworkEntry: Hashable, Sendable, Codable { text; origin: .local/.vpn/.knownPrinter/.user; label }
+public struct DiscoveryPlan: Hashable, Sendable {      // was Netzwerk-Scan und Zebra-Suche durchsuchen
+    public var networks: [DiscoveryNetwork], invalidEntries: [DiscoveryNetworkInvalidEntry]
+    public var hosts: [String], remoteHosts: [String], broadcastTargets: [String]
+    public func estimatedScanDuration(…) -> Duration
+    public static func make(interfaces:entries:includePrivateVPNNetworks:localHostLimit:maxHostsPerEntry:) -> DiscoveryPlan
+}
+public enum DiscoveryNetworks {
+    public static let maxHostsPerEntry = 4096
+    public static func parse(_ text: String) -> Result<IPv4Range, DiscoveryNetworkError>
+    public static func knownPrinterNetworks(_ hosts: [(host: String, label: String?)], resolved: [String: String] = [:]) -> [DiscoveryNetworkEntry]
+    public static func host(ofDeviceURI uri: String) -> String?          // jedes Netzwerkschema, beliebiger Pfad
+    public static func resolveHostnames(_ hosts: [String], resolver: IPv4Resolver? = nil) async -> [String: String]
+    public static func isPrivate(_ address: UInt32) -> Bool
+}
+public struct DiscoveryRegistry: Sendable {            // Zusammenführen nach id, Seriennummer, Druckserver-Seriennr., MAC, Adresse
+    public mutating func insert(_ printer: DiscoveredPrinter) -> Outcome   // .added / .updated / .duplicate
 }
 public struct CUPSQueueInfo: Hashable, Sendable, Codable { public var name: String; public var deviceURI: String; public var isDefault: Bool; public var makeAndModel: String? }
 public enum CUPSQueueLister {
@@ -702,6 +737,128 @@ public enum CUPSQueueLister {
     public static func modelHint(fromDeviceURI uri: String) -> String?  // usb://Zebra%20Technologies/ZTC%20ZD421-203dpi%20ZPL?serial=… → "ZTC ZD421-203dpi ZPL"
 }
 ```
+
+### Druckersuche im Netzwerk (Zebra-Suche, Netze, automatische Suche)
+
+Ziel: wie die Zebra-Programme unter Windows (Zebra Setup Utilities, ZebraNet Bridge, Link-OS-SDK
+`NetworkDiscoverer`) **alle** Zebra-Drucker des Netzes von selbst anzeigen – auch, wenn der Mac per VPN
+(FortiClient & Co.) oder über einen Router mit dem Druckernetz verbunden ist.
+
+**Zebra-Suche (`DiscoverySource.zebra`, `ZebraUDPDiscovery`, Paketformat `ZebraDiscoveryPacket`).**
+Ein UDP-Socket (beliebiger lokaler Port, `SO_BROADCAST`, `IP_MULTICAST_TTL` = 3) sendet die sechs
+Bytes `2E 2C 3A 01 00 00` an Port 4201
+
+* als Broadcast an 255.255.255.255 und an die Directed-Broadcast-Adresse jedes Netzes des Suchplans
+  (macOS sendet 255.255.255.255 nur über die Schnittstelle der Standardroute),
+* an die Multicast-Gruppe 224.0.1.55 über jede multicastfähige Schnittstelle (`IP_MULTICAST_IF`),
+* **einzeln an jede Adresse der entfernten Netze** (VPN, Netze bekannter Drucker, eigene Netze) – wie
+  Link-OS `subnetSearch` („10.62.13.*“). Broadcast und Multicast enden am Router bzw. VPN-Tunnel; die
+  Einzelabfrage erreicht die Drucker trotzdem.
+
+Zwei Runden (800 ms Abstand), danach 2,5 s Wartezeit; Antworten werden je Absender einmal gemeldet.
+Jeder Zebra-Druckserver antwortet von Port 4201 an den Absender mit einem Paket fester Länge (376 Byte):
+
+| Offset | Länge | Inhalt |
+|---:|---:|---|
+| 0 | 3 | Kennung `3A 2C 2E` („:,.“) |
+| 3 | 1 | Paketversion (3) |
+| 4 | 8 | Produktnummer |
+| 12 | 20 | Produktname, auf 20 Zeichen gekürzt („ZTC ZD620-300dpi ZPL“; externer Druckserver: „ZebraNet Wired PS“) |
+| 32 | 7 | Datumscode |
+| 39 | 10 | Firmware („V84.20.23Z“) |
+| 49 | 5 | Firmenkürzel („ZBR“) |
+| 54 | 6 | MAC-Adresse |
+| 60 | 10 | Seriennummer des Druckservers |
+| 70 | 2 | unbekannt (immer `01 00`) |
+| 72 / 76 / 80 | je 4 | IP-Adresse / Subnetzmaske / Gateway |
+| 84 | 25 | Systemname („ZEBRA-ZD620“, „ZBR4262077“) |
+
+Texte enden am ersten NUL; nicht druckbare Felder gelten als leer. Adresse des Druckers ist der
+**Absender** des Pakets (hinter NAT/VPN kann die gemeldete abweichen → `details["reportedAddress"]`).
+Fehlen Produkt- und Systemname (abweichender Aufbau älterer Druckserver), identifiziert die Suche das
+Gerät per SNMP bzw. `~HI` – gefahrlos, denn nur Zebra-Druckserver beantworten die Anfrage.
+Ergebnis: `.tcp(host, 9100)`, `source = .zebra`, `details["identifiedBy"] = "zebra"`, außerdem
+`name` (Systemname), `productName`/`printServer`, `firmware`, `printServerSerial` (Seriennummer des
+**Druckservers** – nicht unbedingt die des Druckers, daher nie unter `serialNumber`), `macAddress`,
+`subnetMask`, `gateway`.
+
+Quellen (abgerufen 2026-11-10, drei unabhängige Beschreibungen mit denselben Offsets, zwei an echter
+Hardware gemessen; Testdaten in `Tests/LabelWerkTransportTests/ZebraDiscoveryTests.swift`):
+J. Runyon, „Zebra network discovery protocol“ (Mitschnitt eines ZebraNet-Druckservers,
+<https://jfr.im/blog/2024/09/zebra-network-discovery-protocol/>); Zebra Print Service für Android
+(Multicast 224.0.1.55:4201, Feldoffsets; <https://github.com/Thunderlight-Software/Zebra-Print-Service>,
+`AddActivity.java`, `NetworkDevice.java`); monochrome-unicorn, Messung an ZD620 und ZD500R
+(<https://github.com/TylerWhittaker/monochrome-unicorn>, `docs/printer-notes.md`); Port 4201 laut Zebra
+ZDownloader User Guide und Zebra Print System Requirements (docs.zebra.com); Suchverfahren und
+Bereichsangaben laut Link-OS-SDK `NetworkDiscoverer` (techdocs.zebra.com/link-os).
+
+**Suchplan (`DiscoveryPlan`, `PrinterDiscovery.Options.extraNetworks`).** Durchsucht werden
+1. die lokalen Subnetze (wie bisher bis 1024 Adressen um die eigene Adresse; Broadcast),
+2. das /24 jedes VPN-Tunnels (Punkt-zu-Punkt-Schnittstelle) mit **privater** Adresse (RFC 1918) –
+   öffentliche Tunneladressen nie (`includePrivateVPNNetworks`),
+3. eigene Netze (`AppPreferences.extraDiscoveryNetworks`, `lwctl discover --networks`),
+4. das /24 jedes bekannten Druckers: Adressen der eingerichteten Drucker (`.tcp`, gemeldete IP),
+   Geräte-URIs ihrer macOS-Warteschlangen (eigene, übernommene, `.cupsQueue`) und aller
+   Zebra-Warteschlangen in macOS (`DiscoveryNetworks.knownPrinterNetworks`, `host(ofDeviceURI:)`:
+   jedes Netzwerkschema mit beliebigem Pfad, z. B. `lpd://10.62.13.19/PRT`,
+   `ipp://host:631/printers/x` – nur der Host zählt; Loopback, USB, `dnssd://` nicht). Hostnamen löst
+   die App vorher auf (`DiscoveryNetworks.resolveHostnames`, `getaddrinfo` `AF_INET` außerhalb des
+   Main-Threads, je Name höchstens 2 s). Nur **private** Adressen (RFC 1918) bringen ihr /24 ein; von
+   einer öffentlichen Adresse (Portweiterleitung, Druckserver in der Cloud) wird nur diese Adresse
+   selbst geprüft – LabelWerk durchsucht nie von selbst ein fremdes öffentliches Netz.
+
+Netze, deren Adressen ein früheres Netz schon abdeckt, werden zusammengefasst (Herkünfte und
+Bezeichnungen kommen hinzu). Angaben (`DiscoveryNetworks.parse`, nachsichtig: Leerzeichen,
+Gedankenstriche): CIDR „10.62.13.0/24“ (auch „10.62.13.19/24“, „/255.255.255.0“), Bereiche
+„10.62.13.1-10.62.13.254“, „10.62.13.37-42“, „10.62.13.8-*“, Platzhalter „10.62.13.*“, „10.62.*“, drei
+Oktette bzw. „.0“ (= /24), einzelne Adressen. Abgelehnt: Loopback, 0/8, Multicast/reserviert (ab 224),
+verkehrte Bereiche, ungültige Präfixe. Je Eintrag höchstens **4096 Adressen**
+(`DiscoveryNetworks.maxHostsPerEntry`); größere Netze werden auf die ersten 4096 begrenzt und in der
+App gekennzeichnet („Großes Netz: Nur die ersten 4096 Adressen werden durchsucht.“). Der
+Netzwerk-Scan (Port 9100) prüft dieselben Adressen, für Adressen außerhalb der lokalen Netze mit
+längerer Frist (`remoteConnectTimeout`, 900 ms); identifiziert wird wie bisher per SNMP und `~HI` nur
+bei positiver Zebra-Erkennung, nicht identifizierte Geräte erscheinen gesondert mit Warnung.
+
+**Zusammenführen (`DiscoveryRegistry`).** Gleiche `id`, dann gleiche Seriennummer des Druckers
+(`serialNumber`), dann gleiche Seriennummer des Druckservers (`printServerSerial`), dann gleiche
+MAC-Adresse (`macAddress`, normalisiert), dann (Netzwerk) gleiche Adresse ergeben einen Drucker; die
+Nummernarten werden nie miteinander verglichen. Rangfolge der Erkennung: Zebra-Suche (3) > SNMP/`~HI`, Bonjour,
+USB, CUPS, Bluetooth (2) > offener Port ohne Identifikation (1). Ein besserer späterer Fund ergänzt den
+Eintrag (Kennung und Verbindung bleiben; allgemeine Namen wie „Zebra ZD421“ weichen keinem eigenen);
+`PrinterDiscovery.discover` liefert ihn mit derselben `id` erneut, Verbraucher ersetzen ihn.
+
+**Automatische Suche (App, `Services/NetworkDiscoveryService.swift`, `model.networkDiscovery`).**
+5 s nach dem Start vollständig (Zebra-Suche, Bonjour, Netzwerk-Scan), danach alle 10 Minuten im
+Hintergrund nur die Zebra-Suche (plus eine Einzelprüfung per Port 9100/SNMP/`~HI` der noch
+sichtbaren Drucker, die diesmal nicht per UDP geantwortet haben, höchstens 64 Adressen – sonst fielen
+nur per Netzwerk-Scan gefundene Drucker nach 35 Minuten aus der Liste); beim Aktivieren der App wieder vollständig, wenn die letzte
+vollständige Suche älter als 10 Minuten ist; „Erneut suchen“ jederzeit. Abschaltbar:
+`AppPreferences.automaticNetworkDiscovery` (Einstellungen › Allgemein › Druckersuche, Editor
+„Netze …“). Ergebnisse fließen in „Drucker suchen“ (zusätzlich zu den Treffern der Seite) und – noch
+nicht eingerichtete, als Zebra erkannte Netzwerkdrucker, die in den letzten 35 Minuten geantwortet
+haben – in die Seitenleiste **„Im Netzwerk“**. „Schon eingerichtet“ heißt: gleiche Verbindung, gleiche
+Adresse, gleiche MAC- bzw. gemeldete IP-Adresse oder eine macOS-Warteschlange des Druckers mit dieser
+Adresse (Hostnamen auch über ihre aufgelöste Adresse). „Hinzufügen“ öffnet den Installationsassistenten
+mit dem Fund selbst (`AppModel.openInstallWizard(for:)`, `InstallWizardPrefill.printer`): Der
+Assistent übernimmt ihn als Suchtreffer (`DiscoveryController.inject(_:)`, übersteht neue Suchläufe,
+ein schwächerer Fund desselben Geräts verdrängt ihn nicht) und wählt ihn aus – die Erkennung beginnt
+mit den Angaben der Zebra-Suche (`zebraCheck = .confirmed`, Modell, Systemname), auch wenn SNMP hinter
+dem VPN gesperrt ist. Der Hinweis „liegt nicht im Netz dieses Macs“ entfällt für Adressen in einem
+Netz des Suchplans.
+
+„Drucker suchen“ startet seine Suche erst, wenn die Optionen bereitstehen (macOS-Warteschlangen,
+Hostnamen); erneutes Suchen, „Suche stoppen“ und das Schließen der Ansicht brechen einen solchen noch
+wartenden Start ab.
+
+**Berechtigungen (macOS).** Ab macOS 15 brauchen Broadcast, Multicast und Unicast ins **lokale** Netz
+die Freigabe „Lokales Netzwerk“ (`NSLocalNetworkUsageDescription`, nennt UDP 4201). Laut Apple
+TN3179 gelten Ziele hinter VPN-Tunneln nicht als lokales Netz, und die Berechtigung
+`com.apple.developer.networking.multicast` ist **nur unter iOS** nötig („The multicast entitlement isn’t
+required on macOS“) – sie wird nicht gesetzt (für Ad-hoc-Builds wäre sie ohnehin nicht erhältlich).
+Ad-hoc signierte Builds: Die Freigabe hängt an der Code-Signatur und kann nach jedem neuen Build erneut
+abgefragt werden bzw. verloren gehen (TN3179 „Build-time considerations“); wird Multicast oder Broadcast
+verweigert, bleiben die Einzelabfragen der entfernten Netze (VPN) unberührt. Quelle:
+<https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy>.
 
 ## 7b. LabelWerkKit
 
@@ -1446,6 +1603,9 @@ Der Filter verarbeitet alle Rasterformate robust (1/8/16 Bit, W/SW/K/RGB → Lum
   (Übersicht, Einstellungen, Etiketten, Werkzeuge, Terminal, Designer, Dateien & Schriften,
   Netzwerk, Firmware, Verlauf, Treiber).
 * Menüleisten-Extra mit Live-Status, Benachrichtigungen bei Fehlern.
+* Druckersuche im Netzwerk: `NetworkDiscoveryService` (`Services/`, `model.networkDiscovery`) sucht
+  automatisch (Start + alle 10 Minuten) und füllt die Seitenleiste „Im Netzwerk“; Editor „Netze …“
+  in `Features/Discovery/DiscoveryNetworksSheet.swift` (§7a „Druckersuche im Netzwerk“).
 * Update-Dienst: `UpdateController` (`Services/`, Oberfläche in `Features/Updates/`) auf dem Kern
   `LabelWerkKit/Update` – sucht, lädt und installiert Releases des Repositorys aus
   `LWUpdateRepository` (Info.plist); Ablauf in `docs/DEVELOPMENT.md` („Release und Updates“).

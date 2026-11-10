@@ -10,11 +10,26 @@ public struct NetworkInterfaceInfo: Hashable, Sendable {
     public var name: String
     public var address: String
     public var netmask: String
+    /// Punkt-zu-Punkt-Verbindung (VPN-Tunnel wie `utun`/`ppp`): kein Broadcast, Netzmaske oft /32.
+    public var isPointToPoint: Bool
+    /// Die Schnittstelle kann Multicast senden (`IFF_MULTICAST`).
+    public var supportsMulticast: Bool
 
-    public init(name: String, address: String, netmask: String) {
+    public init(name: String, address: String, netmask: String, isPointToPoint: Bool = false, supportsMulticast: Bool = true) {
         self.name = name
         self.address = address
         self.netmask = netmask
+        self.isPointToPoint = isPointToPoint
+        self.supportsMulticast = supportsMulticast
+    }
+
+    /// Directed-Broadcast-Adresse des Netzes („192.168.1.255“); `nil` bei Punkt-zu-Punkt-Verbindungen
+    /// und Netzen ohne Broadcast (/31, /32).
+    public var broadcastAddress: String? {
+        guard !isPointToPoint, let address = SubnetScanner.parseIPv4(address),
+              let mask = SubnetScanner.parseIPv4(netmask), let prefix = prefixLength, prefix <= 30
+        else { return nil }
+        return SubnetScanner.formatIPv4(address | ~mask)
     }
 
     /// Präfixlänge der Netzmaske (z. B. 24), `nil` bei ungültiger Maske.
@@ -36,6 +51,12 @@ public struct NetworkInterfaceInfo: Hashable, Sendable {
 public enum SubnetScanner {
     /// Aktive IPv4-Schnittstellen (`getifaddrs`), ohne Loopback und Punkt-zu-Punkt-Verbindungen (VPN).
     public static func localIPv4Interfaces() -> [NetworkInterfaceInfo] {
+        allIPv4Interfaces().filter { !$0.isPointToPoint }
+    }
+
+    /// Aktive IPv4-Schnittstellen (`getifaddrs`) ohne Loopback, **einschließlich** Punkt-zu-Punkt-
+    /// Verbindungen (VPN-Tunnel wie FortiClient `utun`, `ppp`), gekennzeichnet über `isPointToPoint`.
+    public static func allIPv4Interfaces() -> [NetworkInterfaceInfo] {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0, let first = list else { return [] }
         defer { freeifaddrs(list) }
@@ -49,17 +70,20 @@ public enum SubnetScanner {
             guard flags & Int(IFF_UP) != 0,
                   flags & Int(IFF_RUNNING) != 0,
                   flags & Int(IFF_LOOPBACK) == 0,
-                  flags & Int(IFF_POINTOPOINT) == 0,
                   let address = info.ifa_addr,
-                  Int32(address.pointee.sa_family) == AF_INET,
-                  let netmask = info.ifa_netmask
+                  Int32(address.pointee.sa_family) == AF_INET
             else { continue }
             let addressValue = ipv4Value(address)
-            let maskValue = ipv4Value(netmask)
+            // Tunnel melden teils keine Netzmaske: dann als einzelne Adresse (/32) behandeln.
+            let maskValue = info.ifa_netmask.map { ipv4Value($0) } ?? UInt32.max
             // Link-Local (169.254/16) und unspezifizierte Adressen überspringen.
             guard addressValue != 0, addressValue & 0xFFFF_0000 != 0xA9FE_0000 else { continue }
             let name = String(cString: info.ifa_name)
-            let item = NetworkInterfaceInfo(name: name, address: formatIPv4(addressValue), netmask: formatIPv4(maskValue))
+            let item = NetworkInterfaceInfo(
+                name: name, address: formatIPv4(addressValue), netmask: formatIPv4(maskValue),
+                isPointToPoint: flags & Int(IFF_POINTOPOINT) != 0,
+                supportsMulticast: flags & Int(IFF_MULTICAST) != 0
+            )
             if !result.contains(item) { result.append(item) }
         }
         return result

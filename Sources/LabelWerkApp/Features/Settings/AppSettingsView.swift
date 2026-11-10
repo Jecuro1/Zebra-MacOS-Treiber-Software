@@ -60,6 +60,13 @@ private struct GeneralSettings: View {
                 }
                 Toggle(tr("Demo-Drucker anbieten"), isOn: $model.preferences.showDemoPrinter)
             }
+            Section(tr("Druckersuche")) {
+                Toggle(tr("Drucker im Netzwerk automatisch suchen"), isOn: $model.preferences.automaticNetworkDiscovery)
+                Text(tr("5 Sekunden nach dem Start und danach alle 10 Minuten (Zebra-Suche über UDP 4201). Gefundene Drucker erscheinen in der Seitenleiste unter „Im Netzwerk“; weitere Netze, z. B. hinter einem VPN, unter „Drucker suchen“ › „Netze …“."))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Section(tr("Benachrichtigungen")) {
                 Toggle(tr("Mitteilungen bei Druckerfehlern"), isOn: $model.preferences.notificationsEnabled)
                 Toggle(tr("Töne abspielen"), isOn: $model.preferences.playSounds)

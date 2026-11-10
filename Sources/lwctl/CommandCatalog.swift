@@ -98,18 +98,22 @@ enum CommandCatalog {
 
     static let commands: [CommandSpec] = [
         CommandSpec(
-            name: "discover", usage: "discover [--hosts <liste>] [--sources <liste>] [--json]",
+            name: "discover", usage: "discover [--hosts <liste>] [--networks <liste>] [--sources <liste>] [--json]",
             summary: "Drucker im Netzwerk, per USB, Bluetooth und CUPS suchen",
             details: """
-            Sucht Zebra-Drucker über Bonjour, Netzwerkscan (Port 9100), USB, Bluetooth und CUPS und
-            listet sie mit der passenden Drucker-URI für --printer auf. Die Suchdauer bestimmt --timeout.
+            Sucht Zebra-Drucker über Bonjour, die Zebra-Suche (UDP 4201, wie die Zebra-Programme unter
+            Windows), Netzwerkscan (Port 9100), USB, Bluetooth und CUPS und listet sie mit der passenden
+            Drucker-URI für --printer auf. Durchsucht werden die lokalen Netze, private VPN-Netze und die
+            mit --networks angegebenen Netze (je höchstens 4096 Adressen). Die Suchdauer bestimmt --timeout.
             """,
             options: [
                 OptionSpec("hosts", value: "liste", "Nur diese Adressen prüfen (kommagetrennt) statt das lokale Netz zu durchsuchen"),
-                OptionSpec("sources", value: "liste", "Quellen: bonjour,network,usb,cups,bluetooth,ble (Standard: alle)"),
+                OptionSpec("networks", value: "liste", "Zusätzliche Netze, z. B. 10.62.13.0/24, 10.62.13.1-10.62.13.254 oder 10.62.13.* (kommagetrennt)"),
+                OptionSpec("sources", value: "liste", "Quellen: bonjour,zebra,network,usb,cups,bluetooth,ble (Standard: alle)"),
             ],
             needsPrinter: false, minimumArguments: 0, maximumArguments: 0,
-            examples: ["lwctl discover", "lwctl discover --hosts 192.168.1.20,192.168.1.21 --json"]),
+            examples: ["lwctl discover", "lwctl discover --hosts 192.168.1.20,192.168.1.21 --json",
+                       "lwctl discover --sources zebra,network --networks 10.62.13.0/24"]),
         CommandSpec(
             name: "install",
             usage: "install --printer tcp://HOST[:PORT] [--model auto|<id>|generic] [--name NAME] [optionen]",

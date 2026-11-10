@@ -10,7 +10,7 @@
 "NSBluetoothAlwaysUsageDescription" = "LabelWerk verwendet Bluetooth, um mobile Zebra-Etikettendrucker zu finden, ihren Status anzuzeigen und Etiketten an sie zu senden.";
 
 /* Systemabfrage beim ersten Zugriff auf das lokale Netzwerk */
-"NSLocalNetworkUsageDescription" = "LabelWerk sucht im lokalen Netzwerk nach Zebra-Etikettendruckern (Bonjour und Port 9100), zeigt ihren Status an und sendet Druckaufträge und Einstellungen.";
+"NSLocalNetworkUsageDescription" = "LabelWerk sucht im lokalen Netzwerk nach Zebra-Etikettendruckern (Bonjour, Zebra-Suche über UDP 4201 und Port 9100), zeigt ihren Status an und sendet Druckaufträge und Einstellungen.";
 
 /* Copyright-Hinweis im Informationsfenster */
 "NSHumanReadableCopyright" = "© @COPYRIGHT_YEAR@ LabelWerk. Zebra ist eine Marke der Zebra Technologies Corp.; LabelWerk ist ein unabhängiges Projekt.";

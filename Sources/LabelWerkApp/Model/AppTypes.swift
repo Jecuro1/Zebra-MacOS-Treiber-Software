@@ -207,6 +207,12 @@ struct AppPreferences: Codable, Equatable {
     var autoDownloadUpdates: Bool = true
     /// Mit „Diese Version überspringen“ ausgeblendetes Update (Release-Tag, z. B. „v1.1.0-b58“).
     var skippedUpdateTag: String? = nil
+    /// Drucker im Netzwerk automatisch suchen (5 s nach dem Start, danach alle 10 Minuten die
+    /// Zebra-Suche; `NetworkDiscoveryService`).
+    var automaticNetworkDiscovery: Bool = true
+    /// Eigene Netze für die Druckersuche zusätzlich zu den lokalen Subnetzen und den Netzen bekannter
+    /// Drucker, z. B. „10.62.13.0/24“ oder „10.62.13.1-10.62.13.254“ (`DiscoveryNetworks.parse`).
+    var extraDiscoveryNetworks: [String] = []
 }
 
 // MARK: - Persistenter Gesamtzustand
@@ -251,6 +257,26 @@ extension AppPreferences {
         autoCheckUpdates = c.value(.autoCheckUpdates, default: d.autoCheckUpdates)
         autoDownloadUpdates = c.value(.autoDownloadUpdates, default: d.autoDownloadUpdates)
         skippedUpdateTag = c.optional(String.self, .skippedUpdateTag)
+        automaticNetworkDiscovery = c.value(.automaticNetworkDiscovery, default: d.automaticNetworkDiscovery)
+        // Liste (ungültige Elemente werden übersprungen) oder eine von Hand eingetragene Zeichenkette
+        // („10.62.13.0/24, 10.62.14.0/24“); leere Einträge und Duplikate entfallen.
+        extraDiscoveryNetworks = DiscoveryNetworks.normalizedUserEntries(
+            c.optional(LenientStringList.self, .extraDiscoveryNetworks)?.values ?? d.extraDiscoveryNetworks
+        )
+    }
+}
+
+/// Liste von Zeichenketten, nachsichtig gelesen: JSON-Liste (Nicht-Zeichenketten werden übersprungen)
+/// oder eine einzelne Zeichenkette mit Komma, Semikolon bzw. Zeilenumbruch als Trenner.
+struct LenientStringList: Decodable {
+    var values: [String]
+
+    init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(), let text = try? single.decode(String.self) {
+            values = DiscoveryNetworks.splitList(text)
+            return
+        }
+        values = try [LossyElement<String>](from: decoder).compactMap(\.value)
     }
 }
 

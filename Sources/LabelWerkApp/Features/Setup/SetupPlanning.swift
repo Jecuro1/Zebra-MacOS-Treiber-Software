@@ -17,6 +17,8 @@ enum PrinterDetectionSource: String, Equatable, Sendable {
     case usb
     /// Bonjour-Dienst (Produktangabe im TXT-Eintrag bzw. Dienstname).
     case bonjour
+    /// Antwort auf die Zebra-Suche (UDP 4201, Produktname des Druckservers).
+    case zebra
     /// Nicht erkannt – das Modell muss gewählt werden.
     case none
 
@@ -25,7 +27,7 @@ enum PrinterDetectionSource: String, Equatable, Sendable {
         switch self {
         case .printer: return 1.0
         case .snmp: return 0.9
-        case .usb: return 0.85
+        case .usb, .zebra: return 0.85
         case .bonjour: return 0.75
         case .none: return 0
         }
@@ -37,6 +39,7 @@ enum PrinterDetectionSource: String, Equatable, Sendable {
         case .snmp: return tr("Per SNMP erkannt")
         case .usb: return tr("Aus der USB-Gerätekennung")
         case .bonjour: return tr("Aus der Bonjour-Anmeldung")
+        case .zebra: return tr("Aus der Zebra-Suche")
         case .none: return tr("Nicht erkannt")
         }
     }
@@ -116,6 +119,14 @@ enum PrinterSetupPlanning {
             // Die Bonjour-Suche liefert nur Geräte, die sich als Zebra anmelden.
             detection.zebraCheck = .confirmed
             apply(hint: printer.modelHint ?? printer.name, source: .bonjour, to: &detection, catalog: catalog)
+        case .zebra:
+            // Auf die Zebra-Suche (UDP 4201) antworten nur Zebra-Druckserver.
+            detection.zebraCheck = .confirmed
+            apply(hint: printer.modelHint, source: .zebra, to: &detection, catalog: catalog)
+            if let systemName = nonEmpty(printer.details["name"]) { detection.friendlyName = systemName }
+            // Nur die Seriennummer des Druckers (per SNMP/`~HI` ergänzt) – nie die des Druckservers aus
+            // der Zebra-Antwort (`printServerSerial`).
+            if let serial = nonEmpty(printer.details["serialNumber"]) { detection.serialNumber = serial }
         case .network:
             if let identifiedBy = printer.details["identifiedBy"], !identifiedBy.isEmpty {
                 let description = printer.details["sysDescr"] ?? printer.modelHint ?? ""

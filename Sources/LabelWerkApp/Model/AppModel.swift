@@ -28,6 +28,11 @@ final class AppModel {
             if preferences.pollInterval != oldValue.pollInterval {
                 sessions.forEach { $0.restartMonitoringIfNeeded() }
             }
+            if !isRestoring,
+               preferences.extraDiscoveryNetworks != oldValue.extraDiscoveryNetworks
+                || preferences.automaticNetworkDiscovery != oldValue.automaticNetworkDiscovery {
+                networkDiscovery?.preferencesDidChange(old: oldValue, new: preferences)
+            }
         }
     }
     var hasCompletedOnboarding = false { didSet { scheduleSave() } }
@@ -46,6 +51,9 @@ final class AppModel {
     var pendingInstallWizard = false
     /// Gesetzt, wenn ein Bereich programmgesteuert angesprungen werden soll (z. B. aus der Menüleiste).
     var pendingSection: PrinterSection?
+    /// Vorbelegung des Installationsassistenten (Adresse eines gefundenen Druckers), gilt für das
+    /// nächste Öffnen; wird beim Schließen zurückgesetzt.
+    var installWizardPrefill: InstallWizardPrefill?
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var designerSaveTask: Task<Void, Never>?
@@ -58,6 +66,9 @@ final class AppModel {
     /// Update-Dienst: sucht, lädt und installiert neue LabelWerk-Versionen aus den GitHub-Releases
     /// (eigenes `@Observable`-Modell – Ansichten beobachten dessen Zustand direkt).
     @ObservationIgnored private(set) var updates: UpdateController!
+    /// Automatische Druckersuche im Netzwerk (Zebra-Suche, Netzwerk-Scan; Seitenleiste „Im Netzwerk“) –
+    /// eigenes `@Observable`-Modell.
+    @ObservationIgnored private(set) var networkDiscovery: NetworkDiscoveryService!
 
     // MARK: Init
 
@@ -66,6 +77,7 @@ final class AppModel {
         restore()
         queueSync = QueueSyncService(model: self)
         updates = UpdateController(model: self)
+        networkDiscovery = NetworkDiscoveryService(model: self)
     }
 
     private func restore() {
@@ -104,6 +116,8 @@ final class AppModel {
         queueSync.syncAtLaunch()
         // Update-Suche: 10 s nach dem Start, danach alle 6 Stunden (abschaltbar in Einstellungen › Updates).
         updates.start()
+        // Druckersuche im Netzwerk: 5 s nach dem Start, danach alle 10 Minuten (abschaltbar).
+        networkDiscovery.start()
         guard preferences.autoConnect else { return }
         for session in sessions {
             Task { await session.connect() }
@@ -200,6 +214,19 @@ final class AppModel {
             Task { await session.connect() }
         }
         return session
+    }
+
+    /// Öffnet den Installationsassistenten mit der Adresse eines gefundenen Netzwerkdruckers
+    /// (Seitenleiste „Im Netzwerk“). Andere Verbindungen werden direkt hinzugefügt.
+    func openInstallWizard(for printer: DiscoveredPrinter) {
+        guard case .tcp(let host, let port) = printer.descriptor else {
+            addPrinter(from: printer)
+            return
+        }
+        // Nie ein zweites Sheet über einem offenen.
+        guard !isOnboardingPresented, !isAddPrinterPresented, !isInstallWizardPresented else { return }
+        installWizardPrefill = InstallWizardPrefill(host: host, port: port, name: printer.name, printer: printer)
+        isInstallWizardPresented = true
     }
 
     /// Legt den virtuellen Demo-Drucker an (simuliert einen ZD421t vollständig).
