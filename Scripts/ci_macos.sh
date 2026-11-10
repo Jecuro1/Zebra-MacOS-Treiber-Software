@@ -331,7 +331,17 @@ step_install_test() {
         lw_run cupstestppd -W translations "${ppd}" || lw_die "cupstestppd lehnt $(basename "${ppd}") ab."
     fi
     # Warteschlange mit unserer PPD anlegen – cupsd prüft dabei Filterpfad und Rechte.
-    lw_run sudo lpadmin -p "${TEST_QUEUE}" -E -v "socket://127.0.0.1:${TEST_PORT}?waiteof=false" -P "${ppd}"
+    # Ohne „?waiteof=false“: macOS' cupsd weist diese Abfrage mit „Bad device-uri“ ab. Der
+    # Test-„Drucker“ liest bis zum Verbindungsende und schließt dann, das genügt dem Backend.
+    local uri added=0
+    for uri in "socket://127.0.0.1:${TEST_PORT}" "socket://localhost:${TEST_PORT}"; do
+        if lw_run sudo lpadmin -p "${TEST_QUEUE}" -E -v "${uri}" -P "${ppd}"; then
+            added=1
+            break
+        fi
+        lw_ci_warning "lpadmin lehnt ${uri} ab – nächster Versuch."
+    done
+    [[ "${added}" -eq 1 ]] || lw_die "Warteschlange ${TEST_QUEUE} konnte nicht angelegt werden."
     lpstat -p "${TEST_QUEUE}" >&2 || lw_die "Warteschlange ${TEST_QUEUE} fehlt."
     lpoptions -p "${TEST_QUEUE}" -l | grep -q '^lwDarkness' || lw_die "Warteschlange kennt die LabelWerk-Optionen nicht."
     lw_ok "Warteschlange ${TEST_QUEUE} mit $(basename "${ppd}") eingerichtet"
