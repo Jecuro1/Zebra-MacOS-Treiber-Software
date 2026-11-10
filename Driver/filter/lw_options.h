@@ -92,10 +92,10 @@ typedef enum lw_print_mode {
 
 typedef enum lw_backfeed {
     LW_BACKFEED_UNSET = 0,
-    LW_BACKFEED_AFTER,    /* ^JSA */
-    LW_BACKFEED_BEFORE,   /* ^JSB */
-    LW_BACKFEED_NORMAL,   /* ^JSN */
-    LW_BACKFEED_OFF       /* ^JSO */
+    LW_BACKFEED_AFTER,    /* ~JSA */
+    LW_BACKFEED_BEFORE,   /* ~JSB */
+    LW_BACKFEED_NORMAL,   /* ~JSN */
+    LW_BACKFEED_OFF       /* ~JSO */
 } lw_backfeed;
 
 /** Aufgelöste Druckeinstellungen eines Auftrags. */

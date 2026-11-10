@@ -493,8 +493,8 @@ public enum ZPL {
     /// `^MM{T|P|C|D|R|A|K}` – Druckmodus.
     public static func printMode(_ m: PrintMode) -> ZPLCommand { ZPLCommand(.caret, "MM", [m.zplCode]) }
 
-    /// `^JS{A|B|N|O}` – Rückzugsfolge.
-    public static func backfeed(_ b: BackfeedMode) -> ZPLCommand { ZPLCommand(.caret, "JS", [b.zplCode]) }
+    /// `~JS{A|B|N|O}` – Rückzugsfolge („Change Backfeed Sequence“). Achtung: `^JS` ist die Sensorwahl.
+    public static func backfeed(_ b: BackfeedMode) -> ZPLCommand { ZPLCommand(.tilde, "JS", [b.zplCode]) }
 
     /// `^POI` (180° gedreht) bzw. `^PON` (normal).
     public static func printOrientation(inverted: Bool) -> ZPLCommand {

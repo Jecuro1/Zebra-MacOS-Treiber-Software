@@ -697,6 +697,8 @@ def encode_job(pages: Sequence[Bitmap], settings: Settings, *, resolution_dpi: i
             line("~SD%02d" % s.darkness)
         if s.tear_off is not None:
             line("~TA%03d" % s.tear_off)
+        if s.backfeed:
+            line("~JS" + ZPL_CODES["backfeed"][s.backfeed])
         if s.calibrate:
             line("~JC")
         for n, (index, qty) in enumerate(seq):
@@ -710,8 +712,6 @@ def encode_job(pages: Sequence[Bitmap], settings: Settings, *, resolution_dpi: i
                 line("^MT" + ZPL_CODES["media_type"][s.media_type])
             if s.speed is not None:
                 line("^PR%d,%d,%d" % (s.speed, s.speed, s.speed))
-            if s.backfeed:
-                line("^JS" + ZPL_CODES["backfeed"][s.backfeed])
             line("^PW%d" % bm.width)
             line("^LL%d" % bm.height)
             line("^LH0,0")

@@ -122,7 +122,7 @@ public enum ZPL {
     static func mediaType(_ t: MediaType) -> ZPLCommand      // ^MT
     static func mediaTracking(_ t: MediaTracking) -> ZPLCommand // ^MN
     static func printMode(_ m: PrintMode) -> ZPLCommand      // ^MM
-    static func backfeed(_ b: BackfeedMode) -> ZPLCommand    // ^JS
+    static func backfeed(_ b: BackfeedMode) -> ZPLCommand    // ~JS (Steuerbefehl; ^JS wäre die Sensorwahl)
     static func printOrientation(inverted: Bool) -> ZPLCommand // ^POI / ^PON
     static func mirror(_ on: Bool) -> ZPLCommand             // ^PMY / ^PMN
     static func tearOffAdjust(_ dots: Int) -> ZPLCommand     // ~TA (Format: ~TA%03d, z. B. ~TA010, ~TA-10)
@@ -588,7 +588,7 @@ public actor PrinterClient {
     public func printZPL(_ zpl: String) async throws
     public func printImages(_ images: [GrayImage], settings: PrintSettings, resolution: Resolution,
                             stock: LabelStock?, copies: Int = 1) async throws
-    public func applySettings(_ settings: PrintSettings, permanently: Bool) async throws  // ~SD, ^MT, ^MN, ^MM, ^PR, ^LT, ^LS, ~TA, ^JS (+ ^JUS)
+    public func applySettings(_ settings: PrintSettings, permanently: Bool) async throws  // ~SD, ~TA, ~JS, ^MT, ^MN, ^MM, ^PR, ^LT, ^LS (+ ^JUS)
     public func listFiles(drive: String = "E:") async throws -> [PrinterFile]
     public func uploadFont(name: String, data: Data, drive: String = "E:") async throws
     public func uploadGraphic(name: String, bitmap: MonoBitmap, drive: String = "E:") async throws
@@ -629,7 +629,8 @@ SGD `getvar` → `"wert"`; JSON `{}{…}` → JSON-Objekt; `^HH` → Konfigurati
 ## 8. Druckauftragsformat (verbindlich für `JobEncoder` **und** C-Filter)
 
 Eingang: Seiten als `MonoBitmap` (1 = schwarz). Breite > `maxPrintWidthDots` → rechts abschneiden.
-Reihenfolge der Bitmap-Vorverarbeitung: (1) abschneiden, (2) `negative` → invertieren,
+Seiten ohne Fläche (Breite oder Höhe 0) werden nach (1) übersprungen und zählen nicht für
+Kopien/Sortierung. Reihenfolge der Bitmap-Vorverarbeitung: (1) abschneiden, (2) `negative` → invertieren,
 (3) `skipBlankLabels` und Seite leer → Seite überspringen, (4) nur EPL/CPCL: `mirror` → spiegeln,
 (5) nur CPCL: `rotate180` → um 180° drehen. ZPL dreht/spiegelt per `^PO`/`^PM`, EPL dreht per `ZB`.
 Zeilenende ZPL: jeder Befehl in eigener Zeile, abgeschlossen mit `\n` (LF); Grafikdaten in einer Zeile.
@@ -640,6 +641,7 @@ Zeilenende ZPL: jeder Befehl in eigener Zeile, abgeschlossen mit `\n` (LF); Graf
 {startCommands}\n                     falls nicht leer
 ~SD{dd}\n                             falls darkness (zweistellig, 0-gefüllt: ~SD08)
 ~TA{±ddd}\n                           falls tearOffAdjust (printf "%03d": ~TA010, ~TA-10)
+~JS{A|B|N|O}\n                        falls backfeed (Steuerbefehl; ^JS ist die Sensorwahl)
 ~JC\n                                 falls calibrateBeforeJob
 — je Etikett —
 ^XA\n
@@ -647,7 +649,6 @@ Zeilenende ZPL: jeder Befehl in eigener Zeile, abgeschlossen mit `\n` (LF); Graf
 ^MN{Y|M|N|A}\n                        falls tracking
 ^MT{D|T}\n                            falls mediaType
 ^PR{s},{s},{s}\n                      falls speed
-^JS{A|B|N|O}\n                        falls backfeed
 ^PW{breite}\n
 ^LL{höhe}\n
 ^LH0,0\n
@@ -714,7 +715,7 @@ PRINT\r\n
 | `lwLabelTop` | `Default`, `-120`…`120` (PPD: Schritte von 10) | `^LT` |
 | `lwLabelLeft` | `Default`, `-9999`…`9999` (PPD: −200…200, Schritte 10) | `^LS` |
 | `lwTearOff` | `Default`, `-120`…`120` (PPD: Schritte von 10) | `~TA` |
-| `lwBackfeed` | `Default` `After` `Before` `Normal` `Off` | `^JS` |
+| `lwBackfeed` | `Default` `After` `Before` `Normal` `Off` | `~JS` |
 | `lwMirror` `lwNegative` `lwRotate180` | `False` `True` | |
 | `lwDither` | `Threshold` `Ordered` `Halftone` `FloydSteinberg` `Atkinson` `Stucki` | |
 | `lwThreshold` | `1`…`254` (PPD: 64 96 128 160 192) | |

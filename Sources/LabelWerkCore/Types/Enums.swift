@@ -269,15 +269,15 @@ public enum GraphicCompression: String, Codable, CaseIterable, Sendable, Identif
 
 // MARK: - Rückzug (Backfeed)
 
-/// ZPL `^JS` – Reihenfolge des Rückzugs bei Abreiß-/Spendemodus.
+/// ZPL `~JS` – Reihenfolge des Rückzugs bei Abreiß-/Spendemodus (`^JS` ist die Sensorwahl).
 public enum BackfeedMode: String, Codable, CaseIterable, Sendable, Identifiable {
-    /// Rückzug nach dem Druck (`^JSA`).
+    /// Rückzug nach dem Druck (`~JSA`).
     case afterPrinting
-    /// Rückzug vor dem Druck (`^JSB`).
+    /// Rückzug vor dem Druck (`~JSB`).
     case beforePrinting
-    /// Normal: 90 % vor, 10 % nach dem Druck (`^JSN`).
+    /// Normal: 90 % vor, 10 % nach dem Druck (`~JSN`).
     case normal
-    /// Kein Rückzug (`^JSO`).
+    /// Kein Rückzug (`~JSO`).
     case off
 
     public var id: String { rawValue }

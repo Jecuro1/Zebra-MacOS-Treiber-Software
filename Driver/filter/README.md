@@ -67,7 +67,7 @@ PPD-Auswahl liegen (auch als `Custom.37`) und werden auf gültige Bereiche begre
 | `lwMediaTracking` | `Default` `Gap` `BlackMark` `Continuous` `Auto` | ZPL `^MN`, EPL `Q`, CPCL ohne `FORM` bei Endlos |
 | `lwPrintMode` | `Default` `TearOff` `PeelOff` `Cutter` `DelayedCut` `Rewind` `Applicator` `Kiosk` | ZPL `^MM`, EPL `O…C/P` |
 | `lwLabelTop` / `lwLabelLeft` / `lwTearOff` | `Default`, −120…120 / −9999…9999 / −120…120 | `^LT` / `^LS` / `~TA` |
-| `lwBackfeed` | `Default` `After` `Before` `Normal` `Off` | `^JS` |
+| `lwBackfeed` | `Default` `After` `Before` `Normal` `Off` | `~JS` |
 | `lwMirror` `lwNegative` `lwRotate180` | `True`/`False` (auch yes/no/on/off/1/0) | ZPL `^PM`/`^PO`, EPL `ZB`, sonst Bitmap |
 | `lwDither` | `Threshold` `Ordered` `Halftone` `FloydSteinberg` `Atkinson` `Stucki` | Rasterverfahren |
 | `lwThreshold` | 1…254 (Standard 128) | Schwelle bzw. Helligkeitsbezug |

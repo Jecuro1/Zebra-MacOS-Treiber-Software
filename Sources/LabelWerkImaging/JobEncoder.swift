@@ -121,6 +121,8 @@ public struct JobEncoder: Sendable {
         if !s.startCommands.isEmpty { out.line(s.startCommands) }
         if let darkness = s.darkness { out.line("~SD" + Self.zeroPadded(darkness, width: 2)) }
         if let tearOff = s.tearOffAdjust { out.line("~TA" + Self.zeroPadded(tearOff, width: 3)) }
+        // Rückzugsfolge ist der Steuerbefehl ~JS (^JS wäre die Sensorwahl).
+        if let backfeed = s.backfeed { out.line("~JS" + backfeed.zplCode) }
         if s.calibrateBeforeJob { out.line("~JC") }
 
         // Grafikfelder je Seite nur einmal kodieren (Sortierung wiederholt Seiten).
@@ -142,7 +144,6 @@ public struct JobEncoder: Sendable {
             if let tracking = s.tracking { out.line("^MN" + tracking.zplCode) }
             if let mediaType = s.mediaType { out.line("^MT" + mediaType.zplCode) }
             if let speed = s.speed { out.line("^PR\(speed),\(speed),\(speed)") }
-            if let backfeed = s.backfeed { out.line("^JS" + backfeed.zplCode) }
             out.line("^PW\(page.width)")
             out.line("^LL\(page.height)")
             out.line("^LH0,0")

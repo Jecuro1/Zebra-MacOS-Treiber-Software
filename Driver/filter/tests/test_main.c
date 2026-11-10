@@ -1107,8 +1107,8 @@ static void test_job_zpl(void)
     job_capture cap;
     run_job(&cap, &s, 203, 0, -1, 1, true, &page, 1, false);
     const char *expected =
-        "^XA^FXstart^XZ\n~SD08\n~TA-05\n~JC\n"
-        "^XA\n^MMC\n^MNM\n^MTD\n^PR4,4,4\n^JSB\n^PW10\n^LL2\n^LH0,0\n^LT20\n^LS-30\n^POI\n^PMY\n"
+        "^XA^FXstart^XZ\n~SD08\n~TA-05\n~JSB\n~JC\n"
+        "^XA\n^MMC\n^MNM\n^MTD\n^PR4,4,4\n^PW10\n^LL2\n^LH0,0\n^LT20\n^LS-30\n^POI\n^PMY\n"
         "^FO0,0^GFA,4,4,2,C0400000^FS\n^PQ1\n^JUS\n^XZ\n~JR\n";
     CHECK_BUF_STR(cap.out, expected);
     CHECK_INT(cap.labels, 1);

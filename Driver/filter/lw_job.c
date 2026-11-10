@@ -103,6 +103,9 @@ bool lw_job_begin(lw_job *job)
             lw_sink_printf(job->out, "~SD%02d\n", s->darkness);
         if (s->tear_off != LW_UNSET)
             lw_sink_printf(job->out, "~TA%03d\n", s->tear_off);
+        /* Rückzugsfolge: Steuerbefehl ~JS (^JS ist in ZPL II die Sensorwahl). */
+        if (s->backfeed != LW_BACKFEED_UNSET)
+            lw_sink_printf(job->out, "~JS%c\n", lw_backfeed_code(s->backfeed));
         if (s->calibrate)
             lw_sink_puts(job->out, "~JC\n");
         break;
@@ -132,8 +135,6 @@ static bool encode_zpl_body(lw_job *job, const lw_bitmap *page, lw_buf *b)
         lw_buf_printf(b, "^MT%c\n", lw_media_type_code(s->media_type));
     if (s->speed != LW_UNSET)
         lw_buf_printf(b, "^PR%d,%d,%d\n", s->speed, s->speed, s->speed);
-    if (s->backfeed != LW_BACKFEED_UNSET)
-        lw_buf_printf(b, "^JS%c\n", lw_backfeed_code(s->backfeed));
     lw_buf_printf(b, "^PW%d\n", page->width);
     lw_buf_printf(b, "^LL%d\n", page->height);
     lw_buf_append_str(b, "^LH0,0\n");

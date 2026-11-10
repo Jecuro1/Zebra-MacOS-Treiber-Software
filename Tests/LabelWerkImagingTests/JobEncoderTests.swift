@@ -66,13 +66,13 @@ struct JobEncoderTests {
         ^XA^CI28^XZ
         ~SD08
         ~TA-10
+        ~JSB
         ~JC
         ^XA
         ^MMC
         ^MNM
         ^MTT
         ^PR4,4,4
-        ^JSB
         ^PW10
         ^LL3
         ^LH0,0
@@ -325,12 +325,23 @@ struct JobEncoderTests {
         (PrintSettings(tracking: .autoDetect, compression: .hex), "^MNA\n"),
         (PrintSettings(tracking: .gap, compression: .hex), "^MNY\n"),
         (PrintSettings(mediaType: .directThermal, compression: .hex), "^MTD\n"),
-        (PrintSettings(backfeed: .off, compression: .hex), "^JSO\n"),
-        (PrintSettings(speed: 1, backfeed: .normal, compression: .hex), "^PR1,1,1\n^JSN\n"),
+        (PrintSettings(speed: 1, compression: .hex), "^PR1,1,1\n"),
     ])
     func zplMediaCommands(settings: PrintSettings, expectedBlock: String) throws {
         let text = Self.text(try Self.zpl(settings).encode(pages: [Self.pageB]))
         #expect(text == "^XA\n" + expectedBlock + "^PW8\n^LL2\n^LH0,0\n^PON\n^PMN\n^FO0,0^GFA,2,2,1,FF81^FS\n^PQ1\n^XZ\n")
+    }
+
+    @Test("ZPL: Rückzug als Steuerbefehl ~JS im Auftragskopf (nicht ^JS = Sensorwahl)", arguments: [
+        (BackfeedMode.off, "~JSO\n"),
+        (BackfeedMode.normal, "~JSN\n"),
+        (BackfeedMode.afterPrinting, "~JSA\n"),
+        (BackfeedMode.beforePrinting, "~JSB\n"),
+    ])
+    func zplBackfeedIsTildeCommand(mode: BackfeedMode, header: String) throws {
+        let text = Self.text(try Self.zpl(PrintSettings(backfeed: mode, compression: .hex)).encode(pages: [Self.pageB]))
+        #expect(text == header + "^XA\n^PW8\n^LL2\n^LH0,0\n^PON\n^PMN\n^FO0,0^GFA,2,2,1,FF81^FS\n^PQ1\n^XZ\n")
+        #expect(!text.contains("^JS"))
     }
 
     @Test("ZPL: Z64-Auftrag (Struktur + Dekodierung)")

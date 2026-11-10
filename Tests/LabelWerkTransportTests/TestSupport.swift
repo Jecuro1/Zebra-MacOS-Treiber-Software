@@ -365,3 +365,17 @@ func eventually(timeout: Duration = .seconds(3), _ condition: () -> Bool) async 
     }
     return true
 }
+
+
+/// Plattformabhängige Testvoraussetzungen.
+enum TestPlatform {
+    /// `listen()` mit Rückstau 0 lässt weitere Verbindungsversuche nur unter Linux hängen;
+    /// macOS (BSD) nimmt auch dann noch Verbindungen an.
+    static let hasLinuxListenBacklogSemantics: Bool = {
+        #if os(Linux)
+        return true
+        #else
+        return false
+        #endif
+    }()
+}

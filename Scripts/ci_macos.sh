@@ -173,7 +173,14 @@ step_catalog() {
 }
 
 step_test_swift() {
-    lw_run swift test -j "${JOBS}"
+    # Erst alles bauen (inkl. App-Ziel auf macOS), dann jedes Testziel in einem eigenen Lauf:
+    # In einem gemeinsamen Prozess verzögern rechenintensive Tests (QR/PDF417, Renderer-Fuzzing)
+    # auf kleinen CI-Runnern sonst die zeitkritischen Netzwerk- und Zeitlimit-Tests.
+    lw_run swift build -j "${JOBS}" --build-tests
+    local target
+    for target in LabelWerkCoreTests LabelWerkImagingTests LabelWerkBarcodeTests LabelWerkRenderTests LabelWerkStatusTests LabelWerkTransportTests LabelWerkKitTests; do
+        lw_run swift test --skip-build --filter "${target}"
+    done
 }
 
 step_test_driver() {

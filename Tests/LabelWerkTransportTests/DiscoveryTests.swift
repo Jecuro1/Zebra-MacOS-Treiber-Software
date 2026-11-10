@@ -422,7 +422,8 @@ struct PrinterDiscoveryTests {
         #expect(results.count == 1)
     }
 
-    @Test("Timeout beendet die Suche")
+    @Test("Timeout beendet die Suche",
+          .enabled(if: TestPlatform.hasLinuxListenBacklogSemantics, "Benötigt das Linux-Verhalten von listen(…, 0)"))
     func timeoutEndsDiscovery() async throws {
         // Volle Annahme-Warteschlange: weitere Verbindungsversuche hängen bis zum connectTimeout.
         let server = try TestTCPServer(backlog: 0, accepts: false) { _ in }

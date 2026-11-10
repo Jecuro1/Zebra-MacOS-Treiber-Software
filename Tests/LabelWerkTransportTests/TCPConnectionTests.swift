@@ -204,7 +204,8 @@ struct TCPConnectionTests {
         #expect(await connection.isOpen == false)
     }
 
-    @Test("Zeitüberschreitung beim Verbindungsaufbau (volle Annahme-Warteschlange)")
+    @Test("Zeitüberschreitung beim Verbindungsaufbau (volle Annahme-Warteschlange)",
+          .enabled(if: TestPlatform.hasLinuxListenBacklogSemantics, "Benötigt das Linux-Verhalten von listen(…, 0)"))
     func connectTimeoutDeterministic() async throws {
         // Ein Server mit Backlog 0, der nie annimmt: Nach der ersten Verbindung verwirft der
         // Kernel weitere SYNs, der Verbindungsaufbau bleibt hängen.
