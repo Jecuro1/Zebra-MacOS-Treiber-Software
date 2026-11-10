@@ -1,8 +1,9 @@
 # LabelWerk installieren, einrichten und entfernen
 
-Diese Anleitung beschreibt die Installation des Pakets `LabelWerk-<Version>.pkg`, das Einrichten
-von Zebra-Druckern (in der App oder in den macOS-Systemeinstellungen), das Drucken aus beliebigen
-Programmen, das Entfernen und die Fehlersuche.
+Diese Anleitung beschreibt die Installation des Pakets `LabelWerk-<Version>.pkg`, das Installieren
+von Netzwerkdruckern wie mit einem Windows-Treiberinstallationsprogramm, das Einrichten von
+Zebra-Druckern (in der App, mit `lwctl` oder in den macOS-Systemeinstellungen), das Drucken aus
+beliebigen Programmen, das Entfernen und die Fehlersuche.
 
 ## Voraussetzungen
 
@@ -39,8 +40,10 @@ von `/Library/Printers` verändert.
 2. Einführung, wichtige Hinweise und Lizenz bestätigen.
 3. Optional unter „Anpassen“ Komponenten abwählen (z. B. nur den Treiber für einen Druckserver).
 4. „Installieren“ wählen und mit dem Administratorpasswort bestätigen.
-5. Zum Abschluss LabelWerk aus dem Ordner „Programme“ öffnen – der Einrichtungsassistent
-   übernimmt den Rest.
+5. Zum Abschluss öffnet sich LabelWerk automatisch – wie ein Windows-Setup, das mit „Drucker
+   einrichten“ endet: beim ersten Start mit dem Willkommensassistenten, sonst direkt mit dem
+   Einrichtungsassistenten „Drucker installieren“ (nicht bei einem Update). Weiter unter
+   [Netzwerkdrucker (LAN) installieren](#netzwerkdrucker-lan-installieren).
 
 ### Im Terminal (z. B. für Softwareverteilung/MDM)
 
@@ -49,6 +52,11 @@ shasum -a 256 -c LabelWerk-1.0.0.pkg.sha256          # Prüfsumme kontrollieren
 pkgutil --check-signature LabelWerk-1.0.0.pkg         # Signatur anzeigen
 sudo installer -pkg LabelWerk-1.0.0.pkg -target /
 ```
+
+Bei einer Installation über die Kommandozeile öffnet sich kein Fenster (`installer` setzt
+`COMMAND_LINE_INSTALL`, das Paket startet die App dann nicht). Netzwerkdrucker richtet
+anschließend `lwctl install` ein – siehe
+[Kommandozeile: `lwctl install`](#3-kommandozeile-lwctl-install).
 
 Installierte Version abfragen:
 
@@ -93,6 +101,164 @@ Rechte) an. Ist bereits ein *neuerer* Treiber installiert als der, den die App m
 einem Paket einer neueren LabelWerk-Version), ersetzt LabelWerk ihn nur nach ausdrücklicher
 Bestätigung durch die ältere Version – besser ist es dann, die App zu aktualisieren.
 
+## Netzwerkdrucker (LAN) installieren
+
+So einfach wie unter Windows mit dem Installationsprogramm des Druckertreibers: Drucker finden oder
+Adresse eingeben, das Modell wird erkannt, **„Installieren“** – danach ist der Zebra-Drucker ein
+normaler macOS-Drucker. Er erscheint unter **Systemeinstellungen › Drucker & Scanner** und im
+Druckdialog jedes Programms und druckt über den LabelWerk-Treiber (Treiber
+„Zebra <Modell> (<dpi> dpi) - LabelWerk“, Verbindung `socket://<Adresse>:9100`).
+
+Voraussetzungen: Der Drucker ist eingeschaltet, im selben Netz wie der Mac (oder über einen Router
+erreichbar) und nimmt Aufträge auf dem RAW-Port 9100 an – bei Zebra-Druckern mit
+Netzwerkschnittstelle die Werkseinstellung. Die IP-Adresse zeigt das Display bzw. Menü des
+Druckers oder sein Konfigurationsetikett (Tastenkombination je nach Modell, siehe Handbuch); die
+Suche in LabelWerk findet den Drucker meist auch ohne sie.
+
+Es gibt drei gleichwertige Wege – alle legen eine macOS-Warteschlange mit dem LabelWerk-Treiber an:
+
+### 1. Installationsassistent nach dem Paket
+
+Nach einer Installation per Doppelklick auf das Paket öffnet sich LabelWerk automatisch:
+
+* **Beim ersten Start** begrüßt LabelWerk Sie mit dem Willkommensassistenten (Treiber, Drucker,
+  Mitteilungen). Auf seiner Seite **„Drucker finden“** öffnet die Karte **„Netzwerkdrucker
+  installieren“** mit **„Installieren …“** den Einrichtungsassistenten **„Drucker installieren“**.
+* **Wurde LabelWerk schon einmal eingerichtet** (Willkommensassistent abgeschlossen), öffnet sich
+  direkt der Einrichtungsassistent **„Drucker installieren“**.
+
+Der Einrichtungsassistent hat vier Schritte:
+
+1. **Drucker wählen** – LabelWerk sucht im Netzwerk (Bonjour und Netzwerk-Scan). Ist der Drucker
+   nicht dabei, seine IP-Adresse oder seinen Hostnamen eingeben (Port 9100).
+2. **Modell** – LabelWerk fragt den Drucker ab und ordnet Modell, Auflösung und Druckersprache zu;
+   bei Bedarf lässt sich das Modell von Hand wählen.
+3. **Name & Optionen** – Name und Standort, wie sie in macOS erscheinen, Etikettenformat,
+   optional als Standarddrucker und mit Testseite.
+4. **Installieren** – LabelWerk legt die macOS-Warteschlange an. Fehlt der Treiber noch, wird er
+   mitinstalliert (Administratorpasswort).
+
+LabelWerk öffnet sich **nicht** bei einer Installation im Terminal oder per Softwareverteilung
+bzw. MDM (`installer` setzt `COMMAND_LINE_INSTALL`), bei einem **Update** (sobald eine
+macOS-Warteschlange mit dem LabelWerk-Treiber eingerichtet ist – die vorhandenen Drucker werden dann
+nur auf den neuen Treiber umgestellt, ihre Einstellungen bleiben), wenn niemand am Bildschirm
+angemeldet ist, wenn die Komponente „Druckertreiber“ abgewählt wurde oder bei einer Installation
+auf ein anderes Volume. Den Grund vermerkt `/var/log/install.log` (Zeilen „LabelWerk postinstall:
+…“). Von Hand öffnen: Weg 2 oder `open -a LabelWerk --args --setup`.
+
+### 2. In der App: „Drucker installieren …“
+
+Jederzeit später, etwa für weitere Drucker: LabelWerk öffnen und **Ablage › Drucker
+installieren …** wählen – es folgen dieselben vier Schritte. Ein Netzwerkdrucker, der in LabelWerk
+schon angelegt ist, wird unter **Treiber & Warteschlangen** mit **„Einrichten“** zum macOS-Drucker;
+beim Hinzufügen eines Druckers erledigt das die Option **„Auch als macOS-Drucker installieren“**.
+
+### 3. Kommandozeile: `lwctl install`
+
+Für IT, Skripte und Softwareverteilung (MDM, Jamf, Munki …) – ohne Fenster und ohne Rückfrage:
+
+```bash
+lwctl install --printer tcp://192.168.1.50                      # Modell erkennen, Warteschlange anlegen
+lwctl install -p tcp://192.168.1.51 --name Versand --location "Lager, Tor 3" \
+    --stock w4h6in --default --test-page
+lwctl install -p tcp://etiketten-3.local --model zt410 --dpi 300 --dry-run   # nur anzeigen
+lwctl queues --labelwerk                                        # eingerichtete LabelWerk-Drucker
+lwctl uninstall-queue Versand                                   # Warteschlange wieder entfernen
+```
+
+`lwctl install` verbindet sich mit dem Drucker, erkennt Modell, Auflösung und Druckersprache, wählt
+die PPD `LabelWerk-<Modell>-<dpi>dpi.ppd.gz` (gibt es keine passende, wie in der App eine generische
+PPD `LabelWerk-generic-<Sprache>-<dpi>dpi`) und ruft `lpadmin` auf. Jeder ausgeführte Befehl wird
+angezeigt; `--dry-run` zeigt ihn nur an:
+
+```text
+$ /usr/sbin/lpadmin -p Zebra_ZD421t_192.168.1.50 -E -v socket://192.168.1.50:9100 -P /Library/Printers/PPDs/Contents/Resources/LabelWerk-zd421t-203dpi.ppd.gz -D 'Zebra ZD421t (192.168.1.50)' -o printer-is-shared=false
+```
+
+| Option | Bedeutung |
+|---|---|
+| `-p`, `--printer tcp://HOST[:PORT]` | Drucker (Port Standard 9100); alternativ die Umgebungsvariable `LWCTL_PRINTER` |
+| `-m`, `--model auto\|<id>\|generic` | `auto` (Standard): vom Drucker erkennen. `<id>` aus `lwctl models`: ohne Verbindung einrichten (ausgeschalteter Drucker, Vorbereiten vieler Macs). `generic`: generische PPD |
+| `--dpi 152\|203\|300\|600` | Auflösung (Standard: vom Drucker bzw. vom Modell) |
+| `-l`, `--language zpl\|epl\|cpcl` | Druckersprache als Standard der Warteschlange (Standard: die des Modells) |
+| `-n`, `--name NAME` | Name der Warteschlange (Standard: `Zebra_<Modell>_<Adresse>`); erscheint auch als Beschreibung. Eine vorhandene LabelWerk-Warteschlange desselben Druckers wird aktualisiert, andere nur mit `--replace` |
+| `--replace` | vorhandene Warteschlange gleichen Namens ersetzen, auch wenn sie einen anderen Treiber oder ein anderes Gerät verwendet |
+| `--location TEXT` | Standort |
+| `-s`, `--stock ID` | Etikettenformat als Standard-Papiergröße; muss auf den Drucker passen (`lwctl stocks --model <id>`) |
+| `--default` | als Standarddrucker festlegen |
+| `--test-page` | danach eine Testseite über die neue Warteschlange drucken |
+| `--ppd-dir DIR` | anderer PPD-Ordner (Standard: `/Library/Printers/PPDs/Contents/Resources`, unter Linux `/usr/share/ppd/labelwerk`) |
+| `--dry-run` | nur anzeigen, nichts einrichten |
+| `--json` | Ergebnis als JSON (Warteschlange, Modell, PPD, ausgeführte Befehle, vorhandene Warteschlange und beibehaltene Einstellungen, Hinweise) |
+
+**Vorhandene Warteschlangen.** `lwctl install` prüft vorher – auch mit `--dry-run` –, welche
+Warteschlangen es schon gibt (CUPS unterscheidet bei Namen keine Groß-/Kleinschreibung):
+
+* Druckt schon eine LabelWerk-Warteschlange auf denselben Drucker (gleiche Adresse und gleicher
+  Port), wird sie aktualisiert – ohne `--name` auch unter ihrem bisherigen Namen, etwa wenn der
+  Drucker zuvor mit dem Assistenten der App eingerichtet wurde. So erscheint derselbe Drucker nie
+  zweimal im Druckdialog; ein erneuter Lauf derselben Liste ist ungefährlich.
+* Beim Aktualisieren bleiben die Einstellungen der Warteschlange erhalten: alle Standardwerte, die
+  in LabelWerk oder unter **„Optionen & Zubehör“** gewählt wurden (Schwärzung, Geschwindigkeit,
+  Etikettenformat, Medientyp, Druckmodus, Versatz …), Standort, Beschreibung und Freigabe. Neu
+  gesetzt werden nur die Werte dieses Aufrufs (`--stock`, `--language`, `--location`, `--name`) und
+  die Auflösung der gewählten PPD.
+* Eine Warteschlange gleichen Namens, die einen anderen Treiber verwendet oder auf ein anderes Gerät
+  druckt (etwa ein Bürodrucker „Versand“), wird **nicht** angetastet: `lwctl install` bricht mit
+  Rückgabewert 1 ab. Einen anderen Namen wählen oder sie mit `--replace` bewusst ersetzen.
+
+**Auflösung und Sprache.** Gibt es für die gewünschte Kombination keine PPD (etwa für einen
+EPL-Drucker mit 300 dpi, der nicht im Modellkatalog steht – generische EPL-PPDs gibt es nur mit
+203 dpi), nimmt `lwctl install` wie die App die nächstliegende generische PPD und meldet das als
+Hinweis (Etiketten mit falscher Auflösung werden falsch skaliert gedruckt). Mit `--dpi` bzw. `--language`
+ausdrücklich gewählte Werte werden dagegen nie ersetzt – dann endet der Aufruf mit einem Fehler.
+
+Rückgabewerte: 0 eingerichtet, 1 Fehler (keine passende PPD, Warteschlange gleichen Namens
+vorhanden, `lpadmin` fehlgeschlagen), 2 falscher Aufruf (ungültige Adresse, unbekanntes Modell,
+Etikettenformat passt nicht auf den Drucker …), 3 Drucker nicht erreichbar bzw. nicht erkannt. Auf macOS genügt ein Administratorkonto; als Standardbenutzer (und unter Linux ohne
+Mitgliedschaft in der Gruppe `lpadmin`) mit `sudo` ausführen. `lwctl queues` listet alle
+Warteschlangen und markiert die mit LabelWerk-Treiber; `lwctl uninstall-queue` entfernt nur solche
+(andere mit `--force`).
+
+Mehrere Drucker in einem Durchgang, z. B. aus einer Liste mit Adresse, Name und Standort:
+
+```bash
+#!/bin/bash
+# drucker.txt – je Zeile: Adresse Name Standort
+#   192.168.1.50  Versand-1  Lager Tor 1
+#   192.168.1.51  Versand-2  Lager Tor 2
+while read -r ip name location; do
+    [[ -z "$ip" || "$ip" == \#* ]] && continue
+    lwctl install --printer "tcp://$ip" --name "$name" --location "$location" --stock w4h6in \
+        || echo "Fehler bei $ip ($name)" >&2
+done < drucker.txt
+```
+
+Oder kurz für eine Reihe von Adressen (Namen automatisch, Ergebnis je Drucker als JSON):
+
+```bash
+for ip in 192.168.1.50 192.168.1.51 192.168.1.52; do
+    lwctl install -p "tcp://$ip" --json > "lwctl-install-$ip.json" || echo "Fehler: $ip" >&2
+done
+```
+
+### Alternative: macOS-Systemeinstellungen
+
+Ohne LabelWerk-App, nur mit dem installierten Treiber:
+
+1. **Systemeinstellungen › Drucker & Scanner › „Drucker, Scanner oder Fax hinzufügen …“** („+“).
+2. Reiter **„IP“** wählen und bei **Adresse** die IP-Adresse oder den Hostnamen eingeben.
+3. **Protokoll:** **„HP Jetdirect – Socket“** (Port 9100). **Warteschlange** leer lassen, **Name**
+   und **Standort** nach Wunsch.
+4. **Verwenden:** „Software auswählen …“ und den Treiber **„Zebra <Modell> (<dpi> dpi) -
+   LabelWerk“** wählen, z. B. „Zebra ZD421t (203 dpi) - LabelWerk“ (Suchbegriff „LabelWerk“).
+5. **„Hinzufügen“**. Sprache, Medientyp und Druckmodus lassen sich danach unter **„Optionen &
+   Zubehör“** ändern; **„Dienstprogramm öffnen“** startet LabelWerk.
+
+Per Bonjour gefundene Zebra-Drucker (Reiter „Standard“) funktionieren ebenso, sofern unter
+„Verwenden“ der LabelWerk-Treiber gewählt wird – nicht „AirPrint“ oder „Generischer
+PostScript-Drucker“.
+
 ## Drucker einrichten
 
 ### In der App (empfohlen)
@@ -132,12 +298,15 @@ Bluetooth).
    ZD421d/t/c) unter „Verwenden“ die genaue Variante auswählen.
 3. **Netzwerk:** Reiter „IP“ wählen, Adresse des Druckers eingeben, Protokoll
    **„HP Jetdirect – Socket“** (Port 9100), dann unter „Verwenden“ → „Software auswählen …“ das
-   passende Modell „Zebra … - LabelWerk“ wählen. Von Bonjour gefundene Drucker funktionieren
-   ebenso, sofern dort die LabelWerk-PPD ausgewählt wird.
+   passende Modell „Zebra … - LabelWerk“ wählen – Schritt für Schritt unter
+   [Netzwerkdrucker (LAN) installieren](#alternative-macos-systemeinstellungen).
 4. Die Druckeroptionen (Druckersprache, Medientyp, Druckmodus …) lassen sich nachträglich unter
    **„Optionen & Zubehör“** ändern; **„Dienstprogramm öffnen“** startet LabelWerk.
 
 ### Im Terminal
+
+Netzwerkdrucker richtet am einfachsten `lwctl install` ein (Modell, PPD und `lpadmin`-Aufruf
+automatisch, siehe [oben](#3-kommandozeile-lwctl-install)). Von Hand mit `lpadmin`:
 
 ```bash
 lpinfo -v | grep -i zebra                              # USB-Geräteadresse ermitteln

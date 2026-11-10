@@ -21,6 +21,11 @@ Geprüft werden – auf jedem System, also auch unter Linux in der CI –
 * ``postinstall``: Beim Umstellen vorhandener Warteschlangen auf neue PPDs bleiben deren
   Standardoptionen erhalten (Attrappe von ``lpadmin``; zusätzlich gegen einen privaten ``cupsd``,
   sofern einer installiert ist – unter Linux ``/usr/sbin/cupsd`` oder ``$LW_TEST_CUPSD``),
+* ``postinstall``: Nach einer Installation mit dem Installationsprogramm öffnet sich LabelWerk mit
+  ``--setup`` für den angemeldeten Benutzer – nicht bei ``COMMAND_LINE_INSTALL``, bei einem Update
+  (LabelWerk-Warteschlangen vorhanden), ohne angemeldeten Benutzer, ohne App oder auf einem anderen
+  Volume; ein Fehler bricht die Installation nie ab (Attrappen für ``stat``, ``id`` und
+  ``launchctl``); der Pfad der App folgt ``APP_NAME`` (Vorlage wie in ``make_pkg.sh``),
 * die CI-Skripte: jeder fehlschlagende Befehl lässt seinen Schritt scheitern (eigener Prozess je
   Schritt), Optionen erreichen die Schrittprozesse, und ``ci_macos.sh`` deinstalliert nur nach
   einer tatsächlich begonnenen Probeinstallation (simuliertes macOS mit Attrappen für ``uname``
@@ -696,6 +701,15 @@ class UninstallTests(unittest.TestCase):
 # ------------------------------------------------------------------------------------------------
 
 
+def render_package_script(component: str, name: str, destination: Path) -> Path:
+    """Rendert ein Paketskript wie Scripts/make_pkg.sh (Platzhalter aus Installer/config.env)."""
+    template = INSTALLER / "pkg" / "scripts" / component / name
+    result = bash(f'lw_load_config\nlw_render_template "{template}" "{destination}"\nchmod 755 "{destination}"')
+    if result.returncode != 0:
+        raise AssertionError(f"{template} lässt sich nicht rendern: {result.stderr}")
+    return destination
+
+
 class PackageScriptTests(unittest.TestCase):
     def setUp(self):
         self.volume = Path(tempfile.mkdtemp(prefix="lw-volume-"))
@@ -747,7 +761,8 @@ class PackageScriptTests(unittest.TestCase):
         self.ppds.mkdir(parents=True)
         (self.ppds / "LabelWerk-zd421t-203dpi.ppd.gz").write_bytes(b"x")
         os.chmod(self.ppds / "LabelWerk-zd421t-203dpi.ppd.gz", 0o600)
-        result = run([str(self.script("driver", "postinstall")), "pkg", "/", str(self.volume)])
+        script = render_package_script("driver", "postinstall", self.volume / "driver-postinstall")
+        result = run([str(script), "pkg", "/", str(self.volume)])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(mode(self.driver / "Filter" / "rastertolabelwerk"), 0o755)
         self.assertEqual(mode(self.driver / "uninstall.sh"), 0o755)
@@ -757,16 +772,13 @@ class PackageScriptTests(unittest.TestCase):
         self.assertIn("nicht das Startvolume", result.stdout)
 
     def test_postinstall_fails_without_filters(self):
-        result = run([str(self.script("driver", "postinstall")), "pkg", "/", str(self.volume)])
+        script = render_package_script("driver", "postinstall", self.volume / "driver-postinstall")
+        result = run([str(script), "pkg", "/", str(self.volume)])
         self.assertEqual(result.returncode, 1)
         self.assertIn("Filterordner fehlt", result.stdout)
 
     def render_cli_postinstall(self) -> Path:
-        rendered = self.volume / "cli-postinstall"
-        result = bash(f'lw_load_config\nlw_render_template "{self.script("cli", "postinstall")}" "{rendered}"\n'
-                      f'chmod 755 "{rendered}"')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        return rendered
+        return render_package_script("cli", "postinstall", self.volume / "cli-postinstall")
 
     def test_cli_postinstall_creates_link(self):
         script = self.render_cli_postinstall()
@@ -951,6 +963,162 @@ printf -- '--\\n' >> "{self.calls}"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("konnte nicht aktualisiert werden", result.stdout)
         self.assertIn("0 Warteschlangen aktualisiert, 1 unverändert.", result.stdout)
+
+
+# ------------------------------------------------------------------------------------------------
+# postinstall: Einrichtungsassistent nach einer Installation mit dem Installationsprogramm
+# ------------------------------------------------------------------------------------------------
+
+
+class SetupAssistantLaunchTests(unittest.TestCase):
+    """open_setup_assistant() aus dem driver-postinstall mit Attrappen für stat, id und launchctl.
+
+    ``stat`` meldet ``$FAKE_CONSOLE_USER`` als Besitzer von /dev/console (bzw. scheitert mit
+    ``FAKE_STAT_FAILS=1``), ``id -u`` liefert ``$FAKE_UID`` (leer = unbekannter Benutzer), und
+    ``launchctl`` protokolliert seinen Aufruf nur und endet mit ``$FAKE_LAUNCHCTL_STATUS``.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-setup-"))
+        self.bin = self.tmp / "bin"
+        self.app = self.tmp / "Applications" / "LabelWerk.app"
+        (self.app / "Contents").mkdir(parents=True)
+        self.calls = self.tmp / "calls.log"
+        # PPDs der eingerichteten Warteschlangen (wie /etc/cups/ppd); leer = Erstinstallation.
+        self.cups_ppd = self.tmp / "etc-cups-ppd"
+        self.cups_ppd.mkdir()
+        write_executable(self.bin / "stat", f'''#!/bin/sh
+printf 'stat %s\\n' "$*" >> "{self.calls}"
+[ "${{FAKE_STAT_FAILS:-0}}" = 1 ] && exit 1
+printf '%s\\n' "$FAKE_CONSOLE_USER"
+''')
+        write_executable(self.bin / "id", f'''#!/bin/sh
+printf 'id %s\\n' "$*" >> "{self.calls}"
+[ -n "$FAKE_UID" ] || {{ echo "id: $2: no such user" >&2; exit 1; }}
+printf '%s\\n' "$FAKE_UID"
+''')
+        write_executable(self.bin / "launchctl", f'''#!/bin/sh
+printf 'launchctl %s\\n' "$*" >> "{self.calls}"
+exit "${{FAKE_LAUNCHCTL_STATUS:-0}}"
+''')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def launch(self, console_user: str = "anna", uid: str = "501", **extra: str) -> subprocess.CompletedProcess:
+        script = "set -euo pipefail\n" \
+                 "log() { printf 'LabelWerk postinstall: %s\\n' \"$*\"; }\n" \
+                 f"SETUP_APP={shlex.quote(str(self.app))}\n" \
+                 f"CUPS_PPD_DIR={shlex.quote(str(self.cups_ppd))}\n" \
+                 + shell_functions(DRIVER_POSTINSTALL, "has_labelwerk_queues", "console_user", "open_setup_assistant") \
+                 + "\nopen_setup_assistant\necho fertig\n"
+        env = clean_env(FAKE_CONSOLE_USER=console_user, FAKE_UID=uid)
+        env.pop("COMMAND_LINE_INSTALL", None)
+        env["PATH"] = f"{self.bin}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}"
+        env.update(extra)
+        return run([SYSTEM_BASH, "-c", script], env=env)
+
+    def launchctl_calls(self) -> List[str]:
+        if not self.calls.exists():
+            return []
+        return [line for line in self.calls.read_text(encoding="utf-8").splitlines() if line.startswith("launchctl ")]
+
+    def assert_skipped(self, result: subprocess.CompletedProcess, reason: str):
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fertig", result.stdout, "das Skript läuft weiter")
+        self.assertIn(reason, result.stdout)
+        self.assertEqual(self.launchctl_calls(), [], "die App darf nicht geöffnet werden")
+
+    def test_opens_app_as_console_user_with_setup_argument(self):
+        result = self.launch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.launchctl_calls(),
+                         [f"launchctl asuser 501 sudo -u anna /usr/bin/open -a {self.app} --args --setup"])
+        self.assertIn("stat -f%Su /dev/console", self.calls.read_text(encoding="utf-8"))
+        self.assertIn("id -u anna", self.calls.read_text(encoding="utf-8"))
+        self.assertIn("Einrichtungsassistent für „anna“ geöffnet", result.stdout)
+
+    def test_skips_command_line_install(self):
+        # „installer -pkg …“ (Terminal, MDM, CI) setzt COMMAND_LINE_INSTALL=1.
+        result = self.launch(COMMAND_LINE_INSTALL="1")
+        self.assert_skipped(result, "Kommandozeile")
+        self.assertFalse(self.calls.exists(), "nicht einmal der Benutzer wird ermittelt")
+
+    def test_skips_update_with_labelwerk_queues(self):
+        # Update: Eine Warteschlange nutzt schon die LabelWerk-PPD – kein Assistent bei jedem Update.
+        (self.cups_ppd / "Fremd.ppd").write_text('*PPD-Adobe: "4.3"\n*NickName: "HP LaserJet"\n', encoding="utf-8")
+        (self.cups_ppd / "Lager.ppd").write_text(QUEUE_PPD, encoding="utf-8")
+        result = self.launch()
+        self.assert_skipped(result, "LabelWerk-Drucker sind bereits eingerichtet (Update)")
+        self.assertFalse(self.calls.exists(), "nicht einmal der Benutzer wird ermittelt")
+
+    def test_opens_app_when_only_foreign_queues_exist(self):
+        (self.cups_ppd / "Fremd.ppd").write_text('*PPD-Adobe: "4.3"\n*NickName: "HP LaserJet"\n', encoding="utf-8")
+        (self.cups_ppd / "Kein-PPD.txt").write_text("*lwModel: \"zd421t\"\n", encoding="utf-8")
+        result = self.launch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.launchctl_calls()), 1, result.stdout)
+
+    def test_opens_app_without_cups_ppd_directory(self):
+        shutil.rmtree(self.cups_ppd)
+        result = self.launch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.launchctl_calls()), 1, result.stdout)
+
+    def test_skips_without_gui_console_user(self):
+        for user in ("root", "loginwindow", "_mbsetupuser", ""):
+            with self.subTest(console_user=user):
+                self.calls.unlink(missing_ok=True)
+                self.assert_skipped(self.launch(console_user=user), "Kein Benutzer angemeldet")
+
+    def test_skips_when_console_owner_cannot_be_read(self):
+        self.assert_skipped(self.launch(FAKE_STAT_FAILS="1"), "Kein Benutzer angemeldet")
+
+    def test_skips_unknown_or_root_uid(self):
+        for uid in ("", "0", "5O1"):
+            with self.subTest(uid=uid):
+                self.calls.unlink(missing_ok=True)
+                self.assert_skipped(self.launch(uid=uid), "Benutzerkennung von „anna“ unbekannt")
+
+    def test_skips_without_app(self):
+        shutil.rmtree(self.app)
+        self.assert_skipped(self.launch(), "fehlt")
+
+    def test_failed_launch_does_not_fail_install(self):
+        result = self.launch(FAKE_LAUNCHCTL_STATUS="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fertig", result.stdout)
+        self.assertEqual(len(self.launchctl_calls()), 1)
+        self.assertIn("konnte nicht geöffnet werden", result.stdout)
+
+    def test_postinstall_opens_assistant_last_and_never_fatal(self):
+        text = DRIVER_POSTINSTALL.read_text(encoding="utf-8")
+        # Vorlage: Der App-Name kommt aus Installer/config.env (APP_NAME=… make pkg).
+        self.assertIn('SETUP_APP="/Applications/@APP_NAME@.app"', text)
+        rendered = render_package_script("driver", "postinstall", self.tmp / "postinstall")
+        self.assertIn('SETUP_APP="/Applications/LabelWerk.app"', rendered.read_text(encoding="utf-8"))
+        renamed = self.tmp / "postinstall-renamed"
+        result = bash(f'lw_load_config\nlw_render_template "{DRIVER_POSTINSTALL}" "{renamed}"',
+                      env=clean_env(APP_NAME="Etiketten"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('SETUP_APP="/Applications/Etiketten.app"', renamed.read_text(encoding="utf-8"))
+        body = text[text.index("# --- 4. Einrichtungsassistent"):]
+        self.assertTrue(body.rstrip().endswith("open_setup_assistant || true\nexit 0"), body[-200:])
+        # Auf einem anderen Volume endet das Skript vorher (kein angemeldeter Benutzer dort).
+        self.assertLess(text.index("nicht das Startvolume"), text.index("open_setup_assistant || true"))
+
+    @unittest.skipUnless(IS_ROOT, "postinstall setzt Besitzer root:wheel (nur als root testbar)")
+    def test_postinstall_on_other_volume_does_not_open_app(self):
+        volume = self.tmp / "volume"
+        (volume / "Library" / "Printers" / "LabelWerk" / "Filter").mkdir(parents=True)
+        env = clean_env(FAKE_CONSOLE_USER="anna", FAKE_UID="501")
+        env.pop("COMMAND_LINE_INSTALL", None)
+        env["PATH"] = f"{self.bin}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}"
+        script = render_package_script("driver", "postinstall", self.tmp / "postinstall")
+        result = run([str(script), "pkg", "/", str(volume)], env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("nicht das Startvolume", result.stdout)
+        self.assertEqual(self.launchctl_calls(), [])
 
 
 def find_test_cupsd() -> Optional[Path]:
@@ -1653,6 +1821,34 @@ class ResourceTests(unittest.TestCase):
                 html = (lproj / name).read_text(encoding="utf-8")
                 self.assertIn(f'<html lang="{lang}">', html, f"{lang}/{name}")
                 self.assertEqual(unbalanced_html_tags(html), [], f"{lang}/{name}")
+
+    def test_installer_texts_explain_network_printer_setup(self):
+        # Abschluss- und Hinweisseite nennen die Wege, einen Netzwerkdrucker einzurichten (App,
+        # Systemeinstellungen, lwctl) – und wie die App sich nach dem Paket öffnet: beim ersten Start
+        # mit dem Willkommensassistenten (Seite „Drucker finden“ › „Netzwerkdrucker installieren“),
+        # sonst mit dem Assistenten „Drucker installieren“, bei einem Update gar nicht.
+        ui_names = {
+            "de": ("Drucker finden", "Netzwerkdrucker installieren", "Drucker installieren"),
+            "en": ("Find Printers", "Install network printer", "Install Printer"),
+        }
+        expected = {
+            "de": ("Willkommensassistent", "Update", "HP Jetdirect – Socket", "- LabelWerk",
+                   "lwctl install --printer tcp://"),
+            "en": ("welcome assistant", "update", "HP Jetdirect – Socket", "- LabelWerk",
+                   "lwctl install --printer tcp://"),
+        }
+        for lang, phrases in expected.items():
+            # Die genannten Bedienelemente heißen in der App wirklich so.
+            strings = (INSTALLER / "Resources" / f"{lang}.lproj" / "Localizable.strings").read_text(encoding="utf-8")
+            for ui_name in ui_names[lang]:
+                with self.subTest(lang=lang, ui_name=ui_name):
+                    self.assertIn(f'= "{ui_name}";', strings)
+            for name in ("conclusion.html", "readme.html"):
+                html = (INSTALLER / "pkg" / "Resources" / f"{lang}.lproj" / name).read_text(encoding="utf-8")
+                text = " ".join(html.split())
+                for phrase in phrases + ui_names[lang]:
+                    with self.subTest(lang=lang, file=name, phrase=phrase):
+                        self.assertIn(phrase, text)
 
     def test_pkg_scripts_reference_architecture_paths(self):
         postinstall = (INSTALLER / "pkg" / "scripts" / "driver" / "postinstall").read_text(encoding="utf-8")

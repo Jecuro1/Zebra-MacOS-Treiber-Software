@@ -13,9 +13,17 @@
 #     die Standardwerte der neuen PPD; die bisher gewählten Standardoptionen der Warteschlange
 #     (Schwärzung, Etikettenformat …) werden deshalb aus ihrer alten PPD gelesen und im selben
 #     Aufruf mit „-o“ wieder gesetzt. Werte, die die neue PPD nicht mehr kennt, verwirft lpadmin.
+#  4. Nur auf dem Startvolume, nur bei einer Installation mit dem Installationsprogramm
+#     (Doppelklick auf das Paket) und nur, solange noch kein LabelWerk-Drucker eingerichtet ist
+#     (also nicht bei einem Update): LabelWerk für den angemeldeten Benutzer mit „--setup“ öffnen –
+#     wie ein Windows-Setup, das mit „Drucker einrichten“ endet. Dieses Skript läuft nach dem
+#     Kopieren der App und nach dem cupsd-Neustart; die optionale lwctl-Komponente danach legt nur
+#     noch einen Link an.
 #
-# Fehler beim Neustart oder Aktualisieren brechen die Installation nicht ab (der Treiber ist dann
-# trotzdem installiert); sie werden in /var/log/install.log protokolliert.
+# Vorlage: Platzhalter in At-Zeichen (App-Name) ersetzt Scripts/make_pkg.sh aus Installer/config.env.
+#
+# Fehler beim Neustart, Aktualisieren oder Öffnen der App brechen die Installation nicht ab (der
+# Treiber ist dann trotzdem installiert); sie werden in /var/log/install.log protokolliert.
 
 set -euo pipefail
 
@@ -156,6 +164,73 @@ refresh_queues() {
     log "${updated} Warteschlangen aktualisiert, ${skipped} unverändert."
 }
 
+# --- 4. Einrichtungsassistent ----------------------------------------------------------------
+SETUP_APP="/Applications/@APP_NAME@.app"  # wird von Scripts/make_pkg.sh aus Installer/config.env eingesetzt
+
+# Gibt es schon eine Warteschlange mit LabelWerk-PPD (*lwModel)? Dann ist dies ein Update – die
+# Drucker sind eingerichtet (und eben aktualisiert), der Assistent würde nur stören.
+has_labelwerk_queues() {
+    local queue_ppd
+    for queue_ppd in "${CUPS_PPD_DIR}"/*.ppd; do
+        [[ -f "${queue_ppd}" ]] || continue
+        if grep -q '^\*lwModel:' "${queue_ppd}"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Gibt den an der grafischen Oberfläche angemeldeten Benutzer aus – nichts, wenn niemand angemeldet
+# ist (Anmeldefenster, Systemassistent beim ersten Start, nur root).
+console_user() {
+    local user
+    user="$(stat -f%Su /dev/console 2>/dev/null || true)"
+    case "${user}" in
+        ""|root|loginwindow|_mbsetupuser) return 0 ;;
+    esac
+    printf '%s\n' "${user}"
+}
+
+# Öffnet LabelWerk mit „--setup“ für den angemeldeten Benutzer (die App startet dann den
+# Einrichtungsassistenten zum Installieren von Druckern). Nie bei Installationen über die
+# Kommandozeile: „installer“ setzt COMMAND_LINE_INSTALL – so auch Softwareverteilung, MDM und CI.
+# Nie bei einem Update, d. h. wenn schon LabelWerk-Drucker eingerichtet sind.
+# Läuft die App unter dem Benutzer (nicht als root): „launchctl asuser“ wechselt in seine
+# Anmeldesitzung, „sudo -u“ zu seiner Kennung. Gibt immer 0 zurück – bestenfalls, nie ein Abbruch.
+open_setup_assistant() {
+    local user uid
+    if [[ -n "${COMMAND_LINE_INSTALL:-}" ]]; then
+        log "Installation über die Kommandozeile – der Einrichtungsassistent wird nicht geöffnet."
+        return 0
+    fi
+    if has_labelwerk_queues; then
+        log "LabelWerk-Drucker sind bereits eingerichtet (Update) – der Einrichtungsassistent wird nicht geöffnet."
+        return 0
+    fi
+    if [[ ! -d "${SETUP_APP}" ]]; then
+        log "${SETUP_APP} fehlt – der Einrichtungsassistent wird nicht geöffnet."
+        return 0
+    fi
+    user="$(console_user)"
+    if [[ -z "${user}" ]]; then
+        log "Kein Benutzer angemeldet – der Einrichtungsassistent wird nicht geöffnet."
+        return 0
+    fi
+    uid="$(id -u "${user}" 2>/dev/null || true)"
+    case "${uid}" in
+        ""|0|*[!0-9]*)
+            log "Benutzerkennung von „${user}“ unbekannt – der Einrichtungsassistent wird nicht geöffnet."
+            return 0
+            ;;
+    esac
+    if launchctl asuser "${uid}" sudo -u "${user}" /usr/bin/open -a "${SETUP_APP}" --args --setup >/dev/null 2>&1; then
+        log "Einrichtungsassistent für „${user}“ geöffnet (${SETUP_APP} --setup)."
+    else
+        log "Einrichtungsassistent konnte nicht geöffnet werden – bitte ${SETUP_APP} selbst öffnen."
+    fi
+    return 0
+}
+
 if restart_cups; then
     if wait_for_scheduler; then
         refresh_queues
@@ -163,4 +238,5 @@ if restart_cups; then
         log "CUPS antwortet nicht – vorhandene Warteschlangen werden nicht aktualisiert."
     fi
 fi
+open_setup_assistant || true
 exit 0

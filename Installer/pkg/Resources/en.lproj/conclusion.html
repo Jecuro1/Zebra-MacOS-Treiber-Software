@@ -28,18 +28,30 @@
 </head>
 <body>
 <h1>@APP_NAME@ is ready</h1>
-<p class="lead">The installation completed successfully.</p>
+<p class="lead">The installation completed successfully. On a first installation, @APP_NAME@ now opens
+automatically – just like a Windows setup that ends with “Set up printer”. On an update, your printers were
+switched to the new driver and keep their settings.</p>
 <div class="card">
-  <strong>Next steps</strong>
+  <strong>Install a network (LAN) printer</strong>
   <ol>
-    <li>Open @APP_NAME@ from the Applications folder or via Spotlight.</li>
-    <li>Pick your printer in the setup assistant – done. From now on every app prints straight to labels.</li>
-    <li>No printer at hand? Choose <em>Printer › Add Demo Printer</em> from the menu.</li>
+    <li>On first launch the welcome assistant greets you: on its <em>Find Printers</em> page, click
+        <em>Install…</em> on <em>Install network printer</em> (if @APP_NAME@ was set up before, the
+        <em>Install Printer</em> assistant opens directly). Printers on your network are found automatically; you can
+        also enter the IP address (port 9100).</li>
+    <li>@APP_NAME@ detects model, resolution and printer language by itself – click <em>Install</em>.</li>
+    <li>Done: the printer appears in <em>System Settings › Printers &amp; Scanners</em> and in every app’s print
+        dialog, printing through the LabelWerk driver.</li>
   </ol>
 </div>
-<h2>Command line</h2>
-<p>If selected, <code>lwctl</code> is available in Terminal, e.g. <code>lwctl discover</code> or
-<code>lwctl help</code>.</p>
+<p>No assistant on screen (e.g. after installing from Terminal or after an update)? Open @APP_NAME@ from the
+Applications folder and choose <em>File › Install Printer…</em>. No printer at hand? Choose <em>File › Add Demo Printer</em>.</p>
+<h2>Without the app: macOS System Settings</h2>
+<p><em>Printers &amp; Scanners › “+” › IP</em>, enter the address, protocol <em>HP Jetdirect – Socket</em>, and pick the
+driver “Zebra <em>model</em> (<em>dpi</em>) - LabelWerk” under <em>Use</em>.</p>
+<h2>Many printers or Macs (IT)</h2>
+<p>If selected, <code>lwctl</code> is available in Terminal: <code>lwctl install --printer tcp://192.168.1.50</code>
+detects the model and sets up the printer; <code>lwctl help install</code> lists all options, and
+<code>lwctl discover</code> finds printers.</p>
 <p class="small">Having trouble? The “Installation” documentation and the app’s <em>Drivers &amp; Queues › Diagnostics</em>
 section help with troubleshooting (filter permissions, CUPS logs).</p>
 </body>

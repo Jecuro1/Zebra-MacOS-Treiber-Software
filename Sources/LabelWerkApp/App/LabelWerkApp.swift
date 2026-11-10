@@ -88,6 +88,12 @@ struct LabelWerkCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button(tr("Drucker hinzufügen …")) { model.isAddPrinterPresented = true }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+                // Kürzel wirken auch hinter einem Sheet – nie ein zweites über einem offenen öffnen.
+                .disabled(model.isInstallWizardPresented || model.isOnboardingPresented)
+            // Wie „Drucker hinzufügen“ unter Windows: als macOS-Drucker mit LabelWerk-Treiber einrichten.
+            Button(tr("Drucker installieren …")) { model.isInstallWizardPresented = true }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+                .disabled(model.isOnboardingPresented || model.isAddPrinterPresented)
             Button(tr("Demo-Drucker hinzufügen")) { model.addDemoPrinter() }
         }
         CommandMenu(tr("Drucker")) {

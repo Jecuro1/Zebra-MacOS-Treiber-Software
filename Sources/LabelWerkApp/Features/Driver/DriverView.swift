@@ -103,6 +103,11 @@ struct DriverView: View {
             pulseFlow(5)
             Task { await loadQueues() }
         }
+        .onChange(of: model.isInstallWizardPresented) { _, shown in
+            // Der Assistent hat womöglich eine Warteschlange angelegt (ein Sheet löst hier kein
+            // onAppear aus): Liste nach dem Schließen neu lesen.
+            if !shown { Task { await loadQueues() } }
+        }
         .confirmationDialog(tr("Treiber entfernen?"), isPresented: $confirmUninstall, titleVisibility: .visible) {
             if !labelWerkQueueNames.isEmpty {
                 Button(tr("Treiber und %d Warteschlangen entfernen", labelWerkQueueNames.count), role: .destructive) {
@@ -476,6 +481,14 @@ struct DriverView: View {
                           subtitle: tr("Drucker, die in allen Programmen im Druckdialog erscheinen"),
                           systemImage: "list.bullet.rectangle.portrait") {
                 HStack(spacing: 6) {
+                    Button {
+                        model.isInstallWizardPresented = true
+                    } label: {
+                        Label(tr("Drucker installieren …"), systemImage: "plus.circle.fill")
+                    }
+                    .buttonStyle(.labelWerkPrimary)
+                    .controlSize(.small)
+                    .help(tr("Netzwerk- oder USB-Drucker als macOS-Drucker installieren – wie unter Windows (⌥⌘N)"))
                     if !linkedQueueSessions.isEmpty {
                         Button {
                             syncAll()
@@ -523,6 +536,12 @@ struct DriverView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 0)
+                        Button {
+                            model.isInstallWizardPresented = true
+                        } label: {
+                            Label(tr("Netzwerkdrucker installieren …"), systemImage: "printer.filled.and.paper")
+                        }
+                        .buttonStyle(.labelWerkSecondary)
                     }
                 }
                 .transition(.opacity)

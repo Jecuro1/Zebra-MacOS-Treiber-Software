@@ -28,18 +28,30 @@
 </head>
 <body>
 <h1>@APP_NAME@ ist bereit</h1>
-<p class="lead">Die Installation wurde erfolgreich abgeschlossen.</p>
+<p class="lead">Die Installation wurde erfolgreich abgeschlossen. Bei der ersten Installation öffnet sich @APP_NAME@
+jetzt automatisch – wie ein Windows-Setup, das mit „Drucker einrichten“ endet. Bei einem Update wurden die
+eingerichteten Drucker auf den neuen Treiber umgestellt; ihre Einstellungen bleiben erhalten.</p>
 <div class="card">
-  <strong>So geht es weiter</strong>
+  <strong>Netzwerkdrucker (LAN) installieren</strong>
   <ol>
-    <li>@APP_NAME@ im Ordner „Programme“ oder über Spotlight öffnen.</li>
-    <li>Im Einrichtungsassistenten den Drucker auswählen – fertig. Ab jetzt druckt jedes Programm direkt auf Etiketten.</li>
-    <li>Ohne Drucker ausprobieren? Im Menü <em>Drucker › Demo-Drucker hinzufügen</em>.</li>
+    <li>Beim ersten Start begrüßt Sie der Willkommensassistent: auf seiner Seite <em>Drucker finden</em> bei
+        <em>Netzwerkdrucker installieren</em> auf <em>Installieren …</em> klicken (wurde @APP_NAME@ schon einmal
+        eingerichtet, öffnet sich der Assistent <em>Drucker installieren</em> direkt). Drucker im Netzwerk werden
+        automatisch gesucht; alternativ die IP-Adresse eingeben (Port 9100).</li>
+    <li>Modell, Auflösung und Druckersprache erkennt @APP_NAME@ selbst – auf <em>Installieren</em> klicken.</li>
+    <li>Fertig: Der Drucker steht unter <em>Systemeinstellungen › Drucker &amp; Scanner</em> und im Druckdialog jedes
+        Programms bereit und druckt mit dem LabelWerk-Treiber.</li>
   </ol>
 </div>
-<h2>Kommandozeile</h2>
-<p>Falls ausgewählt, steht <code>lwctl</code> im Terminal bereit, z. B. <code>lwctl discover</code> oder
-<code>lwctl help</code>.</p>
+<p>Kein Assistent zu sehen (z. B. nach einer Installation im Terminal oder einem Update)? @APP_NAME@ im Ordner
+„Programme“ öffnen und <em>Ablage › Drucker installieren …</em> wählen. Ohne Drucker ausprobieren: <em>Ablage › Demo-Drucker hinzufügen</em>.</p>
+<h2>Ohne App: macOS-Systemeinstellungen</h2>
+<p><em>Drucker &amp; Scanner › „+“ › IP</em>, Adresse eingeben, Protokoll <em>HP Jetdirect – Socket</em>, unter
+<em>Verwenden</em> den Treiber „Zebra <em>Modell</em> (<em>dpi</em>) - LabelWerk“ wählen.</p>
+<h2>Viele Drucker oder Macs (IT)</h2>
+<p>Falls ausgewählt, steht <code>lwctl</code> im Terminal bereit: <code>lwctl install --printer tcp://192.168.1.50</code>
+erkennt das Modell und richtet den Drucker ein; <code>lwctl help install</code> zeigt alle Optionen,
+<code>lwctl discover</code> sucht Drucker.</p>
 <p class="small">Probleme? Hilfe zur Fehlersuche (Filterrechte, CUPS-Protokolle) steht in der Dokumentation
 „Installation“ und in der App unter <em>Treiber &amp; Warteschlangen › Diagnose</em>.</p>
 </body>

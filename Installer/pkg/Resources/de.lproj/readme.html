@@ -35,12 +35,17 @@ und werden automatisch auf die neuen PPD-Dateien umgestellt – Ihre gewählten 
 Geschwindigkeit, Etikettenformat …) bleiben dabei bestehen.</p>
 <h2>Nach der Installation</h2>
 <ol>
-  <li>@APP_NAME@ aus dem Ordner „Programme“ öffnen. Der Einrichtungsassistent sucht nach angeschlossenen und
-      Netzwerk-Druckern (USB, Bonjour, Netzwerk-Scan, Bluetooth).</li>
-  <li>Drucker auswählen und mit einem Klick als macOS-Drucker einrichten – Modell, Auflösung und Treiber werden
-      automatisch zugeordnet.</li>
-  <li>Alternativ: <em>Systemeinstellungen › Drucker &amp; Scanner › Drucker hinzufügen</em> und als Treiber
-      „Zebra … – LabelWerk“ wählen.</li>
+  <li>Zum Abschluss öffnet sich @APP_NAME@ automatisch, beim ersten Mal mit dem Willkommensassistenten (nicht bei
+      einer Installation im Terminal bzw. per Softwareverteilung und nicht bei einem Update – dann @APP_NAME@ aus dem
+      Ordner „Programme“ öffnen).</li>
+  <li><strong>Netzwerkdrucker (LAN):</strong> im Willkommensassistenten auf der Seite <em>Drucker finden</em>
+      <em>Netzwerkdrucker installieren</em> wählen (später: <em>Ablage › Drucker installieren …</em>), den gefundenen
+      Drucker auswählen oder seine IP-Adresse eingeben und auf <em>Installieren</em> klicken. Modell, Auflösung und Treiber werden
+      automatisch zugeordnet; danach ist der Drucker ein normaler Mac-Drucker (<em>Drucker &amp; Scanner</em>,
+      Druckdialog jedes Programms). USB-Drucker werden ebenso gefunden.</li>
+  <li>Alternativ ohne App: <em>Systemeinstellungen › Drucker &amp; Scanner › „+“ › IP</em>, Protokoll
+      <em>HP Jetdirect – Socket</em> und als Treiber „Zebra … - LabelWerk“ wählen.</li>
+  <li>Für IT und viele Drucker: <code>lwctl install --printer tcp://&lt;Adresse&gt;</code> im Terminal.</li>
 </ol>
 <h2>Datenschutz</h2>
 <p>@APP_NAME@ kommuniziert ausschließlich mit Ihren Druckern im lokalen Netzwerk, per USB oder Bluetooth. Es werden

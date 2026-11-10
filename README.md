@@ -75,14 +75,49 @@ Englisch verfügbar und respektiert „Bewegung reduzieren“.
 
 ## Schnellstart
 
-1. `LabelWerk-<version>.pkg` installieren (installiert App, Treiber-Filter und PPDs).
-2. LabelWerk öffnen – der Einrichtungsassistent findet angeschlossene und Netzwerk-Drucker.
-3. Drucker hinzufügen, optional als macOS-Drucker einrichten – fertig. Ab jetzt druckt jede App
-   (Vorschau, Pages, Versand-Tools …) direkt auf das Etikett.
+1. `LabelWerk-<version>.pkg` doppelklicken und installieren (App, Treiber-Filter und PPDs).
+2. Zum Abschluss öffnet sich LabelWerk automatisch – wie ein Windows-Setup, das mit „Drucker
+   einrichten“ endet. Beim ersten Start begrüßt es Sie mit dem Willkommensassistenten; dessen Seite
+   **„Drucker finden“** findet angeschlossene und Netzwerk-Drucker, die Karte
+   **„Netzwerkdrucker installieren“** › **„Installieren …“** öffnet den Assistenten
+   **„Drucker installieren“**. Wurde LabelWerk schon einmal eingerichtet, öffnet sich dieser direkt.
+3. Drucker wählen, **„Installieren“** – fertig. Ab jetzt druckt jede App (Vorschau, Pages,
+   Versand-Tools …) direkt auf das Etikett.
 
 Ohne Drucker: **Ablage › Demo-Drucker hinzufügen** legt einen simulierten ZD421t an.
 
-Ausführlich: [docs/INSTALLATION.md](docs/INSTALLATION.md)
+### Netzwerkdrucker (LAN) installieren
+
+Wie mit einem Windows-Treiberinstallationsprogramm: Drucker finden oder IP-Adresse eingeben, das
+Modell wird erkannt, „Installieren“ – danach ist der Drucker ein normaler macOS-Drucker
+(**Systemeinstellungen › Drucker & Scanner** und Druckdialog jedes Programms) mit dem
+LabelWerk-Treiber. Drei Wege:
+
+1. **Installationsassistent nach dem Paket** – LabelWerk öffnet sich nach der Installation per
+   Doppelklick von selbst (nicht bei `sudo installer …`/MDM und nicht bei einem Update, wenn schon
+   LabelWerk-Drucker eingerichtet sind). Beim ersten Start kommt zuerst der Willkommensassistent:
+   auf seiner Seite **„Drucker finden“** › **„Netzwerkdrucker installieren“** › **„Installieren …“**;
+   später öffnet sich der Assistent direkt. Er führt durch Drucker wählen → Modell → Name &
+   Optionen → Installieren; fehlt der Treiber, wird er mitinstalliert.
+2. **In der App:** **Ablage › Drucker installieren …** – derselbe Assistent, jederzeit für weitere
+   Drucker.
+3. **Kommandozeile** für IT und Softwareverteilung:
+
+   ```bash
+   lwctl install --printer tcp://192.168.1.50                 # Modell erkennen, Warteschlange anlegen
+   lwctl install -p tcp://192.168.1.51 --name Versand --location "Lager" --default --test-page
+   lwctl install -p tcp://192.168.1.52 --model zt410 --dpi 300 --dry-run   # ohne Verbindung, nur anzeigen
+
+   for ip in 192.168.1.50 192.168.1.51 192.168.1.52; do           # mehrere Drucker
+       lwctl install -p "tcp://$ip" || echo "Fehler: $ip" >&2
+   done
+   ```
+
+Alternativ ohne App: **Systemeinstellungen › Drucker & Scanner › „+“ › IP**, Adresse eingeben,
+Protokoll **„HP Jetdirect – Socket“**, unter „Verwenden“ den Treiber
+**„Zebra <Modell> (<dpi> dpi) - LabelWerk“** wählen.
+
+Ausführlich: [docs/INSTALLATION.md](docs/INSTALLATION.md#netzwerkdrucker-lan-installieren)
 
 ## Projektaufbau
 
@@ -136,6 +171,9 @@ Den Drucker wählt `--printer` (bzw. `-p` oder die Umgebungsvariable `LWCTL_PRIN
 
 ```bash
 lwctl discover                                        # Drucker suchen (Bonjour, Netzwerk, USB, Bluetooth, CUPS)
+lwctl install -p tcp://192.168.1.50                   # als macOS-Drucker einrichten (Modell erkennen, lpadmin)
+lwctl queues --labelwerk                              # eingerichtete Warteschlangen mit LabelWerk-Treiber
+lwctl uninstall-queue Zebra_ZD421t_192.168.1.50       # Warteschlange entfernen
 lwctl --printer tcp://192.168.1.50 status             # Zustand, Meldungen, Zähler (--json möglich)
 lwctl -p tcp://192.168.1.50 print versand.png --stock w4h6in --dither atkinson
 lwctl -p tcp://192.168.1.50 send etikett.zpl          # Rohdaten unverändert senden
@@ -151,7 +189,11 @@ lwctl virtual-printer --port 9100                     # Demo-Drucker im Netzwerk
 Weitere Befehle: `info`, `setvar`, `do`, `config`, `network`, `files`, `delete-file`,
 `upload-font`, `upload-graphic`, `firmware`, `test-label`, `models`, `stocks`, `version`.
 `lwctl help <befehl>` zeigt alle Optionen. Rückgabewerte: 0 Erfolg, 1 Fehler, 2 falscher Aufruf,
-3 Verbindungsfehler, 4 Drucker meldet Fehler (`status`), 130 abgebrochen.
+3 Verbindungsfehler (bei `install`: Drucker nicht erreichbar bzw. nicht erkannt), 4 Drucker meldet
+Fehler (`status`), 130 abgebrochen. `install` und `uninstall-queue` zeigen jeden ausgeführten
+`lpadmin`-Befehl an; `--dry-run` zeigt ihn nur an. `install` richtet einen Drucker nie doppelt ein:
+Eine LabelWerk-Warteschlange desselben Druckers wird aktualisiert (ihre Einstellungen bleiben
+erhalten), eine andere Warteschlange gleichen Namens nur mit `--replace` ersetzt.
 
 ## Continuous Integration
 

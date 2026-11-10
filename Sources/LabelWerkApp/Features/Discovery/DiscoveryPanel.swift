@@ -56,6 +56,8 @@ struct DiscoveryPanel: View {
     @State private var highlightToken = 0
     /// Nicht als Zebra erkanntes Netzwerkgerät, das erst nach Rückfrage hinzugefügt wird.
     @State private var pendingUnidentified: DiscoveredPrinter?
+    /// „Auch als macOS-Drucker installieren“ (Netzwerk und USB, gemerkt).
+    @AppStorage(MacPrinterInstallToggle.storageKey) private var installMacPrinter = true
 
     init(style: DiscoveryPanelStyle,
          initialTab: DiscoveryPanelTab = .search,
@@ -186,6 +188,13 @@ struct DiscoveryPanel: View {
                             .foregroundStyle(Theme.ready)
                             .contentTransition(.numericText(value: Double(addedCount)))
                     }
+                }
+                if controller.found.contains(where: { PrinterInstallRequest.supports($0.descriptor) }) {
+                    MacPrinterInstallToggle(isOn: $installMacPrinter)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.subtleFill))
+                        .transition(.opacity)
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: style == .page ? 330 : 300), spacing: 14)],
                           alignment: .leading, spacing: 14) {
@@ -356,6 +365,7 @@ struct DiscoveryPanel: View {
                     .controlSize(.small)
                 }
                 Spacer(minLength: 0)
+                MacPrinterInstallToggle(isOn: $installMacPrinter, compact: true)
                 if !model.sessions.isEmpty {
                     Label(tr("%d eingerichtet", model.sessions.count), systemImage: "printer.fill")
                         .font(.system(size: 11.5, weight: .medium))
@@ -511,6 +521,9 @@ struct DiscoveryPanel: View {
         let previousSelection = model.selection
         let session = model.addPrinter(from: printer)
         if model.preferences.playSounds { SoundService.play(.success) }
+        if MacPrinterInstallToggle.shouldInstall(isOn: installMacPrinter, descriptor: printer.descriptor) {
+            PrinterInstallService.installInBackground(for: session, model: model)
+        }
         if style == .page {
             // Auf der Suchseite bleiben, damit weitere Drucker hinzugefügt werden können.
             model.selection = previousSelection
@@ -697,6 +710,7 @@ struct AddPrinterView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @State private var showInstallWizard = false
     private let initialTab: DiscoveryPanelTab
 
     init(initialTab: DiscoveryPanelTab = .search) {
@@ -715,6 +729,13 @@ struct AddPrinterView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button {
+                    showInstallWizard = true
+                } label: {
+                    Label(tr("Drucker installieren …"), systemImage: "printer.filled.and.paper")
+                }
+                .buttonStyle(.labelWerkSecondary)
+                .help(tr("Installationsassistent: Netzwerkdrucker wie unter Windows als macOS-Drucker einrichten"))
                 Button(action: close) {
                     Image(systemName: "xmark")
                         .font(.system(size: 12, weight: .bold))
@@ -757,6 +778,13 @@ struct AddPrinterView: View {
         }
         .frame(minWidth: 800, idealWidth: 880, minHeight: 620, idealHeight: 720)
         .background { AnimatedBackground(style: .subtle).ignoresSafeArea() }
+        .sheet(isPresented: $showInstallWizard) {
+            NetworkPrinterInstallWizard { exit in
+                // „Drucker öffnen“ bzw. „Treiber & Warteschlangen“: auch dieses Sheet schließen.
+                if exit == .navigated { close() }
+            }
+            .environment(model)
+        }
     }
 
     private func close() {

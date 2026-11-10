@@ -10,7 +10,7 @@ enum CommandCatalog {
                    "Drucker: tcp://host[:port], usb://vid:pid[/seriennummer], cups://warteschlange, virtual://demo (Standard: Umgebungsvariable LWCTL_PRINTER)"),
         OptionSpec("language", short: "l", value: "zpl|epl|cpcl", "Druckersprache (Standard: zpl)"),
         OptionSpec("timeout", short: "t", value: "sekunden", "Wartezeit auf Antworten (Standard: 3; bei discover: Suchdauer, Standard 6)"),
-        OptionSpec("json", "Ausgabe als JSON (status, info, discover, models, stocks, settings, config, files, network)"),
+        OptionSpec("json", "Ausgabe als JSON (status, info, discover, install, queues, uninstall-queue, models, stocks, settings, config, files, network)"),
         OptionSpec("help", short: "h", "Hilfe anzeigen"),
         OptionSpec("version", short: "V", "Version anzeigen"),
     ]
@@ -69,6 +69,71 @@ enum CommandCatalog {
             ],
             needsPrinter: false, minimumArguments: 0, maximumArguments: 0,
             examples: ["lwctl discover", "lwctl discover --hosts 192.168.1.20,192.168.1.21 --json"]),
+        CommandSpec(
+            name: "install",
+            usage: "install --printer tcp://HOST[:PORT] [--model auto|<id>|generic] [--name NAME] [optionen]",
+            summary: "Netzwerkdrucker (LAN) als macOS-/CUPS-Drucker einrichten – wie ein Windows-Installationsprogramm",
+            details: """
+            Verbindet sich mit dem Drucker, erkennt Modell, Auflösung und Druckersprache (--model auto),
+            wählt die passende LabelWerk-PPD (LabelWerk-<modell>-<dpi>dpi, sonst eine generische PPD wie
+            LabelWerk-generic-zpl-203dpi) und legt mit lpadmin eine Warteschlange an (Geräte-URI
+            socket://HOST:PORT, nicht freigegeben). Danach steht der Drucker unter „Drucker & Scanner“ und
+            in jedem Druckdialog bereit. Jeder ausgeführte Befehl wird angezeigt; --dry-run zeigt ihn nur an.
+
+            Ohne Verbindung (z. B. zum Vorbereiten vieler Macs) das Modell mit --model angeben
+            (Liste: lwctl models); --model generic verwendet eine generische PPD. --language legt die
+            Druckersprache fest (Standard: vom Modell bzw. Drucker). Auf macOS genügt ein
+            Administratorkonto, sonst mit sudo ausführen.
+
+            Vorhandene Warteschlangen: Eine LabelWerk-Warteschlange desselben Druckers wird
+            aktualisiert, ihre Einstellungen (Schwärzung, Geschwindigkeit, Etikett …) bleiben erhalten;
+            ohne --name wird sie auch unter anderem Namen gefunden (etwa vom Assistenten der App), statt
+            den Drucker ein zweites Mal einzurichten. Andere Warteschlangen gleichen Namens – auch in
+            anderer Groß-/Kleinschreibung – nur mit --replace. Die Prüfung läuft auch mit --dry-run.
+            """,
+            options: [
+                OptionSpec("model", short: "m", value: "auto|id|generic",
+                           "Druckermodell (Standard: auto = vom Drucker erkennen; generic = generische PPD)"),
+                OptionSpec("dpi", value: "152|203|300|600", "Auflösung (Standard: vom Drucker bzw. vom Modell)"),
+                OptionSpec("name", short: "n", value: "name",
+                           "Name der Warteschlange (Standard: Zebra_<Modell>_<Adresse>); erscheint auch als Beschreibung"),
+                OptionSpec("replace", "Vorhandene Warteschlange gleichen Namens ersetzen (auch ohne LabelWerk-Treiber)"),
+                OptionSpec("location", value: "text", "Standort, z. B. „Lager, Tor 3“"),
+                OptionSpec("stock", short: "s", value: "id", "Etikettenformat als Standard-Papiergröße (Liste: lwctl stocks)"),
+                OptionSpec("default", "Als Standarddrucker festlegen"),
+                OptionSpec("test-page", "Danach eine Testseite über die neue Warteschlange drucken"),
+                OptionSpec("ppd-dir", value: "ordner", "Ordner mit den LabelWerk-PPDs (Standard: \(InstallCommands.defaultPPDDirectory))"),
+                OptionSpec("dry-run", "Befehle nur anzeigen, nichts einrichten"),
+            ],
+            needsPrinter: true, minimumArguments: 0, maximumArguments: 0,
+            examples: [
+                "lwctl install --printer tcp://192.168.1.50",
+                "lwctl install -p tcp://192.168.1.51 --name Versand --location \"Lager, Tor 3\" --stock w4h6in --default --test-page",
+                "lwctl install -p tcp://etiketten-2.local:9100 --model zt410 --dpi 300 --dry-run",
+                "for ip in 192.168.1.50 192.168.1.51; do lwctl install -p tcp://$ip --json; done",
+            ]),
+        CommandSpec(
+            name: "queues", usage: "queues [--labelwerk] [--json]",
+            summary: "Eingerichtete Druckerwarteschlangen (CUPS) auflisten",
+            details: """
+            Listet alle macOS-/CUPS-Warteschlangen mit Geräte-URI und Treiber. Warteschlangen mit dem
+            LabelWerk-Treiber sind markiert; --labelwerk zeigt nur diese.
+            """,
+            options: [OptionSpec("labelwerk", "Nur Warteschlangen mit LabelWerk-Treiber")],
+            needsPrinter: false, minimumArguments: 0, maximumArguments: 0,
+            examples: ["lwctl queues", "lwctl queues --labelwerk --json"]),
+        CommandSpec(
+            name: "uninstall-queue", usage: "uninstall-queue <name> [--force] [--dry-run]",
+            summary: "Druckerwarteschlange entfernen",
+            details: """
+            Entfernt eine mit „install“ oder der App eingerichtete Warteschlange (lpadmin -x). Der
+            Treiber bleibt installiert. Warteschlangen ohne LabelWerk-Treiber werden nur mit --force
+            entfernt.
+            """,
+            options: [OptionSpec("force", short: "f", "Auch Warteschlangen ohne LabelWerk-Treiber entfernen"),
+                      OptionSpec("dry-run", "Befehl nur anzeigen, nichts entfernen")],
+            needsPrinter: false, minimumArguments: 1, maximumArguments: 1,
+            examples: ["lwctl uninstall-queue Zebra_ZD421t_192.168.1.50", "lwctl uninstall-queue Versand --dry-run"]),
         CommandSpec(
             name: "status", usage: "status [--json]",
             summary: "Zustand, Meldungen und Zähler anzeigen",

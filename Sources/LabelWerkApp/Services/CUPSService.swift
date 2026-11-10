@@ -115,7 +115,7 @@ enum CUPSService {
     static func deviceURI(for descriptor: ConnectionDescriptor) async throws -> String? {
         switch descriptor {
         case .tcp(let host, let port):
-            return "socket://\(host):\(port)"
+            return socketURI(host: host, port: port)
         case .usb(let usb):
             // Von CUPS gemeldete USB-URI (z. B. `usb://Zebra%20Technologies/ZTC%20ZD421-203dpi%20ZPL?serial=…`).
             let uris = await zebraDeviceURIs().filter { $0.hasPrefix("usb://") }
@@ -123,6 +123,15 @@ enum CUPSService {
         case .cupsQueue, .bluetooth, .ble, .virtual:
             return nil
         }
+    }
+
+    /// `socket://`-URI eines Netzwerkdruckers. IPv6-Adressen stehen in eckigen Klammern, eine
+    /// Zonenangabe als `%25` (`socket://[fe80::1%25en0]:9100`) – sonst wäre die URI ungültig.
+    static func socketURI(host: String, port: Int) -> String {
+        let bare = host.hasPrefix("[") && host.hasSuffix("]") ? String(host.dropFirst().dropLast()) : host
+        guard bare.contains(":") else { return "socket://\(bare):\(port)" }
+        let zoneEncoded = bare.replacingOccurrences(of: "%25", with: "%").replacingOccurrences(of: "%", with: "%25")
+        return "socket://[\(zoneEncoded)]:\(port)"
     }
 
     /// Wählt die USB-URI dieses Druckers: über die Seriennummer, sonst über das Modell. Mit nur
@@ -169,9 +178,13 @@ enum CUPSService {
         guard let ppd = ppdURL(modelID: printer.modelID, resolution: printer.resolution, language: printer.language) else {
             throw CUPSError.noPPD(printer.name)
         }
-        let name = sanitizedQueueName(queueName ?? printer.name)
+        // Eine vorhandene Warteschlange behält ihren Namen, auch wenn `sanitizedQueueName` ihn
+        // umschreiben würde (z. B. „Büro_Zebra“) – sonst entstünde neben ihr eine zweite.
+        let requested = queueName ?? printer.name
+        let existing = await queues()
+        let name = existing.contains { $0.name == requested } ? requested : sanitizedQueueName(requested)
         // `-R` wirkt sofort und nur auf vorhandene Warteschlangen: Veraltete Standards nur dann entfernen.
-        let exists = await queues().contains { $0.name == name }
+        let exists = existing.contains { $0.name == name }
         let plan = defaultsPlan(settings: printer.settings, language: printer.language, removingStale: exists)
         var args = ["-p", name, "-E", "-v", uri, "-P", ppd.path,
                     "-D", printer.name, "-o", "printer-is-shared=false"]

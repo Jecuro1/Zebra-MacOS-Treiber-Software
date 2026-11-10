@@ -6,6 +6,7 @@
 
 /* MARK: App/LabelWerkApp.swift */
 "Drucker hinzufügen …" = "Drucker hinzufügen …";
+"Drucker installieren …" = "Drucker installieren …";
 "Demo-Drucker hinzufügen" = "Demo-Drucker hinzufügen";
 "Drucker" = "Drucker";
 "Testetikett drucken" = "Testetikett drucken";
@@ -546,6 +547,7 @@
 "Zebra-Drucker per Bonjour, USB, Netzwerk-Scan, macOS-Warteschlange oder Bluetooth finden und einrichten." = "Zebra-Drucker per Bonjour, USB, Netzwerk-Scan, macOS-Warteschlange oder Bluetooth finden und einrichten.";
 "%d Drucker eingerichtet" = "%d Drucker eingerichtet";
 "Suchen, manuell einrichten oder den Demo-Drucker ausprobieren." = "Suchen, manuell einrichten oder den Demo-Drucker ausprobieren.";
+"Installationsassistent: Netzwerkdrucker wie unter Windows als macOS-Drucker einrichten" = "Installationsassistent: Netzwerkdrucker wie unter Windows als macOS-Drucker einrichten";
 "Schließen (Esc)" = "Schließen (Esc)";
 "Fertig" = "Fertig";
 
@@ -709,11 +711,13 @@
 "Der LabelWerk-Filter rastert in Schwarz/Weiß, komprimiert und erzeugt ZPL, EPL oder CPCL mit deinen Einstellungen (Schwärzung, Tempo, Medien)." = "Der LabelWerk-Filter rastert in Schwarz/Weiß, komprimiert und erzeugt ZPL, EPL oder CPCL mit deinen Einstellungen (Schwärzung, Tempo, Medien).";
 "Die Daten gehen per USB oder Netzwerk (Port 9100) an den Zebra-Drucker – ohne Umweg über Zebra-Software." = "Die Daten gehen per USB oder Netzwerk (Port 9100) an den Zebra-Drucker – ohne Umweg über Zebra-Software.";
 "Drucker, die in allen Programmen im Druckdialog erscheinen" = "Drucker, die in allen Programmen im Druckdialog erscheinen";
+"Netzwerk- oder USB-Drucker als macOS-Drucker installieren – wie unter Windows (⌥⌘N)" = "Netzwerk- oder USB-Drucker als macOS-Drucker installieren – wie unter Windows (⌥⌘N)";
 "Alle synchronisieren" = "Alle synchronisieren";
 "Druckeinstellungen aller verknüpften Drucker als Standard ihrer Warteschlange übernehmen" = "Druckeinstellungen aller verknüpften Drucker als Standard ihrer Warteschlange übernehmen";
 "Keine Warteschlangen eingerichtet" = "Keine Warteschlangen eingerichtet";
 "Richte unten für deine LabelWerk-Drucker eine Warteschlange ein – danach erscheinen sie in jedem Druckdialog." = "Richte unten für deine LabelWerk-Drucker eine Warteschlange ein – danach erscheinen sie in jedem Druckdialog.";
 "Installiere zuerst den Treiber, dann lassen sich Warteschlangen für deine Drucker einrichten." = "Installiere zuerst den Treiber, dann lassen sich Warteschlangen für deine Drucker einrichten.";
+"Netzwerkdrucker installieren …" = "Netzwerkdrucker installieren …";
 "LabelWerk-Drucker ohne Warteschlange" = "LabelWerk-Drucker ohne Warteschlange";
 "Eine Warteschlange macht den Drucker mit seinen Einstellungen in allen Programmen verfügbar." = "Eine Warteschlange macht den Drucker mit seinen Einstellungen in allen Programmen verfügbar.";
 "Zum Einrichten wird der LabelWerk-Treiber benötigt. Installiere ihn oben." = "Zum Einrichten wird der LabelWerk-Treiber benötigt. Installiere ihn oben.";
@@ -2158,6 +2162,7 @@
 "Wähle links einen Drucker oder füge einen neuen hinzu." = "Wähle links einen Drucker oder füge einen neuen hinzu.";
 
 /* MARK: Features/Root/SidebarView.swift */
+"Drucker im Netzwerk finden und als macOS-Drucker mit dem LabelWerk-Treiber installieren (⌥⌘N)" = "Drucker im Netzwerk finden und als macOS-Drucker mit dem LabelWerk-Treiber installieren (⌥⌘N)";
 "Drucker entfernen?" = "Drucker entfernen?";
 "„%@“ wird aus LabelWerk entfernt. Eine eingerichtete macOS-Warteschlange bleibt erhalten." = "„%@“ wird aus LabelWerk entfernt. Eine eingerichtete macOS-Warteschlange bleibt erhalten.";
 "Drucker umbenennen" = "Drucker umbenennen";
@@ -2193,6 +2198,114 @@
 "Drucker, Etikettenformate und Verlauf bleiben erhalten." = "Drucker, Etikettenformate und Verlauf bleiben erhalten.";
 "Moderner Treiber und Steuerzentrale für Zebra®-Etikettendrucker auf dem Mac." = "Moderner Treiber und Steuerzentrale für Zebra®-Etikettendrucker auf dem Mac.";
 "Zebra ist eine Marke der Zebra Technologies Corp. LabelWerk ist ein unabhängiges Projekt und steht in keiner Verbindung zu Zebra Technologies." = "Zebra ist eine Marke der Zebra Technologies Corp. LabelWerk ist ein unabhängiges Projekt und steht in keiner Verbindung zu Zebra Technologies.";
+
+/* MARK: Features/Setup/NetworkPrinterInstallWizard.swift */
+"Drucker installieren" = "Drucker installieren";
+"Schritt %d von %d: %@" = "Schritt %d von %d: %@";
+"Assistent schließen (Esc)" = "Assistent schließen (Esc)";
+"Der Treiber wird mitinstalliert" = "Der Treiber wird mitinstalliert";
+"Drucker wird geprüft …" = "Drucker wird geprüft …";
+"Modell wird erkannt …" = "Modell wird erkannt …";
+"Installieren" = "Installieren";
+"Wird installiert …" = "Wird installiert …";
+
+/* MARK: Features/Setup/SetupChooseStep.swift */
+"Drucker im Netzwerk werden gesucht …" = "Drucker im Netzwerk werden gesucht …";
+"Bonjour, Netzwerk-Scan (Port 9100) und USB – Drucker auswählen und „Weiter“ wählen." = "Bonjour, Netzwerk-Scan (Port 9100) und USB – Drucker auswählen und „Weiter“ wählen.";
+"Adresse unten eingeben – sie steht auf dem Konfigurationsetikett des Druckers." = "Adresse unten eingeben – sie steht auf dem Konfigurationsetikett des Druckers.";
+"Im Netzwerk wurde kein Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben." = "Im Netzwerk wurde kein Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben.";
+"Adresse eingeben" = "Adresse eingeben";
+"IP-Adresse oder Hostname, z. B. 192.168.1.50" = "IP-Adresse oder Hostname, z. B. 192.168.1.50";
+"Trotzdem fortfahren" = "Trotzdem fortfahren";
+"Der macOS-Drucker wird trotzdem eingerichtet und druckt, sobald der Drucker erreichbar ist. Das Modell muss dann von Hand gewählt werden." = "Der macOS-Drucker wird trotzdem eingerichtet und druckt, sobald der Drucker erreichbar ist. Das Modell muss dann von Hand gewählt werden.";
+"macOS-Drucker vorhanden" = "macOS-Drucker vorhanden";
+"In LabelWerk" = "In LabelWerk";
+
+/* MARK: Features/Setup/SetupEntryViews.swift */
+"Treiber nicht verfügbar – der Drucker wird nur in LabelWerk eingerichtet." = "Treiber nicht verfügbar – der Drucker wird nur in LabelWerk eingerichtet.";
+"Netzwerk- und USB-Drucker erscheinen danach in jedem Druckdialog." = "Netzwerk- und USB-Drucker erscheinen danach in jedem Druckdialog.";
+"Der LabelWerk-Treiber wird dabei installiert (Administratorpasswort)." = "Der LabelWerk-Treiber wird dabei installiert (Administratorpasswort).";
+"Auch als macOS-Drucker installieren" = "Auch als macOS-Drucker installieren";
+"Netzwerkdrucker installieren" = "Netzwerkdrucker installieren";
+"Wie unter Windows: Drucker finden, Modell erkennen, installieren – danach druckt jedes Programm direkt auf den Zebra-Drucker." = "Wie unter Windows: Drucker finden, Modell erkennen, installieren – danach druckt jedes Programm direkt auf den Zebra-Drucker.";
+"Installieren …" = "Installieren …";
+"Installationsassistent öffnen (⌥⌘N)" = "Installationsassistent öffnen (⌥⌘N)";
+
+/* MARK: Features/Setup/SetupInstallStep.swift */
+"Installation wird vorbereitet …" = "Installation wird vorbereitet …";
+"Installation fehlgeschlagen" = "Installation fehlgeschlagen";
+"Adresse ändern" = "Adresse ändern";
+"Modell ändern" = "Modell ändern";
+"Drucker & Scanner öffnen" = "Drucker & Scanner öffnen";
+"„%@“ ist installiert" = "„%@“ ist installiert";
+"Der Drucker erscheint jetzt in den Systemeinstellungen unter „Drucker & Scanner“ und im Druckdialog jedes Programms (⌘P)." = "Der Drucker erscheint jetzt in den Systemeinstellungen unter „Drucker & Scanner“ und im Druckdialog jedes Programms (⌘P).";
+"Aktualisiert: %@" = "Aktualisiert: %@";
+"Warteschlange: %@" = "Warteschlange: %@";
+"Allgemeiner Treiber" = "Allgemeiner Treiber";
+"Modelltreiber" = "Modelltreiber";
+"In LabelWerk überwacht" = "In LabelWerk überwacht";
+"Weiteren Drucker installieren" = "Weiteren Drucker installieren";
+
+/* MARK: Features/Setup/SetupModelStep.swift */
+"%d %% sicher" = "%d %% sicher";
+"Beim Drucker abfragen" = "Beim Drucker abfragen";
+"Erkanntes Modell" = "Erkanntes Modell";
+"Das automatisch erkannte Modell wieder verwenden" = "Das automatisch erkannte Modell wieder verwenden";
+"Modell erneut erkennen" = "Modell erneut erkennen";
+"Allgemeiner Zebra-Drucker" = "Allgemeiner Zebra-Drucker";
+"Kein Zebra-Drucker erkannt" = "Kein Zebra-Drucker erkannt";
+"Modell nicht erkannt" = "Modell nicht erkannt";
+"LabelWerk fragt den Drucker nach Modell, Auflösung und Sprachen." = "LabelWerk fragt den Drucker nach Modell, Auflösung und Sprachen.";
+"Bitte das Modell unten wählen." = "Bitte das Modell unten wählen.";
+"Von Hand gewählt – erkannt wurde %@." = "Von Hand gewählt – erkannt wurde %@.";
+"Von Hand gewählt." = "Von Hand gewählt.";
+"%@ · meldet sich als „%@“" = "%@ · meldet sich als „%@“";
+"Das Gerät meldet sich als „%@“. Der LabelWerk-Treiber ist nur für Zebra-Drucker gedacht." = "Das Gerät meldet sich als „%@“. Der LabelWerk-Treiber ist nur für Zebra-Drucker gedacht.";
+"Das Gerät hat sich bei der Suche nicht als Zebra-Drucker zu erkennen gegeben. Modell unten wählen – oder beim Drucker abfragen, wenn es sicher ein Zebra-Drucker ist." = "Das Gerät hat sich bei der Suche nicht als Zebra-Drucker zu erkennen gegeben. Modell unten wählen – oder beim Drucker abfragen, wenn es sicher ein Zebra-Drucker ist.";
+"Der Drucker hat nicht geantwortet (%@). Bitte das Modell unten wählen." = "Der Drucker hat nicht geantwortet (%@). Bitte das Modell unten wählen.";
+"Der Drucker ist gerade nicht erreichbar. Bitte das Modell unten wählen – unsicher? „Allgemeiner Zebra-Drucker“ passt zu allen ZPL-Druckern." = "Der Drucker ist gerade nicht erreichbar. Bitte das Modell unten wählen – unsicher? „Allgemeiner Zebra-Drucker“ passt zu allen ZPL-Druckern.";
+"Bitte das Modell unten wählen. Unsicher? „Allgemeiner Zebra-Drucker“ passt zu allen ZPL-Druckern." = "Bitte das Modell unten wählen. Unsicher? „Allgemeiner Zebra-Drucker“ passt zu allen ZPL-Druckern.";
+"Firmware %@" = "Firmware %@";
+"Seriennr. %@" = "Seriennr. %@";
+"Allgemeiner Treiber für %@ – passt, wenn das Modell fehlt" = "Allgemeiner Treiber für %@ – passt, wenn das Modell fehlt";
+"Erkannt" = "Erkannt";
+
+/* MARK: Features/Setup/SetupOptionsStep.swift */
+"Name in macOS" = "Name in macOS";
+"z. B. Lager, Versand, Empfang" = "z. B. Lager, Versand, Empfang";
+"Interner Name in macOS (CUPS), z. B. für das Terminal: lp -d <Name>" = "Interner Name in macOS (CUPS), z. B. für das Terminal: lp -d <Name>";
+"Als Standarddrucker" = "Als Standarddrucker";
+"Druckdialoge schlagen diesen Drucker vor. Steht in den Systemeinstellungen „Zuletzt verwendeter Drucker“, gilt dieser stattdessen." = "Druckdialoge schlagen diesen Drucker vor. Steht in den Systemeinstellungen „Zuletzt verwendeter Drucker“, gilt dieser stattdessen.";
+"Prüft den kompletten Druckweg über macOS – wie „Testseite drucken“ unter Windows." = "Prüft den kompletten Druckweg über macOS – wie „Testseite drucken“ unter Windows.";
+"In LabelWerk überwachen" = "In LabelWerk überwachen";
+"Bereits eingerichtet als „%@“ – der macOS-Drucker wird damit verknüpft." = "Bereits eingerichtet als „%@“ – der macOS-Drucker wird damit verknüpft.";
+"Live-Status, Mitteilungen bei Fehlern, Werkzeuge und Designer für diesen Drucker." = "Live-Status, Mitteilungen bei Fehlern, Werkzeuge und Designer für diesen Drucker.";
+"Für diesen Drucker gibt es schon einen macOS-Drucker" = "Für diesen Drucker gibt es schon einen macOS-Drucker";
+"„%@“ aktualisieren" = "„%@“ aktualisieren";
+"Zusätzlichen macOS-Drucker anlegen" = "Zusätzlichen macOS-Drucker anlegen";
+"Der vorhandene bleibt unverändert – im Druckdialog gibt es den Drucker dann zweimal." = "Der vorhandene bleibt unverändert – im Druckdialog gibt es den Drucker dann zweimal.";
+"Verwendet bereits den LabelWerk-Treiber – Name, Modell und Einstellungen werden erneuert." = "Verwendet bereits den LabelWerk-Treiber – Name, Modell und Einstellungen werden erneuert.";
+"Gleiche Adresse über ein anderes Protokoll (%@) – wird auf den LabelWerk-Treiber umgestellt." = "Gleiche Adresse über ein anderes Protokoll (%@) – wird auf den LabelWerk-Treiber umgestellt.";
+"Verwendet einen anderen Treiber (%@) – wird auf den LabelWerk-Treiber umgestellt." = "Verwendet einen anderen Treiber (%@) – wird auf den LabelWerk-Treiber umgestellt.";
+"LabelWerk-Treiber installiert" = "LabelWerk-Treiber installiert";
+"Der LabelWerk-Treiber wird bei der Installation mit eingerichtet – macOS fragt dafür einmal nach einem Administratorpasswort." = "Der LabelWerk-Treiber wird bei der Installation mit eingerichtet – macOS fragt dafür einmal nach einem Administratorpasswort.";
+"Der LabelWerk-Treiber fehlt, und diese App enthält kein Treiberpaket. Bitte LabelWerk mit dem Installationspaket installieren." = "Der LabelWerk-Treiber fehlt, und diese App enthält kein Treiberpaket. Bitte LabelWerk mit dem Installationspaket installieren.";
+
+/* MARK: Features/Setup/SetupPlanning.swift */
+"Vom Drucker gemeldet" = "Vom Drucker gemeldet";
+"Per SNMP erkannt" = "Per SNMP erkannt";
+"Aus der USB-Gerätekennung" = "Aus der USB-Gerätekennung";
+"Aus der Bonjour-Anmeldung" = "Aus der Bonjour-Anmeldung";
+
+/* MARK: Features/Setup/SetupWizardModel.swift */
+"Drucker wählen" = "Drucker wählen";
+"Name & Optionen" = "Name & Optionen";
+"Drucker im Netzwerk auswählen oder seine Adresse eingeben." = "Drucker im Netzwerk auswählen oder seine Adresse eingeben.";
+"Das Modell bestimmt Treiber, Druckbreite und passende Etiketten." = "Das Modell bestimmt Treiber, Druckbreite und passende Etiketten.";
+"So erscheint der Drucker in macOS und in jedem Druckdialog." = "So erscheint der Drucker in macOS und in jedem Druckdialog.";
+"LabelWerk richtet den Drucker als macOS-Drucker ein." = "LabelWerk richtet den Drucker als macOS-Drucker ein.";
+"%@ liegt nicht im Netz dieses Macs. Das funktioniert nur, wenn ein Router zwischen den Netzen vermittelt – sonst die IP-Adresse am Drucker prüfen." = "%@ liegt nicht im Netz dieses Macs. Das funktioniert nur, wenn ein Router zwischen den Netzen vermittelt – sonst die IP-Adresse am Drucker prüfen.";
+"Nicht als Zebra-Drucker erkannt · %@" = "Nicht als Zebra-Drucker erkannt · %@";
 
 /* MARK: Features/Stocks/StockLibraryComponents.swift */
 "Millimeter" = "Millimeter";
@@ -2614,6 +2727,70 @@
 "Strecken" = "Strecken";
 "Originalgröße" = "Originalgröße";
 "Das PDF enthält keine Seiten." = "Das PDF enthält keine Seiten.";
+
+/* MARK: Services/PrinterInstallService.swift */
+"Treiber bereitstellen" = "Treiber bereitstellen";
+"Drucker prüfen" = "Drucker prüfen";
+"macOS-Drucker anlegen" = "macOS-Drucker anlegen";
+"In LabelWerk übernehmen" = "In LabelWerk übernehmen";
+"%@:%d antwortet nicht – %@" = "%@:%d antwortet nicht – %@";
+"%@:%d antwortet nicht." = "%@:%d antwortet nicht.";
+"Prüfen: Ist der Drucker eingeschaltet und bereit? Stimmt die IP-Adresse (Konfigurationsetikett)? Sind Mac und Drucker im selben Netzwerk bzw. WLAN? Blockiert eine Firewall oder ein Gast-WLAN Port %d?" = "Prüfen: Ist der Drucker eingeschaltet und bereit? Stimmt die IP-Adresse (Konfigurationsetikett)? Sind Mac und Drucker im selben Netzwerk bzw. WLAN? Blockiert eine Firewall oder ein Gast-WLAN Port %d?";
+"Die Eingabe des Administratorpassworts wurde abgebrochen. Es wurde nichts verändert." = "Die Eingabe des Administratorpassworts wurde abgebrochen. Es wurde nichts verändert.";
+"Zum Installieren fragt macOS einmalig nach dem Passwort eines Administrators dieses Macs. „Erneut versuchen“ öffnet die Abfrage wieder." = "Zum Installieren fragt macOS einmalig nach dem Passwort eines Administrators dieses Macs. „Erneut versuchen“ öffnet die Abfrage wieder.";
+"Der LabelWerk-Treiber ist nicht installiert, und diese App enthält kein Treiberpaket." = "Der LabelWerk-Treiber ist nicht installiert, und diese App enthält kein Treiberpaket.";
+"LabelWerk mit dem Installationspaket (LabelWerk-….pkg) installieren – es richtet App und Treiber gemeinsam ein. Danach den Assistenten erneut starten." = "LabelWerk mit dem Installationspaket (LabelWerk-….pkg) installieren – es richtet App und Treiber gemeinsam ein. Danach den Assistenten erneut starten.";
+"Treiber konnte nicht installiert werden" = "Treiber konnte nicht installiert werden";
+"Unter „Treiber & Warteschlangen“ zeigt die Diagnose, was fehlt. Hilft das nicht, das LabelWerk-Installationspaket erneut ausführen." = "Unter „Treiber & Warteschlangen“ zeigt die Diagnose, was fehlt. Hilft das nicht, das LabelWerk-Installationspaket erneut ausführen.";
+"Keine passende Treiberdatei" = "Keine passende Treiberdatei";
+"Für „%@“ wurde keine PPD-Datei gefunden – auch keine allgemeine." = "Für „%@“ wurde keine PPD-Datei gefunden – auch keine allgemeine.";
+"Den Treiber unter „Treiber & Warteschlangen“ erneut installieren (repariert fehlende PPD-Dateien) oder ein anderes Modell bzw. „Allgemeiner Zebra-Drucker“ wählen." = "Den Treiber unter „Treiber & Warteschlangen“ erneut installieren (repariert fehlende PPD-Dateien) oder ein anderes Modell bzw. „Allgemeiner Zebra-Drucker“ wählen.";
+"USB-Drucker nicht gefunden" = "USB-Drucker nicht gefunden";
+"macOS meldet keinen angeschlossenen Zebra-Drucker an USB." = "macOS meldet keinen angeschlossenen Zebra-Drucker an USB.";
+"Drucker einschalten, das USB-Kabel direkt am Mac anschließen (ohne Hub) und einige Sekunden warten. Dann erneut versuchen." = "Drucker einschalten, das USB-Kabel direkt am Mac anschließen (ohne Hub) und einige Sekunden warten. Dann erneut versuchen.";
+"Mehrere USB-Drucker" = "Mehrere USB-Drucker";
+"Mehrere Zebra-Drucker sind per USB angeschlossen, und dieser lässt sich keinem eindeutig zuordnen." = "Mehrere Zebra-Drucker sind per USB angeschlossen, und dieser lässt sich keinem eindeutig zuordnen.";
+"Nur den gewünschten Drucker angeschlossen lassen und erneut versuchen." = "Nur den gewünschten Drucker angeschlossen lassen und erneut versuchen.";
+"Verbindung nicht unterstützt" = "Verbindung nicht unterstützt";
+"macOS-Drucker lassen sich für Netzwerk- (TCP/IP) und USB-Drucker einrichten." = "macOS-Drucker lassen sich für Netzwerk- (TCP/IP) und USB-Drucker einrichten.";
+"macOS-Drucker konnte nicht angelegt werden" = "macOS-Drucker konnte nicht angelegt werden";
+"Erneut versuchen. Bleibt der Fehler, unter „Treiber & Warteschlangen“ die Diagnose prüfen oder den Drucker in den Systemeinstellungen „Drucker & Scanner“ entfernen und neu installieren." = "Erneut versuchen. Bleibt der Fehler, unter „Treiber & Warteschlangen“ die Diagnose prüfen oder den Drucker in den Systemeinstellungen „Drucker & Scanner“ entfernen und neu installieren.";
+"Für dieses Modell ist keine eigene PPD installiert – der allgemeine Treiber wird verwendet." = "Für dieses Modell ist keine eigene PPD installiert – der allgemeine Treiber wird verwendet.";
+"Neue Druckaufträge gehen standardmäßig an diesen Drucker." = "Neue Druckaufträge gehen standardmäßig an diesen Drucker.";
+"Standarddrucker nicht festgelegt: %@" = "Standarddrucker nicht festgelegt: %@";
+"Seite wird über den macOS-Druckweg gesendet …" = "Seite wird über den macOS-Druckweg gesendet …";
+"Gesendet – das Etikett sollte gleich herauskommen." = "Gesendet – das Etikett sollte gleich herauskommen.";
+"Testseite nicht gedruckt: %@" = "Testseite nicht gedruckt: %@";
+"LabelWerk-Treiber %@ ist installiert." = "LabelWerk-Treiber %@ ist installiert.";
+"LabelWerk-Treiber ist installiert." = "LabelWerk-Treiber ist installiert.";
+"LabelWerk-Treiber %@ wurde installiert." = "LabelWerk-Treiber %@ wurde installiert.";
+"LabelWerk-Treiber wurde installiert." = "LabelWerk-Treiber wurde installiert.";
+"Verbunden mit %@" = "Verbunden mit %@";
+"Verbindung zu %@ wird geprüft …" = "Verbindung zu %@ wird geprüft …";
+"%@ ist gerade nicht erreichbar – der macOS-Drucker wird trotzdem eingerichtet und druckt, sobald der Drucker eingeschaltet ist." = "%@ ist gerade nicht erreichbar – der macOS-Drucker wird trotzdem eingerichtet und druckt, sobald der Drucker eingeschaltet ist.";
+"USB-Drucker wird gesucht …" = "USB-Drucker wird gesucht …";
+"Nicht gefunden" = "Nicht gefunden";
+"Angeschlossen: %@" = "Angeschlossen: %@";
+"Nicht eindeutig" = "Nicht eindeutig";
+"Nicht unterstützt" = "Nicht unterstützt";
+"Treiberdatei wird ausgewählt …" = "Treiberdatei wird ausgewählt …";
+"Keine PPD-Datei gefunden" = "Keine PPD-Datei gefunden";
+"Vorhandene macOS-Drucker werden geprüft …" = "Vorhandene macOS-Drucker werden geprüft …";
+"„%@“ wird mit dem LabelWerk-Treiber aktualisiert …" = "„%@“ wird mit dem LabelWerk-Treiber aktualisiert …";
+"„%@“ wird angelegt – macOS fragt ggf. nach einem Administratorpasswort …" = "„%@“ wird angelegt – macOS fragt ggf. nach einem Administratorpasswort …";
+"Die Warteschlange „%@“ ist nach dem Anlegen nicht vorhanden." = "Die Warteschlange „%@“ ist nach dem Anlegen nicht vorhanden.";
+"Allgemeiner Treiber (%@, %d dpi)" = "Allgemeiner Treiber (%@, %d dpi)";
+"Treiber für %@ (%d dpi)" = "Treiber für %@ (%d dpi)";
+"„%@“ eingerichtet · %@" = "„%@“ eingerichtet · %@";
+"„%@“ verwendet jetzt diesen macOS-Drucker." = "„%@“ verwendet jetzt diesen macOS-Drucker.";
+"Nicht gewünscht – nur als macOS-Drucker eingerichtet." = "Nicht gewünscht – nur als macOS-Drucker eingerichtet.";
+"Live-Status, Werkzeuge und Mitteilungen sind aktiv." = "Live-Status, Werkzeuge und Mitteilungen sind aktiv.";
+"Drucker identifizieren" = "Drucker identifizieren";
+"macOS-Drucker wird eingerichtet …" = "macOS-Drucker wird eingerichtet …";
+"„%@“ erscheint jetzt in jedem Druckdialog und in „Drucker & Scanner“." = "„%@“ erscheint jetzt in jedem Druckdialog und in „Drucker & Scanner“.";
+"Als macOS-Drucker installiert" = "Als macOS-Drucker installiert";
+"macOS-Drucker nicht eingerichtet" = "macOS-Drucker nicht eingerichtet";
+"Die Passwortabfrage wurde abgebrochen. Unter „Treiber & Warteschlangen“ lässt sich die Warteschlange jederzeit einrichten." = "Die Passwortabfrage wurde abgebrochen. Unter „Treiber & Warteschlangen“ lässt sich die Warteschlange jederzeit einrichten.";
 
 /* MARK: Services/ProcessRunner.swift */
 "Programm konnte nicht gestartet werden: %@" = "Programm konnte nicht gestartet werden: %@";

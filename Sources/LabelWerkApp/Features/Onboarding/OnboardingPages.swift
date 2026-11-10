@@ -422,6 +422,7 @@ struct OnboardingPrintersPage: View {
     let onManual: () -> Void
 
     @Environment(AppModel.self) private var model
+    @State private var showInstallWizard = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -437,6 +438,12 @@ struct OnboardingPrintersPage: View {
                 DiscoveryPanel(style: .compact, onRequestManual: onManual)
             }
             .onboardingAppear(3, reduceMotion: reduceMotion)
+
+            // Wie unter Windows: Netzwerkdrucker als macOS-Drucker installieren (eigener Assistent).
+            PrinterSetupEntryCard {
+                showInstallWizard = true
+            }
+            .onboardingAppear(4, reduceMotion: reduceMotion)
 
             if !model.sessions.isEmpty {
                 VStack(spacing: 8) {
@@ -466,6 +473,10 @@ struct OnboardingPrintersPage: View {
             }
         }
         .animation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion), value: model.sessions.map(\.id))
+        .sheet(isPresented: $showInstallWizard) {
+            NetworkPrinterInstallWizard()
+                .environment(model)
+        }
     }
 }
 

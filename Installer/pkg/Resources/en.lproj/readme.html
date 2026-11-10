@@ -34,12 +34,17 @@
 switched to the new PPD files automatically – your chosen settings (darkness, speed, label stock …) are preserved.</p>
 <h2>After installation</h2>
 <ol>
-  <li>Open @APP_NAME@ from the Applications folder. The setup assistant looks for connected and network printers
-      (USB, Bonjour, network scan, Bluetooth).</li>
-  <li>Select a printer and add it as a macOS printer with a single click – model, resolution and driver are matched
-      automatically.</li>
-  <li>Alternatively: <em>System Settings › Printers &amp; Scanners › Add Printer</em> and choose
-      “Zebra … – LabelWerk” as the driver.</li>
+  <li>When the installation finishes, @APP_NAME@ opens automatically, the first time with its welcome assistant (not
+      when installing from Terminal or through software distribution, and not on an update – then open @APP_NAME@
+      from the Applications folder).</li>
+  <li><strong>Network (LAN) printers:</strong> in the welcome assistant, choose <em>Install network printer</em> on
+      the <em>Find Printers</em> page (later: <em>File › Install Printer…</em>), select the printer that was found or
+      enter its IP address, and click <em>Install</em>. Model, resolution and driver are matched automatically;
+      afterwards it is a regular Mac printer (<em>Printers &amp; Scanners</em>, every app’s print dialog). USB printers
+      are found the same way.</li>
+  <li>Alternatively without the app: <em>System Settings › Printers &amp; Scanners › “+” › IP</em>, protocol
+      <em>HP Jetdirect – Socket</em>, and choose “Zebra … - LabelWerk” as the driver.</li>
+  <li>For IT and many printers: <code>lwctl install --printer tcp://&lt;address&gt;</code> in Terminal.</li>
 </ol>
 <h2>Privacy</h2>
 <p>@APP_NAME@ only talks to your printers on the local network, via USB or Bluetooth. No data is sent to third

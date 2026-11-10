@@ -44,13 +44,23 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            Button {
-                model.isAddPrinterPresented = true
-            } label: {
-                Label(tr("Drucker hinzufügen"), systemImage: "plus.circle.fill")
-                    .frame(maxWidth: .infinity)
+            VStack(spacing: 8) {
+                Button {
+                    model.isInstallWizardPresented = true
+                } label: {
+                    Label(tr("Netzwerkdrucker installieren …"), systemImage: "printer.filled.and.paper")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.labelWerkSecondary)
+                .help(tr("Drucker im Netzwerk finden und als macOS-Drucker mit dem LabelWerk-Treiber installieren (⌥⌘N)"))
+                Button {
+                    model.isAddPrinterPresented = true
+                } label: {
+                    Label(tr("Drucker hinzufügen"), systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.labelWerkPrimary)
             }
-            .buttonStyle(.labelWerkPrimary)
             .padding(12)
         }
         .confirmationDialog(

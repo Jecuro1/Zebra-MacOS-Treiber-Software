@@ -33,6 +33,11 @@ final class AppModel {
     var toasts: [Toast] = []
     var isOnboardingPresented = false
     var isAddPrinterPresented = false
+    /// Installationsassistent „Drucker installieren“ (macOS-Drucker mit LabelWerk-Treiber einrichten).
+    var isInstallWizardPresented = false
+    /// Vom Installationspaket angefordert (`--setup`), während noch der Willkommensassistent läuft:
+    /// Der Installationsassistent folgt nach dessen Ende.
+    var pendingInstallWizard = false
     /// Gesetzt, wenn ein Bereich programmgesteuert angesprungen werden soll (z. B. aus der Menüleiste).
     var pendingSection: PrinterSection?
 

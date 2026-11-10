@@ -3,6 +3,6 @@
 "CHOICE_APP_TITLE" = "@APP_NAME@-App";
 "CHOICE_APP_DESCRIPTION" = "Steuerzentrale für Zebra-Etikettendrucker: Drucker finden und einrichten, Live-Status, Einstellungen, Werkzeuge, Terminal, Etiketten-Designer, Firmware und Netzwerk. Wird in den Ordner „Programme“ installiert.";
 "CHOICE_DRIVER_TITLE" = "Druckertreiber (CUPS)";
-"CHOICE_DRIVER_DESCRIPTION" = "Filter und PPD-Dateien für alle unterstützten Zebra-Modelle (ZPL II, EPL2, CPCL). Damit druckt jedes Mac-Programm direkt auf Etiketten. Vorhandene LabelWerk-Drucker werden automatisch auf die neue Version umgestellt.";
+"CHOICE_DRIVER_DESCRIPTION" = "Filter und PPD-Dateien für alle unterstützten Zebra-Modelle (ZPL II, EPL2, CPCL). Damit druckt jedes Mac-Programm direkt auf Etiketten. Vorhandene LabelWerk-Drucker werden automatisch auf die neue Version umgestellt. Bei der ersten Installation öffnet sich zum Abschluss der Assistent zum Einrichten von Druckern.";
 "CHOICE_CLI_TITLE" = "Kommandozeilenwerkzeug lwctl";
-"CHOICE_CLI_DESCRIPTION" = "Legt /usr/local/bin/lwctl an, um Drucker im Terminal und in Skripten zu suchen, abzufragen und anzusteuern. Erfordert die App.";
+"CHOICE_CLI_DESCRIPTION" = "Legt /usr/local/bin/lwctl an, um Drucker im Terminal und in Skripten zu suchen, einzurichten, abzufragen und anzusteuern (z. B. lwctl install für die Softwareverteilung). Erfordert die App.";

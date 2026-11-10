@@ -123,10 +123,13 @@ lw_run rm -rf "${WORK}"
 lw_run mkdir -p "${WORK}/components" "${WORK}/scripts-driver" "${WORK}/scripts-cli" "${WORK}/app-root" \
     "${WORK}/resources" "${OUTPUT}"
 
-lw_run cp "${PKG_SRC}/scripts/driver/preinstall" "${PKG_SRC}/scripts/driver/postinstall" "${WORK}/scripts-driver/"
+lw_run cp "${PKG_SRC}/scripts/driver/preinstall" "${WORK}/scripts-driver/"
+# Die postinstall-Skripte sind Vorlagen (Pfad der App aus APP_NAME).
 if [[ "${LW_DRY_RUN}" == "1" ]]; then
+    lw_info "würde schreiben: ${WORK}/scripts-driver/postinstall (aus Installer/pkg/scripts/driver/postinstall)"
     lw_info "würde schreiben: ${WORK}/scripts-cli/postinstall (aus Installer/pkg/scripts/cli/postinstall)"
 else
+    lw_render_template "${PKG_SRC}/scripts/driver/postinstall" "${WORK}/scripts-driver/postinstall"
     lw_render_template "${PKG_SRC}/scripts/cli/postinstall" "${WORK}/scripts-cli/postinstall"
 fi
 lw_run chmod 755 "${WORK}/scripts-driver/preinstall" "${WORK}/scripts-driver/postinstall" \

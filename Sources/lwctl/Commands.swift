@@ -14,6 +14,9 @@ enum Commands {
         case "encode": return try encode(context)
         case "discover": return try await discover(context)
         case "virtual-printer": return try await virtualPrinter(context)
+        case "install": return try await InstallCommands.install(context)
+        case "queues": return try await InstallCommands.queues(context)
+        case "uninstall-queue": return try await InstallCommands.uninstallQueue(context)
         default:
             let client = try await makeClient(context)
             do {

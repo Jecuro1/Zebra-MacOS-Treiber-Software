@@ -23,6 +23,8 @@ struct DiscoveryManualForm: View {
     @State private var interfaces: [NetworkInterfaceInfo] = []
     @State private var didPrepare = false
     @State private var addPulse = 0
+    /// „Auch als macOS-Drucker installieren“ (Netzwerk und USB, gemerkt).
+    @AppStorage(MacPrinterInstallToggle.storageKey) private var installMacPrinter = true
     @Namespace private var namespace
 
     private var reduceMotion: Bool { systemReduceMotion || model.preferences.reduceMotion }
@@ -636,6 +638,13 @@ struct DiscoveryManualForm: View {
                 .buttonStyle(.labelWerkSecondary)
                 .controlSize(.large)
             } else {
+                if draft.connection == .network || draft.connection == .usb {
+                    MacPrinterInstallToggle(isOn: $installMacPrinter)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.subtleFill))
+                        .transition(.opacity)
+                }
                 Button(action: add) {
                     Label(tr("Drucker hinzufügen"), systemImage: "plus.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -974,6 +983,9 @@ struct DiscoveryManualForm: View {
         )
         if !reduceMotion { addPulse += 1 }
         let session = model.addPrinter(saved)
+        if MacPrinterInstallToggle.shouldInstall(isOn: installMacPrinter, descriptor: descriptor) {
+            PrinterInstallService.installInBackground(for: session, model: model)
+        }
         onComplete(session)
     }
 }

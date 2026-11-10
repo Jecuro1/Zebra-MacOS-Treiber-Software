@@ -29,6 +29,10 @@ struct RootView: View {
             AddPrinterView()
                 .environment(model)
         }
+        .sheet(isPresented: $model.isInstallWizardPresented) {
+            NetworkPrinterInstallWizard()
+                .environment(model)
+        }
         .preferredColorScheme(colorScheme(for: model.preferences.appearance))
         .tint(Theme.accent)
         .environment(\.appReduceMotion, model.preferences.reduceMotion)
@@ -41,6 +45,29 @@ struct RootView: View {
             }
             // Wirkt nur beim ersten Hauptfenster (siehe `AppModel.start()`).
             model.start()
+            // Vom Installationspaket mit `--setup` geöffnet (wie ein Windows-Setup, das mit „Drucker
+            // einrichten“ endet): direkt der Installationsassistent. Beim ersten Start kommt zuerst
+            // der Willkommensassistent (mit Einstieg „Netzwerkdrucker installieren“) – der
+            // Installationsassistent folgt nach dessen Ende, falls dort kein Drucker eingerichtet wurde.
+            if PrinterSetupLaunch.consumeSetupRequest() {
+                if model.isOnboardingPresented {
+                    model.pendingInstallWizard = true
+                } else {
+                    model.isInstallWizardPresented = true
+                }
+            }
+        }
+        .onChange(of: model.isOnboardingPresented) { _, shown in
+            guard !shown, model.pendingInstallWizard else { return }
+            model.pendingInstallWizard = false
+            // Im Willkommensassistenten schon Drucker eingerichtet: nicht noch einmal fragen.
+            guard model.sessions.isEmpty else { return }
+            Task { @MainActor in
+                // Erst, wenn das Sheet des Willkommensassistenten geschlossen ist (nur ein Sheet zugleich).
+                try? await Task.sleep(for: .milliseconds(450))
+                guard !model.isOnboardingPresented, !model.isAddPrinterPresented else { return }
+                model.isInstallWizardPresented = true
+            }
         }
     }
 
