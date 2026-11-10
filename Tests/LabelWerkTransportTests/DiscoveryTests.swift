@@ -85,7 +85,9 @@ struct SubnetScannerTests {
     func scanFindsLocalServer() async throws {
         let server = try TestTCPServer { _ in }
         defer { server.stop() }
-        let closedPort = try TestTCPServer.unusedPort()
+        let closed = try ClosedTCPPort()
+        defer { closed.release() }
+        let closedPort = closed.port
 
         var found: [String] = []
         for await host in SubnetScanner.scan(hosts: ["127.0.0.1"], port: server.port, timeout: .milliseconds(500)) {

@@ -188,8 +188,9 @@ struct TCPConnectionTests {
 
     @Test("Verbindung abgelehnt → connectionFailed")
     func connectionRefused() async throws {
-        let port = try TestTCPServer.unusedPort()
-        let connection = TCPConnection(host: "127.0.0.1", port: port, connectTimeout: .seconds(2))
+        let closed = try ClosedTCPPort()
+        defer { closed.release() }
+        let connection = TCPConnection(host: "127.0.0.1", port: closed.port, connectTimeout: .seconds(2))
         do {
             try await connection.open()
             Issue.record("open() hätte fehlschlagen müssen")

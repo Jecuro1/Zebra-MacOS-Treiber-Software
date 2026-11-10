@@ -136,6 +136,42 @@ enum AppearancePreference: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Standard-Maßeinheit für Längen in den Druckeinstellungen („Einheiten“ im Windows-Treiber).
+/// Gespeichert wird immer in Millimetern (Etikettengröße) bzw. Druckpunkten (Versätze).
+enum MeasurementUnit: String, Codable, CaseIterable, Identifiable {
+    case millimeters
+    case inches
+    case dots
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .millimeters: return tr("Millimeter")
+        case .inches: return tr("Zoll")
+        case .dots: return tr("Punkte")
+        }
+    }
+
+    /// Kurzzeichen hinter Zahlen („mm“, „Zoll“, „Punkte“).
+    var symbol: String {
+        switch self {
+        case .millimeters: return tr("mm")
+        case .inches: return tr("Zoll")
+        case .dots: return tr("Punkte")
+        }
+    }
+
+    /// Nachkommastellen der Anzeige: mm eine, Zoll zwei, Punkte keine.
+    var fractionDigits: Int {
+        switch self {
+        case .millimeters: return 1
+        case .inches: return 2
+        case .dots: return 0
+        }
+    }
+}
+
 struct AppPreferences: Codable, Equatable {
     /// Abfrageintervall des Live-Status in Sekunden.
     var pollInterval: Double = 3
@@ -155,6 +191,8 @@ struct AppPreferences: Codable, Equatable {
     var developerMode: Bool = false
     /// Demo-Drucker anzeigen, wenn kein echter Drucker eingerichtet ist.
     var showDemoPrinter: Bool = true
+    /// Maßeinheit für Längen in den Druckeinstellungen.
+    var measurementUnit: MeasurementUnit = .millimeters
 }
 
 // MARK: - Persistenter Gesamtzustand
@@ -195,6 +233,7 @@ extension AppPreferences {
         confirmDestructiveActions = c.value(.confirmDestructiveActions, default: d.confirmDestructiveActions)
         developerMode = c.value(.developerMode, default: d.developerMode)
         showDemoPrinter = c.value(.showDemoPrinter, default: d.showDemoPrinter)
+        measurementUnit = c.value(.measurementUnit, default: d.measurementUnit)
     }
 }
 

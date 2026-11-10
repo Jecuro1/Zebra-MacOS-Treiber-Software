@@ -103,10 +103,15 @@ zuordnet. Generische PPDs haben keinen `*1284DeviceID`.
 `*lwDefaultGapDots` (Lücke des Standardformats in Punkten, z. B. 3 mm → `24`). Alle Punktwerte
 werden exakt wie in Swift gerundet (`Double.rounded()`, kaufmännisch – nicht Pythons `round`).
 
-**Gruppe „General“.** `PageSize`/`PageRegion`/`ImageableArea`/`PaperDimension` für alle
-passenden Katalogformate, `*CustomPageSize` mit `*MaxMediaWidth`/`*MaxMediaHeight`,
-`*HWMargins: 0 0 0 0`, `Resolution` (eine feste Wahl `<dpi>dpi` mit `HWResolution`) und
-`ColorModel Gray` (`cupsColorSpace 18`, 8 Bit).
+**Gruppen wie im Windows-Treiber.** Die Optionen sind wie die Seitenleiste des Dialogs
+„Druckeinstellungen für ZD421 …“ des ZDesigner-Treibers gruppiert (macOS-Druckdialog →
+„Druckerfunktionen“): „Seite einrichten“ (`PageSetup`), „Druckoptionen“ (`PrintOptions`),
+„Bedienermodus“ (`OperationMode`), „Grafik Optionen“ (`Graphics`), „Erweitert“ (`Advanced`).
+„Seite einrichten“ beginnt mit `PageSize`/`PageRegion`/`ImageableArea`/`PaperDimension` für alle
+passenden Katalogformate und `*CustomPageSize` mit `*MaxMediaWidth`/`*MaxMediaHeight`,
+`*HWMargins: 0 0 0 0`; „Erweitert“ endet mit `Resolution` (eine feste Wahl `<dpi>dpi` mit
+`HWResolution`) und `ColorModel Gray` (`cupsColorSpace 18`, 8 Bit). Gruppen ohne Optionen (z. B.
+„Bedienermodus“ der generischen CPCL-PPD) entfallen.
 
 * Schlüsselwort je Format exakt wie `LabelStock.ppdKeyword`: `w<pt>h<pt>` mit
   `Int((mm / 25.4 * 72).rounded())` – die App setzt Warteschlangen mit
@@ -127,41 +132,56 @@ passenden Katalogformate, `*CustomPageSize` mit `*MaxMediaWidth`/`*MaxMediaHeigh
 
 **Optionen `lw*` (§9).** Leere PostScript-Codes (`""`), `*OrderDependency: 20… AnySetup`.
 
-| Gruppe | Option | Auswahl in der PPD | Standard |
+| Gruppe | Option (deutscher Titel) | Auswahl in der PPD | Standard |
 |---|---|---|---|
-| Printer Settings / Druckereinstellungen | `lwLanguage` | Sprachen des Modells (`ZPL` `EPL` `CPCL`) | Standardsprache des Modells |
-| | `lwDarkness` | `Default`, `0`…`30` | `Default` |
-| | `lwSpeed` | `Default`, `1`…Modellmaximum der Auflösung (höchstens 14) | `Default` |
-| | `lwPrintMode` | `Default` + Druckmodi des Modells | `Default` |
-| | `lwCutEvery` | `0 1 2 5 10 25 50 100` – nur Modelle mit Schneider/verzögertem Schnitt | `0` |
-| | `lwBackfeed` | `Default` `After` `Before` `Normal` `Off` | `Default` |
-| Media / Medien | `lwMediaType` | `Default` + Medientypen des Modells | `Default` |
-| | `lwMediaTracking` | `Default` `Gap` `BlackMark` `Continuous` `Auto` | `Default` |
-| Label Position / Etikettenposition | `lwLabelTop`, `lwTearOff` | `Default`, `-120`…`120` in 10er-Schritten | `Default` |
-| | `lwLabelLeft` | `Default`, `-200`…`200` in 10er-Schritten | `Default` |
-| Image / Bild | `lwRotate180`, `lwMirror`, `lwNegative` | Boolean `False`/`True` | `False` |
-| | `lwDither` | `Threshold` `Ordered` `Halftone` `FloydSteinberg` `Atkinson` `Stucki` | `Threshold` |
+| Seite einrichten | `lwMediaTracking` (Medientyp) | `Default` `Continuous` (Endlosmaterial) `Gap` (Einzeletiketten) `BlackMark` (Etiketten mit schwarzen Markierungen) `Notch` (Etiketten mit Seitenkerben) `Auto` | `Default` |
+| | `lwMarkOffset` (Markierung Versatz) | `Default` + −10 −5 −3 −2 −1 0 1 2 3 4 5 10 15 20 25 30 35 mm in Punkten der Auflösung, nur Werte in −80…283 Punkten (ZPL) | `Default` |
+| | `lwRotation` (Drehung) | `0` „0° – Hochformat“, `90` „90° – Querformat“, `180` „180° – Hochformat“, `270` „270° – Querformat“ | `0` |
+| | `lwMirror` (Spiegeln), `lwNegative` (Invers), `lwStopAtLast` (Bei letztem Element stoppen) | Boolean `False`/`True` | `False` |
+| | `lwStopOffset` (Stoppversatz) | 0 1 2 3 5 10 mm in Punkten der Auflösung | `0` |
+| Druckoptionen | `lwSpeed` (Geschwindigkeit) | `Default`, `1`…Modellmaximum (höchstens 14), Text in mm/s: „102 mm/s (4 Zoll/s)“ | `Default` |
+| | `lwDarkness` (Temperatur) | `Default`, `1`…`30` | `Default` |
+| | `lwMediaType` (Druckmodus) | `Default` + `ThermalTransfer` (Thermotransfer) / `DirectThermal` (Thermo-Direkt) des Modells | `Default` |
+| | `lwLabelTop` (Versatz oben) | `Default`, `-120`…`120` Punkte in 10er-Schritten, Text in mm | `Default` |
+| | `lwLabelLeft` (Versatz links) | `Default`, `-200`…`200` Punkte in 10er-Schritten, Text in mm | `Default` |
+| | `lwBackfeed` (Rückzug) | `Default` `Off` (Kein Rückzug) `Before` (Vor dem Drucken) `After` (Nach dem Drucken) `Normal` (Standard) | `Default` |
+| | `lwPauseEvery` (Pausieren) | `0` (Keine Pause) `1 2 5 10 25 50 100` (ZPL) | `0` |
+| | `lwControlChars` (Steuerzeichen) | `Standard`, `Printer` (Intern) (ZPL) | `Standard` |
+| | `lwRTC` (RTC aktualisieren) | `Default` `JobStart` (Druckzeit starten) `EveryLabel` (Jedes Etikett) `EveryMinute` (Jede Minute) (ZPL) | `Default` |
+| | `lwCancelBefore` (Aufträge vor dem Drucken abbrechen) | Boolean; `True` = „Alle aktuellen und nächsten Druckjobs löschen“ (ZPL, EPL) | `False` |
+| | `lwCancelDelay` (Verzögerung) | `0 250 500 1000 2000 3000 5000 10000` ms (ZPL, EPL) | `1000` |
+| Bedienermodus | `lwPrintMode` (Modus) | `Default` + Modi des Modells (Abreißen, Spendemodus, Abschneider, Verzögerter Abschneider, Aufwickeln, Applikator, Kiosk); Linerless ablösen/schneiden/verzögert schneiden/aufwickeln, Linerless-Abriss nur bei Modellen mit Ausstattung `linerless` und ZPL | `Default` |
+| | `lwTearOff` (Versatz) | `Default`, `-120`…`120` Punkte in 10er-Schritten | `Default` |
+| | `lwCutEvery` (Schneiden alle) | `0 1 2 5 10 25 50 100` – nur Modelle mit Schneider/verzögertem Schnitt | `0` |
+| Grafik Optionen | `lwDither` | `Threshold` `Ordered` `Halftone` `FloydSteinberg` `Atkinson` `Stucki` | `Threshold` |
 | | `lwThreshold` | `64 96 128 160 192` | `128` |
-| Advanced / Erweitert | `lwCompression` | `Z64` `ACS` `Hex` | `Z64` |
-| | `lwSkipBlank`, `lwCalibrate`, `lwSaveSettings` | Boolean `False`/`True` | `False` |
+| | `lwCompression` | `Z64` `ACS` `Hex` | `Z64` |
+| Erweitert | `lwLanguage` | Sprachen des Modells (`ZPL` `EPL` `CPCL`) | Standardsprache des Modells |
+| | `lwCalibrate`, `lwSaveSettings`, `lwSkipBlank` | Boolean `False`/`True` | `False` |
+| | `lwPowerUpAction`, `lwHeadCloseAction` | `Default` `Feed` `Calibrate` `Length` `NoMotion` `ShortCal` (ZPL; `^MF` nur, wenn beide gesetzt) | `Default` |
 
-Die Standardwerte entsprechen `PrintSettings.default`. Versatzwerte zeigen zusätzlich die
-Millimeter für die Auflösung der Datei („+10 Punkte (+1,3 mm)“).
+Die Standardwerte entsprechen `PrintSettings.default`. Versatzwerte zeigen die Millimeter für die
+Auflösung der Datei und die Punkte („+1,3 mm (+10 Punkte)“); Markierung Versatz und Stoppversatz
+sind in mm gewählt und als Punkte der Auflösung gespeichert („+5 mm (40 Punkte)“).
 
 Eine Option erscheint nur, wenn der Filter sie in einer Sprache des Modells auswertet (§8):
 ZPL-only sind `lwLabelTop`, `lwLabelLeft`, `lwTearOff`, `lwBackfeed`, `lwCompression`,
-`lwCutEvery`, `lwCalibrate`, `lwSaveSettings`; `lwMediaType` und `lwPrintMode` wirken in ZPL
-und EPL2 (EPL2 kennt nur Abreißen, Spenden, Schneiden). Reine EPL2-Modelle (LP/TLP 2844, TLP 3842)
-und die generische CPCL-PPD zeigen deshalb nur die wirksamen Optionen.
+`lwCutEvery`, `lwCalibrate`, `lwSaveSettings`, `lwMarkOffset`, `lwPauseEvery`, `lwControlChars`,
+`lwRTC`, `lwPowerUpAction`, `lwHeadCloseAction`; `lwMediaType`, `lwPrintMode`, `lwCancelBefore`
+und `lwCancelDelay` wirken in ZPL und EPL2 (EPL2 kennt nur Abreißen, Spenden, Schneiden).
+`lwRotation`, `lwStopAtLast` und `lwStopOffset` wirken in allen Sprachen. Reine EPL2-Modelle
+(LP/TLP 2844, TLP 3842) und die generische CPCL-PPD zeigen deshalb nur die wirksamen Optionen.
 
-`lwStartCmd`/`lwEndCmd` sind **keine** PPD-Optionen: Ihre Werte sind freie Base64url-Zeichenketten,
-die ein Druckdialog nicht darstellen kann. Stünden sie als Auswahl in der PPD, würde ein Dialog
-den Platzhalter mit jedem Auftrag senden und die gesetzten Warteschlangenwerte überdecken. Ohne
-PPD-Eintrag gelangen sie als serverseitige Vorgaben zuverlässig in `argv[5]` des Filters – gesetzt mit
-`lpadmin -p <queue> -o lwStartCmd-default=…`, entfernt mit `-R lwStartCmd-default`. Dasselbe gilt
-für Ganzzahlen außerhalb der PPD-Auswahl (z. B. `-o lwLabelTop-default=37`). Achtung: Die Kurzform
-`-o lwStartCmd=…` speichert CUPS nur für PPD-Optionen mit gültiger Auswahl; andere Werte werden
-stillschweigend verworfen.
+**Keine PPD-Optionen** sind `lwStartCmd`/`lwEndCmd`/`lwLabelStartCmd`/`lwLabelEndCmd` (freie
+Base64url-Zeichenketten), `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` (freie ASCII-Codes
+33…126 für „Steuerzeichen: Intern“) und das veraltete `lwRotate180` (ersetzt durch `lwRotation`;
+der Filter wertet es weiterhin aus). Ein Druckdialog kann freie Werte nicht darstellen; stünden
+sie als Auswahl in der PPD, würde ein Dialog den Platzhalter mit jedem Auftrag senden und die
+gesetzten Warteschlangenwerte überdecken. Ohne PPD-Eintrag gelangen sie als serverseitige Vorgaben
+zuverlässig in `argv[5]` des Filters – gesetzt mit `lpadmin -p <queue> -o lwStartCmd-default=…`,
+entfernt mit `-R lwStartCmd-default`. Dasselbe gilt für Ganzzahlen außerhalb der PPD-Auswahl
+(z. B. `-o lwLabelTop-default=37`). Achtung: Die Kurzform `-o lwStartCmd=…` speichert CUPS nur für
+PPD-Optionen mit gültiger Auswahl; andere Werte werden stillschweigend verworfen.
 
 **Generische PPDs.** Vereinigung der Fähigkeiten aller Katalogmodelle der jeweiligen Sprache:
 Druckbreite und Etikettenlänge = Maximum (ZPL: 216 mm, sodass jeder Drucker passt; EPL2/CPCL:
@@ -174,7 +194,7 @@ Modell-PPD gibt.
 und ihrer Parameter) hat eine deutsche Übersetzung nach CUPS-Konvention:
 
 ```
-*de.Translation lwDarkness/Schwärzung: ""
+*de.Translation lwDarkness/Temperatur: ""
 *de.lwDarkness Default/Druckereinstellung: ""
 *de.PageSize w288h432/4 × 6 Zoll (Versand): ""
 *de.CustomPageSize True/Eigenes Format: ""
@@ -215,7 +235,10 @@ python3 -m unittest discover -s Driver/ppd/tests -v     # oder: make -C Driver/p
 * gültige Standardwerte (Seitengröße = Standardformat, Sprache = Standardsprache, Werte von
   `PrintSettings.default`), Geschwindigkeiten bis zum Modellmaximum, Einschränkungen je Modell;
 * jede `lw*`-Option samt Auswahl **gegen ARCHITECTURE.md §9** (die Tabelle wird aus dem Dokument
-  gelesen) und gegen `CUPSOptionName` in `PrintSettings.swift`;
+  gelesen: „PPD: …“-Angaben inkl. Bereichen und „mm je Auflösung“, „nicht in der PPD“) und gegen
+  `CUPSOptionName` in `PrintSettings.swift`;
+* Gruppen, Reihenfolge und deutsche Begriffe wie im Windows-Treiber, Linerless-Modi genau für
+  Modelle mit Ausstattung `linerless`;
 * vollständige deutsche Übersetzungen, ASCII-Grundtexte, Zeilenlängen, gzip-Modus
   (reproduzierbar), `index.json`, `--model`/`--list`/`--check`/`--file-version`, Katalogfehler;
 * mit `cupstestppd`: alle PPDs bestehen (auch bei deutscher Systemsprache); strenge Prüfung

@@ -184,6 +184,95 @@ public enum TestLabel {
 `ZPLCommand.description`: `prefix + code + parameters.joined(",")`. Für `^FD` enthält
 `parameters` genau ein Element (die bereits maskierten Daten).
 
+### 3.1 Treiberoptionen wie im Windows-Dialog „Druckeinstellungen für ZD421 …“
+
+Erweiterungen der vorhandenen Typen (quellkompatibel; neue `PrintSettings.init`-Parameter mit
+Standardwerten **am Ende**):
+
+```swift
+extension MediaTracking { case notch }          // ^MNW, cupsValue "Notch"; EPL wie gap
+// displayName (Windows „Medientyp“): continuous „Endlosmaterial“, gap „Einzeletiketten“,
+// blackMark „Etiketten mit schwarzen Markierungen“, notch „Etiketten mit Seitenkerben“,
+// autoDetect „Automatisch erkennen“
+extension PrintMode {                           // Windows „Bedienermodus“
+    case linerlessPeel, linerlessCut, linerlessDelayedCut, linerlessRewind, linerlessTear
+    // cupsValue LinerlessPeel … LinerlessTear
+    var sgdValue: String          // media.printmode: "tear off" "peel off" "cutter" "delayed cut" "rewind"
+                                  // "applicator" "kiosk" "linerless peel" "linerless cut"
+                                  // "linerless delayed cut" "linerless rewind" "linerless tear"
+    init?(sgdValue: String)       // tolerant: Groß-/Kleinschreibung, "_"/"-" statt Leerzeichen
+    var isLinerless: Bool
+    var usesSGD: Bool             // == isLinerless: kein ^MM, nur SGD media.printmode
+    var mmCode: String?           // T P C D R A K; nil für Linerless
+    var zplCode: String           // unverändert String; Linerless: Code des classicEquivalent
+    var classicEquivalent: PrintMode   // linerlessPeel → peelOff, …Cut → cutter, …DelayedCut → delayedCut,
+                                       // …Rewind → rewind, …Tear → tearOff
+    var usesCutter: Bool          // cutter, delayedCut, kiosk, linerlessCut, linerlessDelayedCut
+    init?(zplCode:)               // liefert nur klassische Modi
+    // displayName: Abreißen, Spendemodus, Abschneider, Verzögerter Abschneider, Aufwickeln,
+    // Applikator, Kiosk, Linerless ablösen, Linerless schneiden, Linerless verzögert schneiden,
+    // Linerless aufwickeln, Linerless-Abriss
+}
+// MediaType.displayName: „Thermotransfer“ / „Thermo-Direkt“
+// BackfeedMode.displayName: off „Kein Rückzug“, beforePrinting „Vor dem Drucken“,
+//                           afterPrinting „Nach dem Drucken“, normal „Standard“
+
+public enum PrintRotation: Int, Codable, CaseIterable, Sendable, Identifiable {
+    case r0 = 0, r90 = 90, r180 = 180, r270 = 270   // im Uhrzeigersinn
+    var cupsValue: String; init?(cupsValue:)         // "0" "90" "180" "270"
+    var degrees: Int; var isQuarterTurn: Bool        // 90/270
+    var displayName: String   // „0° – Hochformat“, „90° – Querformat“, „180° – Hochformat“, „270° – Querformat“
+}
+public enum RTCUpdate: String, Codable, CaseIterable, Sendable, Identifiable {
+    case jobStart, everyLabel, everyMinute          // cupsValue JobStart EveryLabel EveryMinute
+    // displayName „Druckzeit starten“, „Jedes Etikett“, „Jede Minute“
+}
+public enum MediaFeedAction: String, Codable, CaseIterable, Sendable, Identifiable {
+    case feed, calibrate, length, noMotion, shortCalibration
+    var zplCode: String       // F C L N S (^MF)
+    var cupsValue: String     // Feed Calibrate Length NoMotion ShortCal
+    var sgdValue: String      // feed calibrate length "no motion" "short cal" (ezpl.power_up_action …)
+}
+public struct ControlCharacters: Codable, Hashable, Sendable {
+    public var formatPrefix: UInt8 = 0x5E, controlPrefix: UInt8 = 0x7E, delimiter: UInt8 = 0x2C
+    public static let standard: ControlCharacters
+    public static let validRange: ClosedRange<UInt8>   // 33…126
+    public func clamped() -> ControlCharacters           // ungültig → jeweiliges Standardzeichen
+    public static func character(from text: String) -> UInt8?   // SGD-Wert "^" → 0x5E
+}
+
+extension PrintSettings {        // neue gespeicherte Eigenschaften (Standardwert)
+    var rotation: PrintRotation = .r0
+    var markOffset: Int? = nil              // Punkte −80…283, ^MNM,{n} (nur blackMark)
+    var stopAtLastElement: Bool = false     // nur Endlosmaterial
+    var stopOffset: Int = 0                 // Punkte 0…32000
+    var pauseEvery: Int = 0                 // 0…9999, ^PQ{n},{p},0,N (Vorrang vor cutEvery)
+    var controlCharacters: ControlCharacters? = nil   // nil = „Standard“, sonst „Intern“ (Zeichen des Druckers)
+    var rtcUpdate: RTCUpdate? = nil
+    var cancelJobsBeforePrint: Bool = false // ~JA
+    var cancelDelayMs: Int = 1000           // 0…10000
+    var labelStartCommands: String = ""     // je Etikett nach ^XA
+    var labelEndCommands: String = ""       // je Etikett vor ^XZ
+    var powerUpAction: MediaFeedAction? = nil, headCloseAction: MediaFeedAction? = nil  // ^MF (nur beide)
+    var effectiveRotation: PrintRotation    // rotation != .r0 ? rotation : (rotate180 ? .r180 : .r0)
+    var effectiveControlCharacters: ControlCharacters   // controlCharacters?.clamped() ?? .standard
+    var hasMediaFeedActions: Bool
+}
+```
+
+`rotate180` (`lwRotate180`) bleibt als veralteter Alias erhalten. `clamped()` begrenzt die neuen
+Zahlen und ersetzt ungültige Steuerzeichen; `init(from:)` dekodiert fehlende/ungültige Werte mit
+Standardwerten; `cupsOptions()`/`init(cupsOptions:)` bilden alle Felder ab (§9, Rundreise exakt).
+`CUPSOptionName` kennt die neuen Namen (`all`) sowie `nonPPD` (Optionen ohne PPD-Eintrag).
+
+Befehlsbausteine: `ZPL.mediaTracking(_:markOffset:)` (`^MNM,{n}`, sonst `^MN{code}`),
+`ZPL.printModeCommand(_:) -> ZPLCommand?` (`nil` für Linerless),
+`ZPL.mediaFeed(powerUpAction:headCloseAction:)` (`^MF{a},{b}`), `ZPL.setRealTimeClock(_:timeZone:)`
+(`^ST{MM},{DD},{YYYY},{HH},{mm},{SS},M`), `ZPL.realTimeClockFormat(_:timeZone:)` (`^XA^ST…^XZ`),
+`ZPLCommand.rendered(with: ControlCharacters)` und `ZPL.render(_:characters:)` (eigene Steuerzeichen),
+`SGD.setPrintMode(_:)` (`! U1 setvar "media.printmode" "{sgdValue}"\r\n`),
+`SGD.printSettingsVariables` (für `PrinterClient.readPrintSettings()`).
+
 ## 4. LabelWerkImaging
 
 ```swift
@@ -259,9 +348,15 @@ public enum PNMCodec { static func decode(_ data: Data) throws -> GrayImage } //
 /// Baut komplette Druckaufträge aus Bitmaps – identisches Byteformat wie der C-Filter (§8).
 public struct JobEncoder: Sendable {
     public init(language: PrinterLanguage, resolution: Resolution, settings: PrintSettings,
-                stock: LabelStock? = nil, maxPrintWidthDots: Int? = nil)
+                stock: LabelStock? = nil, maxPrintWidthDots: Int? = nil,
+                timeZone: TimeZone = .current, now: @escaping @Sendable () -> Date = { Date() })
+    public var timeZone: TimeZone                 // Ortszeit für ^ST
+    public var now: @Sendable () -> Date          // Zeitquelle für ^ST (Tests: feste Zeit)
+    public var timeStepSeconds: Int64             // Tests: Etikett k sieht now() + k·timeStepSeconds (Standard 0)
     public func encode(pages: [MonoBitmap], copies: Int = 1, collate: Bool = true) throws -> Data
     public func encode(images: [GrayImage], copies: Int = 1, collate: Bool = true) throws -> Data // dithert gemäß settings
+    public func preprocess(_ page: MonoBitmap) -> MonoBitmap?     // Schritte (0)–(5) aus §8, z. B. für Vorschauen
+    public func cancelPrefixLength() -> Int?      // Bytes bis einschließlich der ~JA-Zeile (Aufrufer wartet dort)
 }
 ```
 
@@ -588,7 +683,19 @@ public actor PrinterClient {
     public func printZPL(_ zpl: String) async throws
     public func printImages(_ images: [GrayImage], settings: PrintSettings, resolution: Resolution,
                             stock: LabelStock?, copies: Int = 1) async throws
-    public func applySettings(_ settings: PrintSettings, permanently: Bool) async throws  // ~SD, ~TA, ~JS, ^MT, ^MN, ^MM, ^PR, ^LT, ^LS (+ ^JUS)
+        // mit cancelJobsBeforePrint: Teil bis ~JA senden, cancelDelayMs warten, Rest senden
+    public func applySettings(_ settings: PrintSettings, permanently: Bool) async throws
+        // ~SD, ~TA, ~JS, [SGD media.printmode bei Linerless], ^XA ^MT ^MN[M,offset] ^MM(klassisch) ^PR ^LT ^LS
+        // ^MF(nur beide Aktionen) (+ ^JUS) ^XZ – mit den Steuerzeichen aus settings.controlCharacters
+    public static func settingsPayload(_ settings: PrintSettings, permanently: Bool, language: PrinterLanguage) -> Data
+    public func syncClock(now: Date = Date(), timeZone: TimeZone = .current) async throws
+        // ZPL: ^XA^ST{MM},{DD},{YYYY},{HH},{mm},{SS},M^XZ; EPL/CPCL: SGD rtc.date (MM-DD-YYYY), rtc.time (HH:MM:SS)
+    public static func clockPayload(now: Date, timeZone: TimeZone, language: PrinterLanguage) -> Data
+    public func readPrintSettings(into base: PrintSettings = PrintSettings()) async throws -> PrintSettings
+        // SGD: print.tone, media.speed, ezpl.media_type (sonst media.type journal → continuous,
+        // media.sense_mode bar → blackMark / gap → gap), ezpl.print_method, media.printmode,
+        // zpl.label_top, zpl.left_position, ezpl.tear_off, ezpl.power_up_action, ezpl.head_close_action,
+        // zpl.caret/zpl.control_character/zpl.delimiter (alle Standard → nil); fehlende Werte → base
     public func listFiles(drive: String = "E:") async throws -> [PrinterFile]
     public func uploadFont(name: String, data: Data, drive: String = "E:") async throws
     public func uploadGraphic(name: String, bitmap: MonoBitmap, drive: String = "E:") async throws
@@ -605,6 +712,8 @@ public actor VirtualPrinter: PrinterConnection {
     public var receivedData: Data { get }
     public var renderedLabels: [RenderedLabel] { get }   // aus empfangenem ZPL (LabelWerkRender)
     public func setPaused(_ on: Bool); func setHeadOpen(_ on: Bool); func setMediaOut(_ on: Bool); func setRibbonOut(_ on: Bool)
+    public var clockDate: Date { get }                    // simulierte Echtzeituhr (^ST, SGD rtc.date/rtc.time)
+    // Linerless-Modelle (Ausstattung linerless) akzeptieren die Linerless-Werte von media.printmode
     public var files: [PrinterFile] { get }
     public static func registerWithConnectionFactory()   // `.virtual(id:)` → VirtualPrinter (Standardmodell ZD421t)
 }
@@ -626,27 +735,60 @@ SGD `getvar` → `"wert"`; JSON `{}{…}` → JSON-Objekt; `^HH` → Konfigurati
 `upload-graphic <png> [--name]`, `firmware <datei>`, `terminal` (interaktiv), `models`, `stocks`,
 `test-label`, `virtual-printer [--port 9100] [--model zd421t]`, `version`, `help`.
 
+Treiberoptionen für `print` und `encode` (je eine `PrintSettings`-Eigenschaft, §9): `--darkness`,
+`--speed`, `--media-type`, `--tracking gap|blackMark|continuous|auto|notch`, `--print-mode`
+(inkl. `linerlessPeel` … `linerlessTear`), `--label-top`, `--label-left`, `--tear-off`, `--backfeed`,
+`--negative`, `--mirror`, `--rotate180`, `--rotation 0|90|180|270`, `--mark-offset`, `--stop-at-last`,
+`--stop-offset`, `--pause-every`, `--cut-every`, `--control-chars standard|printer` mit
+`--format-prefix`/`--control-prefix`/`--delimiter` (Zeichen oder dezimaler Code 33…126; nur mit
+`printer`), `--rtc jobStart|everyLabel|everyMinute`, `--cancel-before`, `--cancel-delay`,
+`--label-start-commands`, `--label-end-commands`, `--power-up-action`/`--head-close-action`
+(`feed|calibrate|length|noMotion|shortCal` oder ZPL-Code), `--calibrate`, `--save-settings`,
+`--skip-blank`, `--start-commands`, `--end-commands`. Nur `encode`: `--no-collate`, `--max-width`,
+`--fixed-time <s>` (feste Uhrzeit für `^ST`, Sekunden seit 1970), `--time-step <s>` (Etikett k sieht
+die Zeit + k·s, wie `LW_TIME_STEP_SECONDS`), `--time-zone <id>` (Standard: `TZ` bzw. Systemzeitzone).
+Mit `--rotation 90|270` passt `print`/`encode` (ohne `--no-layout`) das Bild in das quer liegende
+Etikett ein; der `JobEncoder` dreht die Seite danach zurück.
+
 ## 8. Druckauftragsformat (verbindlich für `JobEncoder` **und** C-Filter)
 
-Eingang: Seiten als `MonoBitmap` (1 = schwarz). Breite > `maxPrintWidthDots` → rechts abschneiden.
-Seiten ohne Fläche (Breite oder Höhe 0) werden nach (1) übersprungen und zählen nicht für
-Kopien/Sortierung. Reihenfolge der Bitmap-Vorverarbeitung: (1) abschneiden, (2) `negative` → invertieren,
-(3) `skipBlankLabels` und Seite leer → Seite überspringen, (4) nur EPL/CPCL: `mirror` → spiegeln,
-(5) nur CPCL: `rotate180` → um 180° drehen. ZPL dreht/spiegelt per `^PO`/`^PM`, EPL dreht per `ZB`.
-Zeilenende ZPL: jeder Befehl in eigener Zeile, abgeschlossen mit `\n` (LF); Grafikdaten in einer Zeile.
+Eingang: Seiten als `MonoBitmap` (1 = schwarz). Wirksame Drehung `R = effectiveRotation`
+(`rotation`, falls ≠ 0, sonst 180 bei `rotate180`, sonst 0). Reihenfolge der Bitmap-Vorverarbeitung
+(alle Sprachen, Einstellungen zuvor mit `clamped()` begrenzt):
+
+0. `R` = 90 bzw. 270 → Bitmap im Uhrzeigersinn drehen (neue Größe H × W): 90°: Punkt (x, y) →
+   (H − 1 − y, x); 270°: (x, y) → (y, W − 1 − x).
+1. Breite > `maxPrintWidthDots` → rechts abschneiden. Seiten ohne Fläche (Breite oder Höhe 0)
+   werden danach übersprungen und zählen nicht für Kopien/Sortierung.
+   1b. `stopAtLastElement` **und** `tracking == continuous` → Seitenhöhe = (letzte Zeile mit einem
+   schwarzen Punkt, −1 bei leerer Seite) + 1 + `stopOffset`, mindestens 1; kürzer → unten
+   abschneiden, länger → weiße Zeilen anfügen.
+2. `negative` → invertieren.
+3. `skipBlankLabels` und Seite leer → Seite überspringen.
+4. Nur EPL/CPCL: `mirror` → spiegeln.
+5. `R` = 180: ZPL `^POI`, EPL `ZB`, CPCL dreht die Bitmap um 180°.
+
+ZPL spiegelt per `^PM`. Zeilenende ZPL: jeder Befehl in eigener Zeile, abgeschlossen mit `\n` (LF);
+Grafikdaten in einer Zeile.
 
 ### ZPL
 
 ```
 {startCommands}\n                     falls nicht leer
+~JA\n                                 falls cancelJobsBeforePrint (Filter: Ausgabe leeren, cancelDelayMs warten)
 ~SD{dd}\n                             falls darkness (zweistellig, 0-gefüllt: ~SD08)
 ~TA{±ddd}\n                           falls tearOffAdjust (printf "%03d": ~TA010, ~TA-10)
 ~JS{A|B|N|O}\n                        falls backfeed (Steuerbefehl; ^JS ist die Sensorwahl)
 ~JC\n                                 falls calibrateBeforeJob
-— je Etikett —
+! U1 setvar "media.printmode" "{sgd}"\r\n   falls printMode linerless (sgdValue; Zeilenende CR LF)
+^XA^MF{a},{b}^XZ\n                    falls powerUpAction UND headCloseAction (F|C|L|N|S)
+^XA^ST{MM},{DD},{YYYY},{HH},{mm},{SS},M^XZ\n   falls rtcUpdate (Ortszeit, 0-gefüllt, 24 h)
+— je Etikett (k = 0, 1, … in Auftragsreihenfolge inkl. Sortierwiederholungen) —
+^XA^ST…^XZ\n                         everyLabel und k > 0, bzw. everyMinute und ≥ 60 s seit dem letzten ^ST
 ^XA\n
-^MM{T|P|C|D|R|A|K}\n                  falls printMode
-^MN{Y|M|N|A}\n                        falls tracking
+{labelStartCommands}\n                falls nicht leer
+^MM{T|P|C|D|R|A|K}\n                  falls printMode und nicht linerless
+^MN{Y|M|N|A|W}\n                      falls tracking; blackMark mit markOffset: ^MNM,{offset}
 ^MT{D|T}\n                            falls mediaType
 ^PR{s},{s},{s}\n                      falls speed
 ^PW{breite}\n
@@ -654,11 +796,13 @@ Zeilenende ZPL: jeder Befehl in eigener Zeile, abgeschlossen mit `\n` (LF); Graf
 ^LH0,0\n
 ^LT{top}\n                            falls labelTop
 ^LS{left}\n                           falls labelLeft
-^PO{I|N}\n                            rotate180 ? I : N
+^PO{I|N}\n                            R == 180 ? I : N
 ^PM{Y|N}\n                            mirror ? Y : N
 ^FO0,0^GFA,{total},{total},{bpr},{daten}^FS\n
-^PQ{n}\n                              bzw. ^PQ{n},{cutEvery},0,Y falls cutEvery > 0
+^PQ{n}\n                              ^PQ{n},{pauseEvery},0,N falls pauseEvery > 0 (Vorrang),
+                                      sonst ^PQ{n},{cutEvery},0,Y falls cutEvery > 0
 ^JUS\n                                nur beim ersten Etikett, falls saveToPrinter
+{labelEndCommands}\n                  falls nicht leer
 ^XZ\n
 — Ende —
 {endCommands}\n                       falls nicht leer
@@ -670,23 +814,44 @@ Zeilenende ZPL: jeder Befehl in eigener Zeile, abgeschlossen mit `\n` (LF); Graf
 * Kopien: `collate == false` oder nur eine Seite → je Seite `^PQ{copies}`.
   `collate == true` und > 1 Seite → gesamte Seitenfolge `copies`-mal wiederholen, je `^PQ1`.
 * Höhe `^LL` = Bitmaphöhe.
+* **Echtzeituhr** (`rtcUpdate`): Zeit in ganzen Sekunden seit 1970 (abgerundet), als Ortszeit
+  formatiert (Swift `JobEncoder.timeZone`, C/Python `localtime()` nach `TZ`). Auftragskopf: Zeit T0.
+  Etikett k: Zeit Tk (laufende Uhr; zum Testen T0 + k·Schritt: Swift `now`/`timeStepSeconds`, C
+  `LW_FIXED_TIME`/`LW_TIME_STEP_SECONDS`, Python `now`/`time_step`). `everyLabel`: `^ST` vor jedem
+  Etikett mit k > 0; `everyMinute`: vor jedem Etikett (auch k = 0), sobald Tk − (Zeit des letzten `^ST`)
+  ≥ 60; `jobStart`: nur im Kopf. Ein Etikett mit `^PQ{n}` zählt als **ein** Etikett.
+* **Steuerzeichen „Intern“** (`controlCharacters` ≠ nil, Zeichen 33…126, ungültige → Standardzeichen):
+  in **allen selbst erzeugten** Befehlen wird `^` durch `formatPrefix`, `~` durch `controlPrefix` und
+  `,` durch `delimiter` ersetzt – auch in `~JA`, `~SD`, `~TA`, `~JS`, `~JC`, `^XA^MF…^XZ`,
+  `^XA^ST…^XZ`, `^LH0,0`, `^PR`, `^PQ`, `^MNM,n` und im `^GFA`-Kopf
+  (`{fp}FO0{d}0{fp}GFA{d}{total}{d}{total}{d}{bpr}{d}{daten}{fp}FS`). **Nicht** ersetzt werden
+  Start-/End-/Etikettenbefehle, die SGD-Zeile und die Grafikdaten (z. B. `,`/`!`/`:` in ACS).
+* **Aufträge abbrechen**: `~JA` steht nach den Startbefehlen. Der C-Filter leert danach die Ausgabe
+  und wartet `cancelDelayMs`; `JobEncoder` schreibt nur die Zeile – `PrinterClient.printImages` sendet
+  den Teil bis einschließlich `~JA\n` (`cancelPrefixLength()`), wartet und sendet den Rest.
+* Nur ZPL: `markOffset`, `pauseEvery`, Steuerzeichen, `rtcUpdate`, `^MF`, Linerless-SGD. EPL und CPCL
+  ignorieren sie (Drehung 90/270 und „Bei letztem Element stoppen“ gelten für alle Sprachen).
 
 ### EPL2 (Zeilenende `\n`)
 
 ```
-{startCommands}\n
+{startCommands}\n                     falls nicht leer
+~JA\n                                 falls cancelJobsBeforePrint (wörtlich, ohne eigene Steuerzeichen; Filter wartet)
 — je Etikett —
 \nN\n                                  (führendes LF leert evtl. Restdaten)
+{labelStartCommands}\n                falls nicht leer
 q{breite}\n
-Q{höhe},{lücke}\n                     tracking gap/auto/nil: Lücke = stock.gapDots oder 24; blackMark: Q{höhe},B{lücke}; continuous: Q{höhe},0
+Q{höhe},{lücke}\n                     tracking gap/notch/auto/nil: Lücke = stock.gapDots oder 24; blackMark: Q{höhe},B{lücke}; continuous: Q{höhe},0
 S{speed}\n                            falls speed (begrenzt 1…6)
 D{density}\n                          falls darkness (round(darkness/2), 0…15)
-Z{B|T}\n                              rotate180 ? B : T
+Z{B|T}\n                              R == 180 ? B : T
 O{D}{C|P}\n                           falls mediaType/printMode gesetzt: "O" + (directThermal ? "D" : "") + (cutter ? "C" : peelOff ? "P" : "")
+                                      (Linerless-Modi: weder C noch P)
 GW0,0,{bpr},{höhe},<binär, Bit 0 = schwarz>\n
+{labelEndCommands}\n                  falls nicht leer (vor P: das nächste N leert den Bildpuffer)
 P{n}\n                                bzw. P1 bei Sortierung (wie ZPL)
 — Ende —
-{endCommands}\n
+{endCommands}\n                       falls nicht leer
 ```
 
 ### CPCL (Zeilenende `\r\n`)
@@ -701,6 +866,9 @@ CG {bpr} {höhe} 0 0 <binär, 1 = schwarz>\r\n
 FORM\r\n                              außer bei continuous
 PRINT\r\n
 ```
+
+CPCL hat keinen Auftragskopf: Start-/Endbefehle, `~JA` (`cancelJobsBeforePrint`) und Befehle je
+Etikett entfallen ebenso wie alle ZPL-Optionen.
 
 ## 9. CUPS-Optionen (PPD ↔ Filter ↔ App)
 
@@ -747,6 +915,14 @@ Windows-Treiber: „Seite einrichten“ (Seitengröße, `lwMediaTracking`, `lwMa
 „Grafik Optionen“ (`lwDither`, `lwThreshold`, `lwCompression`) und „Erweitert“ (`lwLanguage`,
 `lwCalibrate`, `lwSaveSettings`, `lwSkipBlank`, `lwPowerUpAction`, `lwHeadCloseAction`, Auflösung,
 Farbmodell).
+
+Lesen der neuen Optionen (Swift `PrintSettings(cupsOptions:)`, C-Filter, Python-Referenz gleich):
+`lwRotation` ungültig → 0; `lwControlChars` ohne Beachtung der Groß-/Kleinschreibung, nur `Printer`
+aktiviert `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter` (je fehlend, `Default` oder außerhalb
+33…126 → Standardzeichen `^`/`~`/`,`); Zahlen außerhalb des Bereichs werden begrenzt (`lwMarkOffset`
+−80…283, `lwStopOffset` 0…32000, `lwPauseEvery` 0…9999, `lwCancelDelay` 0…10000). `cupsOptions()`
+schreibt `lwRotation` und `lwRotate180` unverändert (Rundreise exakt), `lwFormatPrefix`… nur bei
+`Printer`, leere Befehle (`lwLabelStartCmd`, `lwLabelEndCmd`) gar nicht.
 
 Vorrang im Filter: Wert aus `argv[5]` (Job-/Warteschlangen-Optionen) **vor** markierter PPD-Auswahl
 **vor** PPD-Default. Ganzzahlen außerhalb der PPD-Auswahl sind erlaubt. Warteschlangen-Standardwerte

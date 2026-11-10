@@ -8,6 +8,12 @@ erzeugen. Die Implementierung ist bewusst anders strukturiert als der C-Code (ga
 Zeilen-Streaming, Fehlerfelder über das ganze Bild, Bitketten statt Bitmasken), damit
 gemeinsame Denkfehler unwahrscheinlich sind.
 
+Enthält auch die Optionen der Windows-Druckeinstellungen (Drehung 90/180/270°, Markenversatz,
+Seitenkerben, Linerless, Bei letztem Element stoppen, Pause, eigene Steuerzeichen, RTC ``^ST``,
+``~JA``, Etikettenbefehle, ``^MF``). Die Uhr für ``^ST`` ist ein Parameter (``now``,
+``time_step``) – wie ``LW_FIXED_TIME``/``LW_TIME_STEP_SECONDS`` beim Filter; die Ortszeit folgt
+der Umgebungsvariablen ``TZ`` des Python-Prozesses.
+
 Als Modul importierbar::
 
     import reference_encoder as ref

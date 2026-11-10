@@ -352,6 +352,15 @@ final class PrinterSession: Identifiable {
         }
     }
 
+    /// Wie `run`, für Erweiterungen in anderen Dateien (z. B. `PrinterSession+Preferences.swift`).
+    func withClient<T>(
+        _ activityText: String,
+        quiet: Bool = false,
+        _ operation: (PrinterClient) async throws -> T
+    ) async -> T? {
+        await run(activityText, quiet: quiet, operation)
+    }
+
     private func recordJob(_ kind: JobRecord.Kind, title: String, labels: Int, bytes: Int,
                            success: Bool, message: String? = nil, preview: Data? = nil, payload: Data? = nil) {
         let stored = payload.flatMap { $0.count <= JobRecord.maxStoredPayload ? $0 : nil }

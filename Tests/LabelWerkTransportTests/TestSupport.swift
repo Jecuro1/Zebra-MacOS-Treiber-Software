@@ -200,13 +200,68 @@ final class TestTCPServer: @unchecked Sendable {
         #endif
     }
 
-    /// Liefert einen Port auf 127.0.0.1, auf dem garantiert niemand lauscht.
+    /// Liefert einen Portnummer auf 127.0.0.1, auf der gerade niemand lauscht – nur für UDP-Ziele
+    /// (z. B. SNMP ohne Dienst). Der Port ist danach wieder frei; für „Verbindung abgelehnt“ bei
+    /// TCP `ClosedTCPPort` verwenden, sonst kann ein parallel laufender Test ihn belegen.
     static func unusedPort() throws -> Int {
         let server = try TestTCPServer(accepts: false) { _ in }
         let port = server.port
         server.stop()
         return port
     }
+}
+
+/// Hält einen TCP-Port auf 127.0.0.1 belegt (gebunden, aber ohne `listen`), solange das Objekt
+/// lebt: Verbindungen dorthin werden garantiert abgelehnt (RST). Weil der Port gebunden bleibt,
+/// kann ihn weder ein parallel laufender Test per `bind(0)` bekommen noch ein ausgehender
+/// `connect` als lokalen Port wählen (sonst verbände sich der Client mit sich selbst).
+final class ClosedTCPPort: @unchecked Sendable {
+    let port: Int
+    private let fd: Int32
+    private let lock = NSLock()
+    private var released = false
+
+    init() throws {
+        #if canImport(Darwin)
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        #else
+        let fd = socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
+        #endif
+        guard fd >= 0 else { throw TestServerError(description: "socket() fehlgeschlagen") }
+        // Bewusst ohne SO_REUSEADDR: Kein anderer Socket darf diesen Port mitbenutzen.
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = 0
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        #if canImport(Darwin)
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        #endif
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) }
+        }
+        guard bound == 0, named == 0 else {
+            _ = TestTCPServer.closeFD(fd)
+            throw TestServerError(description: "bind/getsockname fehlgeschlagen")
+        }
+        self.port = Int(UInt16(bigEndian: address.sin_port))
+        self.fd = fd
+    }
+
+    func release() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !released else { return }
+        released = true
+        _ = TestTCPServer.closeFD(fd)
+    }
+
+    deinit { release() }
 }
 
 /// UDP-Responder auf 127.0.0.1 für SNMP-Tests: beantwortet jede Anfrage mit `respond(request)`.
