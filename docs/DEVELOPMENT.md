@@ -288,8 +288,9 @@ Token – sie nutzt das `GITHUB_TOKEN` des Laufs.
 Für eine Weitergabe außerhalb des Update-Dienstes (Gatekeeper ohne Warnung) bleibt der klassische
 Weg:
 
-1. `VERSION` in `Installer/config.env` erhöhen und committen (`BUILD` höher als die letzte
-   CI-Laufnummer wählen, sonst ersetzt das Paket keine neuere CI-Version).
+1. `VERSION` in `Installer/config.env` erhöhen und committen. (Ein Paket mit unveränderter
+   Version braucht eine `BUILD` über der letzten CI-Laufnummer, sonst ersetzt es keine neuere
+   CI-Version.)
 2. `make test` (bzw. `make ci`) – alles grün.
 3. Signierte Bausteine bauen:
 

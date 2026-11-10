@@ -322,7 +322,7 @@ step_verify_pkg() {
     # Build-Nummer (Belege im Protokoll; Paketaufbau siehe Scripts/make_pkg.sh).
     local package_info="${expanded}/LabelWerkApp.pkg/PackageInfo"
     [[ -f "${package_info}" ]] || lw_die "PackageInfo der App-Komponente fehlt."
-    grep -E '<(pkg-info|bundle|relocate)[ />]' "${package_info}" | sed 's/^[[:space:]]*/    /' >&2 || true
+    sed 's/^/    /' "${package_info}" >&2
     lw_check_app_package_info "${package_info}"
     grep -q "CFBundleVersion=\"${BUILD}\"" "${expanded}/Distribution" \
         || lw_die "Distribution nennt nicht CFBundleVersion=\"${BUILD}\"."
@@ -418,6 +418,34 @@ step_install_test() {
         [[ "${installed_build}" == "${BUILD}" ]] \
             || lw_die "Update hat /Applications/${APP_NAME}.app nicht ersetzt (Build ${installed_build}, erwartet ${BUILD})."
         lw_ok "App-Update: /Applications/${APP_NAME}.app von Build 0 auf ${BUILD} ersetzt (gleiche Version ${VERSION})"
+    fi
+    probe_print_dialog
+}
+
+# Welches Papierformat schlagen macOS-Programme für die Testwarteschlange vor? Einmal mit dem
+# Standardpapierformat des Systems (meist US Letter) und einmal wie beim Anwender mit A4. Bisher nur
+# Auskunft (Warnung statt Abbruch), bis das Verhalten auf echten macOS-Versionen belegt ist.
+probe_print_dialog() {
+    local probe="${LW_REPO_ROOT}/Scripts/probe_page_format.swift" previous_default="" output
+    [[ -f "${probe}" ]] || return 0
+    previous_default="$(lpstat -d 2>/dev/null | sed -n 's/^.*: //p' || true)"
+    lpoptions -d "${TEST_QUEUE}" >/dev/null 2>&1 || lw_ci_warning "Standarddrucker ließ sich nicht setzen."
+    local paper
+    for paper in "" iso-a4; do
+        if [[ -n "${paper}" ]]; then
+            defaults write com.apple.print.PrintingPrefs DefaultPaperID -string "${paper}" || true
+        else
+            defaults delete com.apple.print.PrintingPrefs DefaultPaperID >/dev/null 2>&1 || true
+        fi
+        if output="$(swift "${probe}" "${TEST_QUEUE}" "${TEST_SIZE_KEYWORD}" 2>&1)"; then
+            lw_ok "Druckdialog (Systempapier ${paper:-Standard}): ${output//$'\n'/ · }"
+        else
+            lw_ci_warning "Druckdialog (Systempapier ${paper:-Standard}): ${output//$'\n'/ · }"
+        fi
+    done
+    defaults delete com.apple.print.PrintingPrefs DefaultPaperID >/dev/null 2>&1 || true
+    if [[ -n "${previous_default}" ]]; then
+        lpoptions -d "${previous_default}" >/dev/null 2>&1 || true
     fi
 }
 
