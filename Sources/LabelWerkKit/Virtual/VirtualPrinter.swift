@@ -19,7 +19,7 @@ import LabelWerkTransport
 /// * SGD `getvar`/`setvar`/`do` und JSON `{}{…}` (inkl. `allconfig`) arbeiten auf rund 70
 ///   Variablen mit Typ, Bereich und Zugriffsrecht; `setvar` prüft Werte und speichert sie.
 /// * `~SD`, `~TA`, `~JS`, `^MT`, `^MN`, `^MM`, `^PR`, `^LT`, `^LS`, `^PW`, `^LL`, `^MF`, `^KN`
-///   ändern dieselben Einstellungen; `^JUS` ist ohne Wirkung (alles ist sofort dauerhaft),
+///   ändern dieselben Einstellungen, `^ST` stellt die Echtzeituhr (`rtc.date`, `rtc.time`); `^JUS` ist ohne Wirkung (alles ist sofort dauerhaft),
 ///   `^JUF`/`^JUN` laden Werkseinstellungen. `^MD` setzt wie bei der Firmware nur einen
 ///   Versatz zur gespeicherten Schwärzung (`print.tone` bleibt unverändert, nach einem Neustart
 ///   gilt wieder 0); `^JS` ist die Sensorwahl und ändert den Rückzug nicht.
@@ -108,6 +108,9 @@ public actor VirtualPrinter: PrinterConnection {
     var relativeDarkness: Double = 0
     /// Anzahl der Neustarts seit dem Erzeugen (`~JR`, `device.reset`).
     var restartCount = 0
+    /// Abweichung der Echtzeituhr von der Systemzeit in Sekunden (gestellt per `^ST` bzw. SGD
+    /// `rtc.date`/`rtc.time`).
+    var clockOffset: TimeInterval = 0
     var jsonEnabled: Bool
     var sgdEnabled: Bool
     var eplPage = EPLPageBuilder()
@@ -327,6 +330,9 @@ public actor VirtualPrinter: PrinterConnection {
         refreshDynamicValues()
         return store.values
     }
+
+    /// Aktuelle Zeit der simulierten Echtzeituhr (Systemzeit plus gestellte Abweichung).
+    public var clockDate: Date { Date().addingTimeInterval(clockOffset) }
 
     public var isPaused: Bool { paused }
     public var isHeadOpen: Bool { headOpen }

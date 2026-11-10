@@ -41,22 +41,6 @@
 #define LW_OPT_SKIP_BLANK    "lwSkipBlank"
 #define LW_OPT_START_CMD     "lwStartCmd"
 #define LW_OPT_END_CMD       "lwEndCmd"
-#define LW_OPT_ROTATION          "lwRotation"
-#define LW_OPT_MARK_OFFSET       "lwMarkOffset"
-#define LW_OPT_STOP_AT_LAST      "lwStopAtLast"
-#define LW_OPT_STOP_OFFSET       "lwStopOffset"
-#define LW_OPT_PAUSE_EVERY       "lwPauseEvery"
-#define LW_OPT_CONTROL_CHARS     "lwControlChars"
-#define LW_OPT_FORMAT_PREFIX     "lwFormatPrefix"
-#define LW_OPT_CONTROL_PREFIX    "lwControlPrefix"
-#define LW_OPT_DELIMITER         "lwDelimiter"
-#define LW_OPT_RTC               "lwRTC"
-#define LW_OPT_CANCEL_BEFORE     "lwCancelBefore"
-#define LW_OPT_CANCEL_DELAY      "lwCancelDelay"
-#define LW_OPT_LABEL_START_CMD   "lwLabelStartCmd"
-#define LW_OPT_LABEL_END_CMD     "lwLabelEndCmd"
-#define LW_OPT_POWER_UP_ACTION   "lwPowerUpAction"
-#define LW_OPT_HEAD_CLOSE_ACTION "lwHeadCloseAction"
 #define LW_OPT_ROTATION      "lwRotation"
 #define LW_OPT_MARK_OFFSET   "lwMarkOffset"
 #define LW_OPT_STOP_AT_LAST  "lwStopAtLast"
@@ -84,22 +68,6 @@
 
 /** Markiert eine nicht gesetzte optionale Ganzzahl (kein Befehl wird gesendet). */
 #define LW_UNSET INT_MIN
-
-/** Standard-Steuerzeichen von ZPL II (Formatpräfix ^, Steuerpräfix ~, Trennzeichen ,). */
-#define LW_FORMAT_PREFIX_STANDARD  0x5E
-#define LW_CONTROL_PREFIX_STANDARD 0x7E
-#define LW_DELIMITER_STANDARD      0x2C
-/** Zulässiger Bereich für eigene Steuerzeichen (druckbares ASCII ohne Leerzeichen). */
-#define LW_CONTROL_CHAR_MIN 33
-#define LW_CONTROL_CHAR_MAX 126
-
-/** Grenzen der neuen Ganzzahloptionen (ARCHITECTURE.md §9). */
-#define LW_MARK_OFFSET_MIN   (-80)
-#define LW_MARK_OFFSET_MAX   283
-#define LW_STOP_OFFSET_MAX   32000
-#define LW_PAUSE_EVERY_MAX   9999
-#define LW_CANCEL_DELAY_MAX  10000
-#define LW_CANCEL_DELAY_DEFAULT 1000
 
 /** Standard-Steuerzeichen von ZPL (Formatpräfix ^, Steuerpräfix ~, Trennzeichen ,). */
 #define LW_FORMAT_PREFIX_STANDARD  0x5E
@@ -160,24 +128,6 @@ typedef enum lw_backfeed {
     LW_BACKFEED_NORMAL,   /* ~JSN */
     LW_BACKFEED_OFF       /* ~JSO */
 } lw_backfeed;
-
-/** Echtzeituhr stellen (^ST): nie, zu Auftragsbeginn, vor jedem Etikett, jede Minute. */
-typedef enum lw_rtc {
-    LW_RTC_UNSET = 0,
-    LW_RTC_JOB_START,      /* "JobStart"   – nur im Auftragskopf */
-    LW_RTC_EVERY_LABEL,    /* "EveryLabel" – zusätzlich vor jedem weiteren Etikett */
-    LW_RTC_EVERY_MINUTE    /* "EveryMinute" – zusätzlich, sobald ≥ 60 s vergangen sind */
-} lw_rtc;
-
-/** Medienvorschub beim Einschalten bzw. Schließen des Druckkopfs (^MF). */
-typedef enum lw_feed_action {
-    LW_FEED_ACTION_UNSET = 0,
-    LW_FEED_ACTION_FEED,         /* F – "Feed" */
-    LW_FEED_ACTION_CALIBRATE,    /* C – "Calibrate" */
-    LW_FEED_ACTION_LENGTH,       /* L – "Length" */
-    LW_FEED_ACTION_NO_MOTION,    /* N – "NoMotion" */
-    LW_FEED_ACTION_SHORT_CAL     /* S – "ShortCal" */
-} lw_feed_action;
 
 typedef enum lw_rtc {
     LW_RTC_UNSET = 0,         /* Uhr nicht stellen */
@@ -281,9 +231,6 @@ void lw_settings_clamp(lw_settings *s);
 /** Meldet die wirksamen Einstellungen als DEBUG-Zeile. */
 void lw_settings_log(const lw_settings *s, const lw_logger *log);
 
-/** Wirksame Drehung: rotation ≠ 0 ? rotation : (rotate180 ? 180 : 0). */
-int lw_settings_effective_rotation(const lw_settings *s);
-
 /* Einzelne Zerleger (öffentlich für Tests). Eingaben ohne führenden/abschließenden Leerraum. */
 lw_parse_result lw_parse_bool(const char *text, bool *value);
 /** Ganzzahl mit optionalem Vorzeichen und optionalem Präfix "Custom." – sättigt auf int. */
@@ -295,14 +242,6 @@ lw_parse_result lw_parse_print_mode(const char *text, lw_print_mode *value);
 lw_parse_result lw_parse_backfeed(const char *text, lw_backfeed *value);
 lw_parse_result lw_parse_dither(const char *text, lw_dither_algorithm *value);
 lw_parse_result lw_parse_compression(const char *text, lw_compression *value);
-/** "0" "90" "180" "270" ("Default" → LW_PARSE_DEFAULT). */
-lw_parse_result lw_parse_rotation(const char *text, int *value);
-lw_parse_result lw_parse_rtc(const char *text, lw_rtc *value);
-lw_parse_result lw_parse_feed_action(const char *text, lw_feed_action *value);
-/** "Standard" → false, "Printer" → true ("Default" → LW_PARSE_DEFAULT). */
-lw_parse_result lw_parse_control_chars(const char *text, bool *printer);
-/** Dezimaler ASCII-Code 33…126 (z. B. "35" für #); andere Werte sind ungültig. */
-lw_parse_result lw_parse_control_char(const char *text, unsigned char *value);
 /** "0", "90", "180", "270" ("Default" → LW_PARSE_DEFAULT). */
 lw_parse_result lw_parse_rotation(const char *text, int *value);
 lw_parse_result lw_parse_rtc(const char *text, lw_rtc *value);
@@ -325,11 +264,6 @@ char lw_media_type_code(lw_media_type t);             /* 'D' / 'T' / 0 */
 char lw_tracking_code(lw_tracking t);                 /* 'Y' / 'M' / 'N' / 'A' / 0 */
 char lw_print_mode_code(lw_print_mode m);             /* 'T' … 'K' / 0 (auch für Linerless) */
 char lw_backfeed_code(lw_backfeed b);                 /* 'A' / 'B' / 'N' / 'O' / 0 */
-/** SGD-Wert für media.printmode ("tear off" … "linerless tear") oder NULL. */
-const char *lw_print_mode_sgd(lw_print_mode m);
-bool lw_print_mode_is_linerless(lw_print_mode m);
-char lw_feed_action_code(lw_feed_action a);           /* 'F' 'C' 'L' 'N' 'S' / 0 */
-const char *lw_rtc_name(lw_rtc r);                    /* "JobStart" … / "-" */
 /** true für die fünf Linerless-Modi (kein ^MM, SGD media.printmode). */
 bool lw_print_mode_is_linerless(lw_print_mode m);
 /** SGD-Wert für media.printmode ("tear off" … "linerless tear"); NULL bei UNSET. */

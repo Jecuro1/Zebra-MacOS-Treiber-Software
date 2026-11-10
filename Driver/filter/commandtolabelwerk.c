@@ -18,6 +18,9 @@
  *   ReportLevels       keine Daten (Thermodrucker haben keine Füllstände).
  *   unbekannt          DEBUG-Meldung, wird ignoriert.
  *
+ * Mit lwControlChars=Printer (eigene Steuerzeichen des Druckers) beginnen die ZPL-Befehle ~WC
+ * und ~JC mit lwControlPrefix statt ~.
+ *
  * Exitcode: 0 = Erfolg, 1 = Fehler (Datei nicht lesbar, keine Befehlsdatei, Ausgabefehler).
  */
 
@@ -44,6 +47,7 @@ typedef struct command_context {
     lw_sink *out;
     const lw_logger *log;
     lw_language language;
+    char control_prefix;        /* ZPL-Steuerpräfix: '~' bzw. lwControlPrefix */
     const char *model;
     int resolution_dpi;
     int print_width;
@@ -106,7 +110,7 @@ static void cmd_print_self_test(command_context *c)
 {
     switch (c->language) {
     case LW_LANGUAGE_ZPL:
-        lw_sink_puts(c->out, "~WC\n");
+        lw_sink_printf(c->out, "%cWC\n", c->control_prefix);
         break;
     case LW_LANGUAGE_EPL:
         lw_sink_puts(c->out, "\nU\n");
@@ -123,7 +127,7 @@ static void cmd_calibrate(command_context *c)
 {
     switch (c->language) {
     case LW_LANGUAGE_ZPL:
-        lw_sink_puts(c->out, "~JC\n");
+        lw_sink_printf(c->out, "%cJC\n", c->control_prefix);
         break;
     case LW_LANGUAGE_EPL:
         lw_sink_puts(c->out, "\nxa\n");
@@ -240,6 +244,7 @@ int main(int argc, char *argv[])
         .out = &out,
         .log = &log,
         .language = settings.language,
+        .control_prefix = settings.control_printer ? (char)settings.control_prefix : '~',
         .model = lw_cups_ppd_string(&opts, LW_ATTR_MODEL),
         .resolution_dpi = lw_cups_ppd_resolution(&opts),
         .print_width = lw_cups_ppd_int(&opts, LW_ATTR_MAX_PRINT_WIDTH, 1, 0, &log),

@@ -311,8 +311,9 @@ public struct JobEncoder: Sendable {
                 out.line(option)
             }
             out.raw(gw)   // enthält bereits das abschließende LF
-            out.line("P\(item.quantity)")
+            // Vor „P“: Nach dem Druck leert das nächste „N“ den Bildpuffer – wie bei ZPL vor ^XZ.
             if !s.labelEndCommands.isEmpty { out.line(s.labelEndCommands) }
+            out.line("P\(item.quantity)")
         }
         if !s.endCommands.isEmpty { out.line(s.endCommands) }
         return out.data

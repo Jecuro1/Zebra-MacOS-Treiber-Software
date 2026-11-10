@@ -231,7 +231,8 @@ extension VirtualPrinter {
         let now = Date()
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current
-        let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: now)
+        let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second],
+                                            from: now.addingTimeInterval(clockOffset))
         store.force("rtc.date", String(format: "%02d-%02d-%04d", parts.month ?? 1, parts.day ?? 1, parts.year ?? 2026))
         store.force("rtc.time", String(format: "%02d:%02d:%02d", parts.hour ?? 0, parts.minute ?? 0, parts.second ?? 0))
         let uptime = max(0, Int(now.timeIntervalSince(bootDate)))

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import sys
+import time
 import zlib
 from dataclasses import dataclass, field, replace
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -283,6 +284,37 @@ def rotate180(bm: Bitmap) -> Bitmap:
     return Bitmap.from_rows(bm.width, (bm.row_bits(y)[::-1] for y in reversed(range(bm.height))))
 
 
+def rotate_quarter(bm: Bitmap, degrees: int) -> Bitmap:
+    """Dreht im Uhrzeigersinn: 90° (x, y) → (h − 1 − y, x), 270° (x, y) → (y, w − 1 − x).
+
+    Neue Zeile ``ny`` = Spalte ``ny`` von unten nach oben gelesen (90°) bzw. Spalte
+    ``w − 1 − ny`` von oben nach unten (270°)."""
+    rows = [bm.row_bits(y) for y in range(bm.height)]
+    w, h = bm.width, bm.height
+    if degrees == 90:
+        new_rows = ("".join(rows[h - 1 - nx][ny] for nx in range(h)) for ny in range(w))
+    elif degrees == 270:
+        new_rows = ("".join(rows[nx][w - 1 - ny] for nx in range(h)) for ny in range(w))
+    else:
+        return bm
+    return Bitmap.from_rows(h, new_rows) if w > 0 else Bitmap(h, 0)
+
+
+def last_black_row(bm: Bitmap) -> int:
+    """Letzte Zeile mit einem schwarzen Punkt, −1 bei leerer Bitmap."""
+    for y in reversed(range(bm.height)):
+        if any(bm.row(y)):
+            return y
+    return -1
+
+
+def with_height(bm: Bitmap, height: int) -> Bitmap:
+    """Kürzt bzw. verlängert (weiße Zeilen) auf ``height`` Zeilen."""
+    rows = [bm.row_bits(y) for y in range(min(height, bm.height))]
+    rows += ["0" * bm.width] * (height - len(rows))
+    return Bitmap.from_rows(bm.width, rows)
+
+
 # --------------------------------------------------------------------------------------------
 # Kodierungen
 # --------------------------------------------------------------------------------------------
@@ -427,26 +459,67 @@ class Settings:
     skip_blank: bool = False
     start_commands: bytes = b""
     end_commands: bytes = b""
+    # --- Erweiterungen (Windows-Druckeinstellungen) ---
+    rotation: int = 0                      # 0 / 90 / 180 / 270 (0 + rotate180 = 180)
+    mark_offset: Optional[int] = None      # ^MNM,n (nur BlackMark), −80…283
+    stop_at_last: bool = False             # nur Continuous
+    stop_offset: int = 0                   # 0…32000 Punkte
+    pause_every: int = 0                   # ^PQn,p,0,N (Vorrang vor cut_every)
+    control_chars: Optional[Tuple[int, int, int]] = None   # None = Standard, sonst (^, ~, ,)-Ersatz
+    rtc: Optional[str] = None              # JobStart / EveryLabel / EveryMinute
+    cancel_before: bool = False            # ~JA
+    cancel_delay: int = 1000               # ms, nur der Filter wartet
+    label_start_commands: bytes = b""
+    label_end_commands: bytes = b""
+    power_up_action: Optional[str] = None  # Feed / Calibrate / Length / NoMotion / ShortCal
+    head_close_action: Optional[str] = None
 
     def clamped(self) -> "Settings":
         def c(v, lo, hi):
             return None if v is None else max(lo, min(hi, v))
+
+        chars = self.control_chars
+        if chars is not None:
+            chars = tuple(v if CONTROL_CHAR_MIN <= v <= CONTROL_CHAR_MAX else std
+                          for v, std in zip(chars, STANDARD_CONTROL_CHARS))
         return replace(self,
                        darkness=c(self.darkness, 0, 30), speed=c(self.speed, 1, 14),
                        label_top=c(self.label_top, -120, 120), label_left=c(self.label_left, -9999, 9999),
                        tear_off=c(self.tear_off, -120, 120), threshold=c(self.threshold, 1, 254),
-                       cut_every=c(self.cut_every, 0, 9999))
+                       cut_every=c(self.cut_every, 0, 9999),
+                       rotation=self.rotation if self.rotation in (0, 90, 180, 270) else 0,
+                       mark_offset=c(self.mark_offset, -80, 283), stop_offset=c(self.stop_offset, 0, 32000),
+                       pause_every=c(self.pause_every, 0, 9999), cancel_delay=c(self.cancel_delay, 0, 10000),
+                       control_chars=chars)
+
+    @property
+    def effective_rotation(self) -> int:
+        if self.rotation in (90, 180, 270):
+            return self.rotation
+        return 180 if self.rotate180 else 0
+
+
+#: Standard-Steuerzeichen (^ ~ ,) und gültiger Bereich eigener Zeichen.
+STANDARD_CONTROL_CHARS = (0x5E, 0x7E, 0x2C)
+CONTROL_CHAR_MIN, CONTROL_CHAR_MAX = 33, 126
 
 
 ENUMS = {
     "lwLanguage": {"zpl": "ZPL", "zpl2": "ZPL", "zplii": "ZPL", "epl": "EPL", "epl2": "EPL", "cpcl": "CPCL"},
     "lwMediaType": {"directthermal": "DirectThermal", "thermaltransfer": "ThermalTransfer"},
-    "lwMediaTracking": {"gap": "Gap", "blackmark": "BlackMark", "continuous": "Continuous", "auto": "Auto"},
+    "lwMediaTracking": {"gap": "Gap", "blackmark": "BlackMark", "continuous": "Continuous", "auto": "Auto",
+                        "notch": "Notch"},
     "lwPrintMode": {k.lower(): k for k in ("TearOff", "PeelOff", "Cutter", "DelayedCut", "Rewind",
-                                           "Applicator", "Kiosk")},
+                                           "Applicator", "Kiosk", "LinerlessPeel", "LinerlessCut",
+                                           "LinerlessDelayedCut", "LinerlessRewind", "LinerlessTear")},
     "lwBackfeed": {k.lower(): k for k in ("After", "Before", "Normal", "Off")},
     "lwDither": {k.lower(): k for k in DITHERS},
     "lwCompression": {"z64": "Z64", "acs": "ACS", "hex": "Hex"},
+    "lwRotation": {"0": 0, "90": 90, "180": 180, "270": 270},
+    "lwRTC": {k.lower(): k for k in ("JobStart", "EveryLabel", "EveryMinute")},
+    "lwPowerUpAction": {k.lower(): k for k in ("Feed", "Calibrate", "Length", "NoMotion", "ShortCal")},
+    "lwHeadCloseAction": {k.lower(): k for k in ("Feed", "Calibrate", "Length", "NoMotion", "ShortCal")},
+    "lwControlChars": {"standard": False, "printer": True},
 }
 
 INVALID = object()
@@ -484,6 +557,14 @@ def _parse_enum(name: str, text: str):
     if text.lower() == "default":
         return DEFAULT
     return ENUMS[name].get(text.lower(), INVALID)
+
+
+def _parse_char(text: str):
+    """Dezimaler ASCII-Code 33…126 (lwFormatPrefix/lwControlPrefix/lwDelimiter)."""
+    value = _parse_int(text)
+    if value is INVALID or value is DEFAULT:
+        return value
+    return value if CONTROL_CHAR_MIN <= value <= CONTROL_CHAR_MAX else INVALID
 
 
 def _parse_commands(text: str):
@@ -555,7 +636,23 @@ def resolve_settings(argv: Dict[str, str], marked: Dict[str, str], defaults: Dic
         skip_blank=pick("lwSkipBlank", _parse_bool, False),
         start_commands=pick("lwStartCmd", _parse_commands, b""),
         end_commands=pick("lwEndCmd", _parse_commands, b""),
+        rotation=pick("lwRotation", lambda t: _parse_enum("lwRotation", t), 0),
+        mark_offset=pick("lwMarkOffset", _parse_int, None),
+        stop_at_last=pick("lwStopAtLast", _parse_bool, False),
+        stop_offset=pick("lwStopOffset", _parse_int, 0),
+        pause_every=pick("lwPauseEvery", _parse_int, 0),
+        rtc=pick("lwRTC", lambda t: _parse_enum("lwRTC", t), None),
+        cancel_before=pick("lwCancelBefore", _parse_bool, False),
+        cancel_delay=pick("lwCancelDelay", _parse_int, 1000),
+        label_start_commands=pick("lwLabelStartCmd", _parse_commands, b""),
+        label_end_commands=pick("lwLabelEndCmd", _parse_commands, b""),
+        power_up_action=pick("lwPowerUpAction", lambda t: _parse_enum("lwPowerUpAction", t), None),
+        head_close_action=pick("lwHeadCloseAction", lambda t: _parse_enum("lwHeadCloseAction", t), None),
     )
+    if pick("lwControlChars", lambda t: _parse_enum("lwControlChars", t), False):
+        s = replace(s, control_chars=(pick("lwFormatPrefix", _parse_char, STANDARD_CONTROL_CHARS[0]),
+                                      pick("lwControlPrefix", _parse_char, STANDARD_CONTROL_CHARS[1]),
+                                      pick("lwDelimiter", _parse_char, STANDARD_CONTROL_CHARS[2])))
     return s.clamped()
 
 
@@ -642,25 +739,43 @@ DEFAULT_GAP_DOTS = 24
 ZPL_CODES = {
     "print_mode": {"TearOff": "T", "PeelOff": "P", "Cutter": "C", "DelayedCut": "D", "Rewind": "R",
                    "Applicator": "A", "Kiosk": "K"},
-    "tracking": {"Gap": "Y", "BlackMark": "M", "Continuous": "N", "Auto": "A"},
+    "tracking": {"Gap": "Y", "BlackMark": "M", "Continuous": "N", "Auto": "A", "Notch": "W"},
+    "media_action": {"Feed": "F", "Calibrate": "C", "Length": "L", "NoMotion": "N", "ShortCal": "S"},
     "media_type": {"DirectThermal": "D", "ThermalTransfer": "T"},
     "backfeed": {"After": "A", "Before": "B", "Normal": "N", "Off": "O"},
 }
 
 
+#: SGD-Werte für media.printmode der Linerless-Modi (kein ^MM-Code).
+LINERLESS_SGD = {"LinerlessPeel": "linerless peel", "LinerlessCut": "linerless cut",
+                 "LinerlessDelayedCut": "linerless delayed cut", "LinerlessRewind": "linerless rewind",
+                 "LinerlessTear": "linerless tear"}
+
+
 def preprocess(page: Bitmap, s: Settings, max_width: int) -> Optional[Bitmap]:
-    bm = crop(page, max_width)
+    rotation = s.effective_rotation
+    bm = rotate_quarter(page, rotation) if rotation in (90, 270) else page          # (0)
+    bm = crop(bm, max_width)                                                        # (1)
     if bm.width == 0 or bm.height == 0:
         return None
-    if s.negative:
+    if s.stop_at_last and s.tracking == "Continuous":                               # (1b)
+        bm = with_height(bm, max(1, last_black_row(bm) + 1 + s.stop_offset))
+    if s.negative:                                                                  # (2)
         bm = invert(bm)
-    if s.skip_blank and is_blank(bm):
+    if s.skip_blank and is_blank(bm):                                               # (3)
         return None
-    if s.mirror and s.language != "ZPL":
+    if s.mirror and s.language != "ZPL":                                            # (4)
         bm = mirror(bm)
-    if s.rotate180 and s.language == "CPCL":
+    if rotation == 180 and s.language == "CPCL":                                    # (5)
         bm = rotate180(bm)
     return bm
+
+
+def set_time_line(when: int) -> str:
+    """^XA^STmm,dd,yyyy,hh,mm,ss,M^XZ in Ortszeit (Umgebungsvariable TZ)."""
+    t = time.localtime(when)
+    return "^XA^ST%02d,%02d,%04d,%02d,%02d,%02d,M^XZ" % (t.tm_mon, t.tm_mday, t.tm_year, t.tm_hour,
+                                                          t.tm_min, t.tm_sec)
 
 
 def graphic_data(bm: Bitmap, compression: str) -> bytes:
@@ -681,66 +796,105 @@ def label_sequence(count: int, copies: int, collate: bool) -> List[Tuple[int, in
 
 def encode_job(pages: Sequence[Bitmap], settings: Settings, *, resolution_dpi: int = 203,
                max_width: int = 0, gap_dots: int = DEFAULT_GAP_DOTS, copies: int = 1,
-               collate: bool = True) -> bytes:
+               collate: bool = True, now: Optional[int] = None, time_step: int = 0) -> bytes:
+    """Kodiert einen Auftrag nach §8.
+
+    ``now`` (Sekunden seit 1970, Standard: aktuelle Zeit) und ``time_step`` bilden die Uhr für
+    ``^ST`` (lwRTC): Auftragskopf = ``now``, Etikett k (0-basiert, Sortierwiederholungen zählen
+    mit) = ``now + k · time_step`` – wie ``LW_FIXED_TIME``/``LW_TIME_STEP_SECONDS`` im Filter."""
     s = settings.clamped()
     processed = [bm for bm in (preprocess(p, s, max_width) for p in pages) if bm is not None]
     seq = label_sequence(len(processed), copies, collate)
     out = bytearray()
+    start_time = int(time.time()) if now is None else now
+    if s.control_chars is None:
+        table = None
+    else:
+        table = bytes.maketrans(b"^~,", bytes(s.control_chars))
 
     def line(text: str, end: str = "\n"):
         out.extend((text + end).encode("utf-8"))
 
+    def cmd(text: str) -> None:
+        """Selbst erzeugter ZPL-Befehl: Steuerzeichen in einem Durchgang ersetzen."""
+        data = text.encode("ascii")
+        out.extend(data if table is None else data.translate(table))
+
+    def raw_line(data: bytes) -> None:
+        if data:
+            out.extend(data + b"\n")
+
     if s.language == "ZPL":
-        if s.start_commands:
-            out.extend(s.start_commands + b"\n")
+        raw_line(s.start_commands)
+        if s.cancel_before:
+            cmd("~JA\n")
         if s.darkness is not None:
-            line("~SD%02d" % s.darkness)
+            cmd("~SD%02d\n" % s.darkness)
         if s.tear_off is not None:
-            line("~TA%03d" % s.tear_off)
+            cmd("~TA%03d\n" % s.tear_off)
         if s.backfeed:
-            line("~JS" + ZPL_CODES["backfeed"][s.backfeed])
+            cmd("~JS%s\n" % ZPL_CODES["backfeed"][s.backfeed])
         if s.calibrate:
-            line("~JC")
+            cmd("~JC\n")
+        if s.print_mode in LINERLESS_SGD:
+            out.extend(b'! U1 setvar "media.printmode" "%s"\r\n' % LINERLESS_SGD[s.print_mode].encode("ascii"))
+        if s.power_up_action and s.head_close_action:
+            cmd("^XA^MF%s,%s^XZ\n" % (ZPL_CODES["media_action"][s.power_up_action],
+                                     ZPL_CODES["media_action"][s.head_close_action]))
+        last_st = start_time
+        if s.rtc:
+            cmd(set_time_line(start_time) + "\n")
         for n, (index, qty) in enumerate(seq):
             bm = processed[index]
-            line("^XA")
-            if s.print_mode:
-                line("^MM" + ZPL_CODES["print_mode"][s.print_mode])
-            if s.tracking:
-                line("^MN" + ZPL_CODES["tracking"][s.tracking])
+            if s.rtc in ("EveryLabel", "EveryMinute"):
+                t = start_time + n * time_step
+                if (n > 0) if s.rtc == "EveryLabel" else (t - last_st >= 60):
+                    cmd(set_time_line(t) + "\n")
+                    last_st = t
+            cmd("^XA\n")
+            raw_line(s.label_start_commands)
+            head = []
+            if s.print_mode and s.print_mode not in LINERLESS_SGD:
+                head.append("^MM" + ZPL_CODES["print_mode"][s.print_mode])
+            if s.tracking == "BlackMark" and s.mark_offset is not None:
+                head.append("^MNM,%d" % s.mark_offset)
+            elif s.tracking:
+                head.append("^MN" + ZPL_CODES["tracking"][s.tracking])
             if s.media_type:
-                line("^MT" + ZPL_CODES["media_type"][s.media_type])
+                head.append("^MT" + ZPL_CODES["media_type"][s.media_type])
             if s.speed is not None:
-                line("^PR%d,%d,%d" % (s.speed, s.speed, s.speed))
-            line("^PW%d" % bm.width)
-            line("^LL%d" % bm.height)
-            line("^LH0,0")
+                head.append("^PR%d,%d,%d" % (s.speed, s.speed, s.speed))
+            head += ["^PW%d" % bm.width, "^LL%d" % bm.height, "^LH0,0"]
             if s.label_top is not None:
-                line("^LT%d" % s.label_top)
+                head.append("^LT%d" % s.label_top)
             if s.label_left is not None:
-                line("^LS%d" % s.label_left)
-            line("^POI" if s.rotate180 else "^PON")
-            line("^PMY" if s.mirror else "^PMN")
+                head.append("^LS%d" % s.label_left)
+            head.append("^POI" if s.effective_rotation == 180 else "^PON")
+            head.append("^PMY" if s.mirror else "^PMN")
             total = len(bm.data)
-            out.extend(b"^FO0,0^GFA,%d,%d,%d," % (total, total, bm.bpr))
+            cmd("".join(h + "\n" for h in head) + "^FO0,0^GFA,%d,%d,%d," % (total, total, bm.bpr))
             out.extend(graphic_data(bm, s.compression))
-            out.extend(b"^FS\n")
-            if s.cut_every > 0:
-                line("^PQ%d,%d,0,Y" % (qty, s.cut_every))
+            cmd("^FS\n")
+            if s.pause_every > 0:
+                cmd("^PQ%d,%d,0,N\n" % (qty, s.pause_every))
+            elif s.cut_every > 0:
+                cmd("^PQ%d,%d,0,Y\n" % (qty, s.cut_every))
             else:
-                line("^PQ%d" % qty)
+                cmd("^PQ%d\n" % qty)
             if n == 0 and s.save_settings:
-                line("^JUS")
-            line("^XZ")
-        if s.end_commands:
-            out.extend(s.end_commands + b"\n")
+                cmd("^JUS\n")
+            raw_line(s.label_end_commands)
+            cmd("^XZ\n")
+        raw_line(s.end_commands)
     elif s.language == "EPL":
-        if s.start_commands:
-            out.extend(s.start_commands + b"\n")
+        raw_line(s.start_commands)
+        if s.cancel_before:
+            out.extend(b"~JA\n")     # wörtlich, wie die Startbefehle (keine eigenen Steuerzeichen)
         for index, qty in seq:
             bm = processed[index]
             out.extend(b"\n")
             line("N")
+            raw_line(s.label_start_commands)
             line("q%d" % bm.width)
             if s.tracking == "BlackMark":
                 line("Q%d,B%d" % (bm.height, gap_dots))
@@ -752,7 +906,7 @@ def encode_job(pages: Sequence[Bitmap], settings: Settings, *, resolution_dpi: i
                 line("S%d" % max(1, min(6, s.speed)))
             if s.darkness is not None:
                 line("D%d" % max(0, min(15, (s.darkness + 1) // 2)))
-            line("ZB" if s.rotate180 else "ZT")
+            line("ZB" if s.effective_rotation == 180 else "ZT")
             if s.media_type or s.print_mode:
                 opt = "O"
                 if s.media_type == "DirectThermal":
@@ -765,6 +919,7 @@ def encode_job(pages: Sequence[Bitmap], settings: Settings, *, resolution_dpi: i
             out.extend(b"GW0,0,%d,%d," % (bm.bpr, bm.height))
             out.extend(bytes(b ^ 0xFF for b in bm.data))   # EPL: Bit 0 = schwarz
             out.extend(b"\n")
+            raw_line(s.label_end_commands)
             line("P%d" % qty)
         if s.end_commands:
             out.extend(s.end_commands + b"\n")
@@ -822,6 +977,24 @@ def selftest() -> None:
     assert resolve_settings({"lwDarkness": "99", "lwThreshold": "0"}, {}, {}).darkness == 30
     assert _parse_commands(base64url_encode("^XA")) == b"^XA"
     assert _parse_commands("Zm9v=") is INVALID and _parse_commands("_w") is INVALID
+    for _ in range(100):
+        w, h = rng.randint(1, 40), rng.randint(1, 9)
+        bm = Bitmap.from_rows(w, ("".join(rng.choice("01") for _ in range(w)) for _ in range(h)))
+        r90 = rotate_quarter(bm, 90)
+        assert (r90.width, r90.height) == (h, w)
+        assert all(r90.get(h - 1 - y, x) == bm.get(x, y) for y in range(h) for x in range(w))
+        r270 = rotate_quarter(bm, 270)
+        assert all(r270.get(y, w - 1 - x) == bm.get(x, y) for y in range(h) for x in range(w))
+        assert rotate_quarter(r90, 270).data == bm.data
+        assert rotate_quarter(rotate_quarter(bm, 90), 90).data == rotate180(bm).data
+    assert with_height(Bitmap(9, 2, bytearray(b"\x80\x00\x00\x00")), 3).data == bytearray(b"\x80\x00" + bytes(4))
+    assert last_black_row(Bitmap(9, 3)) == -1
+    s = resolve_settings({"lwControlChars": "Printer", "lwFormatPrefix": "35", "lwDelimiter": "200"}, {}, {})
+    assert s.control_chars == (35, 0x7E, 0x2C)
+    assert resolve_settings({"lwFormatPrefix": "35"}, {}, {}).control_chars is None
+    assert resolve_settings({"lwRotation": "90", "lwRotate180": "True"}, {}, {}).effective_rotation == 90
+    assert resolve_settings({"lwRotate180": "True"}, {}, {}).effective_rotation == 180
+    assert set_time_line(0)[-5:] == ",M^XZ"
 
 
 __all__ = [
@@ -829,7 +1002,8 @@ __all__ = [
     "is_supported_format", "crop", "invert", "is_blank", "mirror", "rotate180", "hex_encode",
     "acs_encode", "acs_decode", "crc16_xmodem", "z64_encode", "z64_decode", "base64url_encode",
     "resolve_settings", "parse_cups_options", "encode_job", "encode_job_from_luminance",
-    "label_sequence", "preprocess", "resolve_collate", "parse_copies", "selftest",
+    "label_sequence", "preprocess", "resolve_collate", "parse_copies", "selftest", "rotate_quarter",
+    "last_black_row", "with_height", "set_time_line", "LINERLESS_SGD", "STANDARD_CONTROL_CHARS",
 ]
 
 

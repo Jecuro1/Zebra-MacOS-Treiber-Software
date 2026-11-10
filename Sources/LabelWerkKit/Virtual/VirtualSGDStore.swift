@@ -205,7 +205,12 @@ struct VirtualSGDStore: Sendable {
         let defaultStock = ModelCatalog.shared.stock(id: model.defaultStock)
         let labelLength = min(model.maxLabelLengthDots(resolution), defaultStock?.heightDots(resolution) ?? resolution.dots(fromInches: 6))
         let transfer = model.supportsThermalTransfer
-        let printModes = model.printModes.map(SGDValueMapping.printMode)
+        var printModes = model.printModes.map(SGDValueMapping.printMode)
+        if model.supports(.linerless) {
+            // Linerless-Modelle kennen zusätzlich die Linerless-Modi (nur per SGD einstellbar).
+            printModes += PrintMode.allCases.filter { $0.isLinerless && !model.printModes.contains($0) }
+                .map(SGDValueMapping.printMode)
+        }
 
         // Gerät
         add("device.friendly_name", identity.serialNumber, .string(maxLength: 17))

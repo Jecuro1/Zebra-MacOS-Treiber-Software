@@ -280,6 +280,8 @@ extension VirtualPrinter {
                     restoreNetworkDefaults()
                 default: break // S (speichern) und R (zurückholen): alles ist sofort dauerhaft.
                 }
+            case "ST":
+                setClock(parameters)
             case "MF":
                 if let action = Self.feedAction(first) { store.update("ezpl.power_up_action", action) }
                 if let action = Self.feedAction(parameter(1).uppercased()) { store.update("ezpl.head_close_action", action) }
@@ -336,6 +338,49 @@ extension VirtualPrinter {
             // Einstellung bleibt.
             break
         }
+    }
+
+    /// `^STa,b,c,d,e,f,g` – Monat, Tag, Jahr, Stunde, Minute, Sekunde, Format (`A`/`P` = 12 Stunden
+    /// vormittags/nachmittags, `M` = 24 Stunden). Fehlende Felder behalten den aktuellen Wert.
+    func setClock(_ parameters: [String]) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let current = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: clockDate)
+        func number(_ index: Int, _ fallback: Int?) -> Int? {
+            guard index < parameters.count, let value = Int(parameters[index]) else { return fallback }
+            return value
+        }
+        var components = DateComponents()
+        components.month = number(0, current.month)
+        components.day = number(1, current.day)
+        components.year = number(2, current.year)
+        var hour = number(3, current.hour) ?? 0
+        let format = parameters.count > 6 ? parameters[6].uppercased() : "M"
+        if format == "P", hour < 12 { hour += 12 }
+        if format == "A", hour == 12 { hour = 0 }
+        components.hour = hour
+        components.minute = number(4, current.minute)
+        components.second = number(5, current.second)
+        guard let date = calendar.date(from: components) else { return }
+        clockOffset = date.timeIntervalSince(Date())
+    }
+
+    /// `rtc.date` (`MM-DD-YYYY`) bzw. `rtc.time` (`HH:MM:SS`) per SGD stellen.
+    func setClock(sgdName name: String, value: String) -> Bool {
+        let parts = value.split(whereSeparator: { $0 == "-" || $0 == ":" || $0 == "/" || $0 == "." })
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 3, parts.allSatisfy({ Int($0) != nil }) else { return false }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        var c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: clockDate)
+        if name == "rtc.date" {
+            (c.month, c.day, c.year) = (Int(parts[0]), Int(parts[1]), Int(parts[2]))
+        } else {
+            (c.hour, c.minute, c.second) = (Int(parts[0]), Int(parts[1]), Int(parts[2]))
+        }
+        guard let date = calendar.date(from: c) else { return false }
+        clockOffset = date.timeIntervalSince(Date())
+        return true
     }
 
     /// `^PR`-Geschwindigkeit: Ziffern (Zoll/s) oder Buchstaben A–E.

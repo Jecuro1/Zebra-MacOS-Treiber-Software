@@ -157,6 +157,10 @@ extension VirtualPrinter {
             _ = performDo(name, value)
             return true
         }
+        if name == "rtc.date" || name == "rtc.time" {
+            // Die Uhr läuft weiter: gestellt wird die Abweichung zur Systemzeit.
+            return setClock(sgdName: name, value: value)
+        }
         guard store.assign(name, value) else { return false }
         switch name {
         case "device.languages":

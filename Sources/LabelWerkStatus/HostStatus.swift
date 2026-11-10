@@ -143,34 +143,40 @@ extension HostStatus {
         ("3", .cutter, "Schneiden"),
         ("4", .applicator, "Applikator"),
         ("5", .delayedCut, "Verzögert schneiden"),
-        ("6", .peelOff, "Linerless – Spenden"),
-        ("7", .rewind, "Linerless – Aufwickeln"),
+        ("6", .linerlessPeel, "Linerless – Spenden"),
+        ("7", .linerlessRewind, "Linerless – Aufwickeln"),
         ("8", .cutter, "Teilschnitt"),
         ("9", nil, "RFID"),
         ("K", .kiosk, "Kiosk"),
         ("S", nil, "Stream"),
-        ("A", .tearOff, "Linerless – Abreißen"),
+        ("A", .linerlessTear, "Linerless – Abreißen"),
     ]
 
     /// Ordnet einen `~HS`-Druckmoduscode einem ``PrintMode`` zu.
     ///
-    /// Linerless-Varianten werden auf den gleichwertigen Grundmodus abgebildet
-    /// (6 → Spenden, 7 → Aufwickeln, A → Abreißen), der Teilschnitt (8) auf Schneiden.
-    /// RFID (9), Stream (S) und unbekannte Codes liefern `nil`.
+    /// Linerless-Codes liefern die Linerless-Modi (6 → Linerless ablösen, 7 → Linerless
+    /// aufwickeln, A → Linerless-Abriss), der Teilschnitt (8) Schneiden. RFID (9), Stream (S) und
+    /// unbekannte Codes liefern `nil`.
     public static func printMode(forCode code: String) -> PrintMode? {
         let normalized = StatusText.trim(code).uppercased()
         return printModeTable.first { $0.code == normalized }?.mode
     }
 
     /// Kanonischer `~HS`-Code eines ``PrintMode`` (Umkehrung von ``printMode(forCode:)``).
+    ///
+    /// `~HS` kennt keine eigenen Codes für Linerless schneiden / verzögert schneiden; dafür wird
+    /// der Code des gleichwertigen klassischen Modus geliefert (3 bzw. 5).
     public static func code(for mode: PrintMode) -> String {
         switch mode {
         case .rewind: return "0"
         case .peelOff: return "1"
         case .tearOff: return "2"
-        case .cutter: return "3"
+        case .cutter, .linerlessCut: return "3"
         case .applicator: return "4"
-        case .delayedCut: return "5"
+        case .delayedCut, .linerlessDelayedCut: return "5"
+        case .linerlessPeel: return "6"
+        case .linerlessRewind: return "7"
+        case .linerlessTear: return "A"
         case .kiosk: return "K"
         }
     }
@@ -178,6 +184,8 @@ extension HostStatus {
     /// Deutsche Bezeichnung des gemeldeten Druckmodus (inkl. Linerless-/RFID-Varianten).
     public var printModeDisplayName: String {
         let code = effectivePrintModeCode
+        // Modi ohne eigenen ~HS-Code (Linerless schneiden …) nicht als Grundmodus benennen.
+        if let printMode, Self.printMode(forCode: code) != printMode { return printMode.displayName }
         if let entry = Self.printModeTable.first(where: { $0.code == code }) { return entry.name }
         if let printMode { return printMode.displayName }
         return code.isEmpty ? "Unbekannt" : "Unbekannt (\(code))"

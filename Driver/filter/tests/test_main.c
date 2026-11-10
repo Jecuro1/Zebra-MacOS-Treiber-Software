@@ -8,7 +8,9 @@
  * Z64 (Rundreise mit zlib), Bitmap-Operationen, alle sechs Rasterverfahren (gegen eine
  * unabhängige Naivimplementierung), Rasterumrechnung aller Farbräume/Bittiefen/Anordnungen,
  * Optionszerlegung und Vorrangregeln, ZPL/EPL/CPCL-Schreiber byte-genau, Kopien/Sortierung,
- * Abbruch, leere und flächenlose Seiten.
+ * Abbruch, leere und flächenlose Seiten; Windows-Optionen: Drehung 90/180/270°, Markenversatz,
+ * Bei letztem Element stoppen, Pause, eigene Steuerzeichen, RTC (^ST) mit fester/schrittweiser
+ * Uhr, ~JA mit Wartezeit, Etikettenbefehle, ^MF, Linerless-Modi (SGD), Seitenkerben.
  */
 
 #if !defined(__APPLE__) && !defined(_DEFAULT_SOURCE)
@@ -19,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <zlib.h>
 
 #include "lw_bitmap.h"
@@ -1068,8 +1071,8 @@ static void run_job(job_capture *cap, const lw_settings *s, int dpi, int max_wid
                     int copies, bool collate, lw_bitmap *pages, int count, bool cancel)
 {
     capture_init(cap);
-    lw_job_config cfg = { s, dpi, max_width, gap, copies, collate };
-    lw_job_hooks hooks = { capture_label, NULL, capture_canceled, cap, NULL };
+    lw_job_config cfg = { s, dpi, max_width, gap, copies, collate, false, 0, 0 };
+    lw_job_hooks hooks = { capture_label, NULL, capture_canceled, cap, NULL, NULL };
     lw_job job;
     CHECK(lw_job_init(&job, &cfg, &cap->sink, &hooks));
     CHECK(lw_job_begin(&job));
@@ -1331,8 +1334,8 @@ static void test_job_copies(void)
     capture_init(&cap);
     cap.cancel_after_first = true;
     {
-        lw_job_config cfg = { &s, 203, 0, -1, 4, true };
-        lw_job_hooks hooks = { capture_label, NULL, capture_canceled, &cap, NULL };
+        lw_job_config cfg = { &s, 203, 0, -1, 4, true, false, 0, 0 };
+        lw_job_hooks hooks = { capture_label, NULL, capture_canceled, &cap, NULL, NULL };
         lw_job job;
         lw_job_init(&job, &cfg, &cap.sink, &hooks);
         lw_job_add_page(&job, &pages[0], 1);
@@ -1396,8 +1399,8 @@ static bool run_job_lazy(job_capture *cap, const lw_settings *s, int copies, lw_
                          bool cancel, bool *begun)
 {
     capture_init(cap);
-    lw_job_config cfg = { s, 203, 0, -1, copies, true };
-    lw_job_hooks hooks = { capture_label, NULL, capture_canceled, cap, NULL };
+    lw_job_config cfg = { s, 203, 0, -1, copies, true, false, 0, 0 };
+    lw_job_hooks hooks = { capture_label, NULL, capture_canceled, cap, NULL, NULL };
     lw_job job;
     CHECK(lw_job_init(&job, &cfg, &cap->sink, &hooks));
     for (int i = 0; i < count; i++)

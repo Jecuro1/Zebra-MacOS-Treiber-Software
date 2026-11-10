@@ -18,6 +18,13 @@
  * Kommt der Abbruch vor der ersten Seite (auch bevor der Datenstrom überhaupt beginnt), schreibt
  * der Filter gar nichts – keinen Auftragskopf (also auch kein ~JC) und keine Endbefehle.
  * Exitcode: 0 = Erfolg (auch nach Abbruch), 1 = Fehler.
+ *
+ * Umgebungsvariablen (nur für Tests und Diagnose; unter CUPS normalerweise nicht gesetzt):
+ *   LW_FIXED_TIME=<Sekunden seit 1970>   feste Uhrzeit für ^ST (lwRTC) statt der Systemzeit
+ *   LW_TIME_STEP_SECONDS=<n>             mit LW_FIXED_TIME: Etikett k sieht LW_FIXED_TIME + k·n
+ *                                        (simulierte Uhr für lwRTC=EveryMinute)
+ *   LW_CANCEL_DELAY_SCALE=<Faktor ≥ 0>   Faktor für die Wartezeit nach ~JA (lwCancelDelay);
+ *                                        0 = nicht warten
  */
 
 #if !defined(__APPLE__) && !defined(_DEFAULT_SOURCE)
@@ -35,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "lw_bitmap.h"
@@ -87,6 +95,43 @@ static bool is_canceled(void *ctx)
 {
     (void)ctx;
     return g_canceled != 0;
+}
+
+/* Wartezeit nach ~JA (lwCancelBefore/lwCancelDelay), skaliert mit LW_CANCEL_DELAY_SCALE.
+ * Ein SIGTERM beendet die Wartezeit vorzeitig. */
+typedef struct filter_context {
+    double delay_scale;
+    const lw_logger *log;
+} filter_context;
+
+static void wait_ms(void *ctx, int ms)
+{
+    const filter_context *fc = ctx;
+    double scaled = (double)ms * (fc != NULL ? fc->delay_scale : 1.0);
+    if (scaled < 1.0)
+        return;
+    long total = (long)(scaled + 0.5);
+    lw_log(fc != NULL ? fc->log : NULL, LW_LOG_DEBUG, "Warte %ld ms nach ~JA (laufende Aufträge abbrechen).", total);
+    struct timespec rest = { total / 1000, (total % 1000) * 1000000L };
+    while (!g_canceled && nanosleep(&rest, &rest) != 0 && errno == EINTR)
+        ;
+}
+
+/* Ganzzahl aus einer Umgebungsvariablen; false, wenn sie fehlt oder ungültig ist. */
+static bool env_long_long(const char *name, long long *value, const lw_logger *log)
+{
+    const char *text = getenv(name);
+    if (text == NULL || text[0] == '\0')
+        return false;
+    char *end = NULL;
+    errno = 0;
+    long long v = strtoll(text, &end, 10);
+    if (errno != 0 || end == text || *end != '\0') {
+        lw_log(log, LW_LOG_WARNING, "Ungültiger Wert „%.40s“ für %s – wird ignoriert.", text, name);
+        return false;
+    }
+    *value = v;
+    return true;
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -182,13 +227,20 @@ static page_result process_page(cups_raster_t *ras, const cups_page_header2_t *h
 
     const int width = (int)h->cupsWidth;
     const int height = (int)h->cupsHeight;
-    const int out_width = (max_print_width > 0 && width > max_print_width) ? max_print_width : width;
-    if (out_width < width)
+    /* Bei 90°/270° wird erst nach dem Drehen abgeschnitten (lw_job_add_page, §8 Schritt 0). */
+    const int rotation = lw_settings_effective_rotation(settings);
+    const bool quarter = rotation == 90 || rotation == 270;
+    const int rotated_width = quarter ? height : width;
+    const int label_length = quarter ? width : height;
+    const int out_width = (!quarter && max_print_width > 0 && width > max_print_width) ? max_print_width : width;
+    if (max_print_width > 0 && rotated_width > max_print_width)
         lw_log(log, LW_LOG_INFO, "Seite %d ist %d Punkte breit und wird auf die Druckbreite von %d Punkten abgeschnitten.",
-               page_number, width, out_width);
-    if (settings->language == LW_LANGUAGE_ZPL && height > LW_ZPL_MAX_LABEL_LENGTH)
+               page_number, rotated_width, max_print_width);
+    if (quarter)
+        lw_log(log, LW_LOG_DEBUG, "Seite %d wird um %d° gedreht.", page_number, rotation);
+    if (settings->language == LW_LANGUAGE_ZPL && label_length > LW_ZPL_MAX_LABEL_LENGTH)
         lw_log(log, LW_LOG_WARNING, "Seite %d ist %d Punkte lang – ZPL erlaubt höchstens %d (^LL); der Drucker kürzt das Etikett.",
-               page_number, height, LW_ZPL_MAX_LABEL_LENGTH);
+               page_number, label_length, LW_ZPL_MAX_LABEL_LENGTH);
 
     lw_bitmap page;
     lw_bitmap_init(&page);
@@ -284,6 +336,20 @@ int main(int argc, char *argv[])
     const char *model = lw_cups_ppd_string(&opts, LW_ATTR_MODEL);
     int copies = lw_cups_copies(argv[4], &log);
     bool collate = lw_cups_collate(&opts, &log);
+    long long fixed_time = 0, time_step = 0;
+    bool fixed_clock = env_long_long("LW_FIXED_TIME", &fixed_time, &log);
+    if (fixed_clock)
+        env_long_long("LW_TIME_STEP_SECONDS", &time_step, &log);
+    filter_context fctx = { 1.0, &log };
+    const char *scale = getenv("LW_CANCEL_DELAY_SCALE");
+    if (scale != NULL && scale[0] != '\0') {
+        char *end = NULL;
+        double v = strtod(scale, &end);
+        if (end == scale || *end != '\0' || !(v >= 0.0) || v > 1000.0)
+            lw_log(&log, LW_LOG_WARNING, "Ungültiger Wert „%.40s“ für LW_CANCEL_DELAY_SCALE – wird ignoriert.", scale);
+        else
+            fctx.delay_scale = v;
+    }
     lw_log(&log, LW_LOG_DEBUG, "Modell=%s Druckbreite=%d Lücke=%d Kopien=%d Sortieren=%d",
            model != NULL ? model : "-", max_print_width, gap_dots, copies, collate);
 
@@ -325,13 +391,17 @@ int main(int argc, char *argv[])
         .gap_dots = gap_dots,
         .copies = copies,
         .collate = collate,
+        .fixed_clock = fixed_clock,
+        .fixed_time = fixed_time,
+        .time_step = time_step,
     };
     lw_job_hooks hooks = {
         .label_emitted = on_label_emitted,
         .open_spool = open_spool,
         .is_canceled = is_canceled,
-        .ctx = NULL,
+        .ctx = &fctx,
         .log = &log,
+        .wait_ms = wait_ms,
     };
     lw_job job;
     lw_job_init(&job, &config, &out, &hooks);
