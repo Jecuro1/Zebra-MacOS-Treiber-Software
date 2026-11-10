@@ -19,6 +19,8 @@ enum PrinterSection: String, CaseIterable, Identifiable, Codable {
     case terminal
     case files
     case network
+    case maintenance
+    case rfid
     case firmware
 
     var id: String { rawValue }
@@ -32,6 +34,8 @@ enum PrinterSection: String, CaseIterable, Identifiable, Codable {
         case .terminal: return tr("Terminal")
         case .files: return tr("Dateien & Schriften")
         case .network: return tr("Netzwerk")
+        case .maintenance: return tr("Sicherung & Wartung")
+        case .rfid: return tr("RFID")
         case .firmware: return tr("Firmware")
         }
     }
@@ -45,6 +49,8 @@ enum PrinterSection: String, CaseIterable, Identifiable, Codable {
         case .terminal: return "terminal"
         case .files: return "externaldrive"
         case .network: return "network"
+        case .maintenance: return "externaldrive.badge.timemachine"
+        case .rfid: return "antenna.radiowaves.left.and.right"
         case .firmware: return "cpu"
         }
     }
@@ -55,6 +61,8 @@ enum PrinterSection: String, CaseIterable, Identifiable, Codable {
         if descriptor.supportsBidirectional { sections.append(.files) }
         let hasNetwork = model.map { $0.connectivity.contains(.ethernet) || $0.connectivity.contains(.wifi) } ?? true
         if hasNetwork && descriptor.supportsBidirectional { sections.append(.network) }
+        if descriptor.supportsBidirectional { sections.append(.maintenance) }
+        if descriptor.supportsBidirectional, model?.supports(.rfid) ?? false { sections.append(.rfid) }
         sections.append(.firmware)
         return sections
     }

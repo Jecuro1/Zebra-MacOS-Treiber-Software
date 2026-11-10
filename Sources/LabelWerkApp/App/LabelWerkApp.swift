@@ -109,7 +109,7 @@ struct LabelWerkCommands: Commands {
 
             Divider()
 
-            ForEach(Array(PrinterSection.allCases.enumerated()), id: \.element) { index, section in
+            ForEach(Array(PrinterSection.allCases.prefix(9).enumerated()), id: \.element) { index, section in
                 Button(section.title) {
                     if let session = model.selectedSession { session.section = section }
                 }

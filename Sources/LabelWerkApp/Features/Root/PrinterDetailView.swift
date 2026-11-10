@@ -79,6 +79,8 @@ struct PrinterDetailView: View {
         case .terminal: TerminalView(session: session)
         case .files: FilesView(session: session)
         case .network: NetworkView(session: session)
+        case .maintenance: MaintenanceView(session: session)
+        case .rfid: RFIDView(session: session)
         case .firmware: FirmwareView(session: session)
         }
     }
