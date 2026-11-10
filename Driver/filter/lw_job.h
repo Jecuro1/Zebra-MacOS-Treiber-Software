@@ -8,10 +8,20 @@
  * Seiten werden einzeln verarbeitet und sofort kodiert; der Speicherbedarf bleibt unabhängig
  * von der Seitenzahl auf eine Seite begrenzt:
  *
- *   - Vorverarbeitung je Seite (§8): (1) rechts abschneiden auf max_print_width,
- *     (2) negative → invertieren, (3) skip_blank und leer → überspringen,
- *     (4) nur EPL/CPCL: mirror → spiegeln, (5) nur CPCL: rotate180 → drehen.
- *     Seiten ohne Fläche (Breite oder Höhe 0) werden mit einer Warnung übersprungen.
+ *   - Vorverarbeitung je Seite (§8): (0) wirksame Drehung 90°/270° → Bitmap im Uhrzeigersinn
+ *     drehen (alle Sprachen), (1) rechts abschneiden auf max_print_width – Seiten ohne Fläche
+ *     (Breite oder Höhe 0) werden danach mit einer Warnung übersprungen –, (1b) stop_at_last
+ *     und Endlosmaterial → Höhe = letzte schwarze Zeile + 1 + stop_offset (mindestens 1, weiße
+ *     Zeilen werden bei Bedarf angehängt), (2) negative → invertieren, (3) skip_blank und leer
+ *     → überspringen, (4) nur EPL/CPCL: mirror → spiegeln, (5) wirksame Drehung 180°: ZPL ^POI,
+ *     EPL ZB, CPCL Bitmap drehen.
+ *   - RTC (^ST): im Auftragskopf, dazu vor Etikett k (0-basiert, Sortierwiederholungen zählen
+ *     mit) bei EVERY_LABEL für k > 0 bzw. bei EVERY_MINUTE, wenn seit dem letzten ^ST ≥ 60 s
+ *     vergangen sind. Uhr: fixed_clock ? fixed_time (Kopf) bzw. fixed_time + k·time_step
+ *     (Etikett k) : time(NULL); Ortszeit über localtime_r.
+ *   - Eigene Steuerzeichen (control_printer): ^ ~ , werden in allen selbst erzeugten Befehlen
+ *     in einem Durchgang durch format_prefix/control_prefix/delimiter ersetzt – nicht in
+ *     Grafikdaten, der SGD-Zeile und Rohbefehlen.
  *   - Kopien: collate == false oder nur eine Seite → je Seite Menge `copies`.
  *     collate == true und > 1 Seite → gesamte Seitenfolge `copies`-mal, je Menge 1.
  *     Da die Seitenzahl erst am Ende feststeht, wird im Sortiermodus die erste Seite
@@ -49,6 +59,10 @@ typedef struct lw_job_config {
     int copies;
     /** Sortieren (ganze Seitenfolge wiederholen). */
     bool collate;
+    /** Uhr für ^ST: false → Systemzeit; true → fixed_time + k · time_step (Sekunden seit 1970). */
+    bool fixed_clock;
+    long long fixed_time;
+    long long time_step;
 } lw_job_config;
 
 typedef struct lw_job_hooks {
@@ -60,6 +74,9 @@ typedef struct lw_job_hooks {
     bool (*is_canceled)(void *ctx);
     void *ctx;
     const lw_logger *log;
+    /** Wartet nach ~JA (cancel_before) `ms` Millisekunden; NULL = nicht warten. Die Ausgabe ist
+     *  vorher geleert. */
+    void (*wait_ms)(void *ctx, int ms);
 } lw_job_hooks;
 
 /** Kodierte Seite: CPCL braucht Höhe und Auflösung für die Kopfzeile; der Rest steckt in `body`. */
@@ -76,6 +93,10 @@ typedef struct lw_job {
     int max_print_width;
     int gap_dots;
     int quantity;               /* begrenzte Kopienzahl */
+    bool fixed_clock;
+    long long fixed_time;
+    long long time_step;
+    long long last_st_time;     /* Zeitpunkt des letzten ^ST */
     bool collate_mode;          /* collate && quantity > 1 */
     lw_sink *out;
     lw_job_hooks hooks;
@@ -97,7 +118,9 @@ typedef struct lw_job {
 /** Initialisiert den Auftrag. Liefert false bei ungültiger Konfiguration. */
 bool lw_job_init(lw_job *job, const lw_job_config *config, lw_sink *out, const lw_job_hooks *hooks);
 
-/** Schreibt den Auftragskopf (ZPL: Startbefehle, ~SD, ~TA, ~JC; EPL: Startbefehle). */
+/** Schreibt den Auftragskopf (ZPL: Startbefehle, ~JA, ~SD, ~TA, ~JS, ~JC, SGD media.printmode,
+ *  ^MF, ^ST; EPL: Startbefehle, ~JA). Nach ~JA wird die Ausgabe geleert und hooks.wait_ms
+ *  aufgerufen. */
 bool lw_job_begin(lw_job *job);
 
 /**

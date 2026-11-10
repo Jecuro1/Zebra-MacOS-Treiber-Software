@@ -44,12 +44,32 @@ void lw_settings_init(lw_settings *s)
     s->start_commands_len = 0;
     s->end_commands = NULL;
     s->end_commands_len = 0;
+    s->rotation = 0;
+    s->mark_offset = LW_UNSET;
+    s->stop_at_last = false;
+    s->stop_offset = 0;
+    s->pause_every = 0;
+    s->control_printer = false;
+    s->format_prefix = LW_FORMAT_PREFIX_STANDARD;
+    s->control_prefix = LW_CONTROL_PREFIX_STANDARD;
+    s->delimiter = LW_DELIMITER_STANDARD;
+    s->rtc = LW_RTC_UNSET;
+    s->cancel_before = false;
+    s->cancel_delay = 1000;
+    s->label_start_commands = NULL;
+    s->label_start_commands_len = 0;
+    s->label_end_commands = NULL;
+    s->label_end_commands_len = 0;
+    s->power_up_action = LW_MEDIA_ACTION_UNSET;
+    s->head_close_action = LW_MEDIA_ACTION_UNSET;
 }
 
 void lw_settings_free(lw_settings *s)
 {
     free(s->start_commands);
     free(s->end_commands);
+    free(s->label_start_commands);
+    free(s->label_end_commands);
     lw_settings_init(s);
 }
 
@@ -72,6 +92,27 @@ void lw_settings_clamp(lw_settings *s)
         s->tear_off = clamp_int(s->tear_off, -120, 120);
     s->threshold = clamp_int(s->threshold, 1, 254);
     s->cut_every = clamp_int(s->cut_every, 0, 9999);
+    if (s->rotation != 0 && s->rotation != 90 && s->rotation != 180 && s->rotation != 270)
+        s->rotation = 0;
+    if (s->mark_offset != LW_UNSET)
+        s->mark_offset = clamp_int(s->mark_offset, -80, 283);
+    s->stop_offset = clamp_int(s->stop_offset, 0, 32000);
+    s->pause_every = clamp_int(s->pause_every, 0, 9999);
+    s->cancel_delay = clamp_int(s->cancel_delay, 0, 10000);
+    /* Steuerzeichen außerhalb von 33…126 gelten als Standardzeichen dieser Stelle. */
+    if (s->format_prefix < LW_CONTROL_CHAR_MIN || s->format_prefix > LW_CONTROL_CHAR_MAX)
+        s->format_prefix = LW_FORMAT_PREFIX_STANDARD;
+    if (s->control_prefix < LW_CONTROL_CHAR_MIN || s->control_prefix > LW_CONTROL_CHAR_MAX)
+        s->control_prefix = LW_CONTROL_PREFIX_STANDARD;
+    if (s->delimiter < LW_CONTROL_CHAR_MIN || s->delimiter > LW_CONTROL_CHAR_MAX)
+        s->delimiter = LW_DELIMITER_STANDARD;
+}
+
+int lw_settings_effective_rotation(const lw_settings *s)
+{
+    if (s->rotation == 90 || s->rotation == 180 || s->rotation == 270)
+        return s->rotation;
+    return s->rotate180 ? 180 : 0;
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -112,6 +153,7 @@ static const enum_entry media_type_table[] = {
 static const enum_entry tracking_table[] = {
     { "Gap", LW_TRACKING_GAP }, { "BlackMark", LW_TRACKING_BLACK_MARK },
     { "Continuous", LW_TRACKING_CONTINUOUS }, { "Auto", LW_TRACKING_AUTO },
+    { "Notch", LW_TRACKING_NOTCH },
     { NULL, 0 }
 };
 
@@ -120,6 +162,38 @@ static const enum_entry print_mode_table[] = {
     { "Cutter", LW_PRINT_MODE_CUTTER }, { "DelayedCut", LW_PRINT_MODE_DELAYED_CUT },
     { "Rewind", LW_PRINT_MODE_REWIND }, { "Applicator", LW_PRINT_MODE_APPLICATOR },
     { "Kiosk", LW_PRINT_MODE_KIOSK },
+    { "LinerlessPeel", LW_PRINT_MODE_LINERLESS_PEEL }, { "LinerlessCut", LW_PRINT_MODE_LINERLESS_CUT },
+    { "LinerlessDelayedCut", LW_PRINT_MODE_LINERLESS_DELAYED_CUT },
+    { "LinerlessRewind", LW_PRINT_MODE_LINERLESS_REWIND }, { "LinerlessTear", LW_PRINT_MODE_LINERLESS_TEAR },
+    { NULL, 0 }
+};
+
+/* SGD-Werte für media.printmode je Druckmodus (Index = lw_print_mode). */
+static const char *const print_mode_sgd[] = {
+    NULL, "tear off", "peel off", "cutter", "delayed cut", "rewind", "applicator", "kiosk",
+    "linerless peel", "linerless cut", "linerless delayed cut", "linerless rewind", "linerless tear"
+};
+
+static const enum_entry rotation_table[] = {
+    { "0", 0 }, { "90", 90 }, { "180", 180 }, { "270", 270 },
+    { NULL, 0 }
+};
+
+static const enum_entry rtc_table[] = {
+    { "JobStart", LW_RTC_JOB_START }, { "EveryLabel", LW_RTC_EVERY_LABEL },
+    { "EveryMinute", LW_RTC_EVERY_MINUTE },
+    { NULL, 0 }
+};
+
+static const enum_entry media_action_table[] = {
+    { "Feed", LW_MEDIA_ACTION_FEED }, { "Calibrate", LW_MEDIA_ACTION_CALIBRATE },
+    { "Length", LW_MEDIA_ACTION_LENGTH }, { "NoMotion", LW_MEDIA_ACTION_NO_MOTION },
+    { "ShortCal", LW_MEDIA_ACTION_SHORT_CAL },
+    { NULL, 0 }
+};
+
+static const enum_entry control_chars_table[] = {
+    { "Standard", 0 }, { "Printer", 1 },
     { NULL, 0 }
 };
 
@@ -211,6 +285,30 @@ DEFINE_ENUM_PARSER(lw_parse_print_mode, lw_print_mode, print_mode_table)
 DEFINE_ENUM_PARSER(lw_parse_backfeed, lw_backfeed, backfeed_table)
 DEFINE_ENUM_PARSER(lw_parse_dither, lw_dither_algorithm, dither_table)
 DEFINE_ENUM_PARSER(lw_parse_compression, lw_compression, compression_table)
+DEFINE_ENUM_PARSER(lw_parse_rotation, int, rotation_table)
+DEFINE_ENUM_PARSER(lw_parse_rtc, lw_rtc, rtc_table)
+DEFINE_ENUM_PARSER(lw_parse_media_action, lw_media_action, media_action_table)
+
+lw_parse_result lw_parse_control_chars(const char *text, bool *printer)
+{
+    int v = 0;
+    lw_parse_result r = parse_enum(text, control_chars_table, &v);
+    if (r == LW_PARSE_OK)
+        *printer = v != 0;
+    return r;
+}
+
+lw_parse_result lw_parse_control_char(const char *text, int *value)
+{
+    int v = 0;
+    lw_parse_result r = lw_parse_int(text, &v);
+    if (r != LW_PARSE_OK)
+        return r;
+    if (v < LW_CONTROL_CHAR_MIN || v > LW_CONTROL_CHAR_MAX)
+        return LW_PARSE_INVALID;
+    *value = v;
+    return LW_PARSE_OK;
+}
 
 lw_parse_result lw_parse_commands(const char *text, lw_buf *out)
 {
@@ -276,6 +374,7 @@ char lw_tracking_code(lw_tracking t)
     case LW_TRACKING_BLACK_MARK: return 'M';
     case LW_TRACKING_CONTINUOUS: return 'N';
     case LW_TRACKING_AUTO: return 'A';
+    case LW_TRACKING_NOTCH: return 'W';
     case LW_TRACKING_UNSET: break;
     }
     return 0;
@@ -291,9 +390,47 @@ char lw_print_mode_code(lw_print_mode m)
     case LW_PRINT_MODE_REWIND: return 'R';
     case LW_PRINT_MODE_APPLICATOR: return 'A';
     case LW_PRINT_MODE_KIOSK: return 'K';
+    case LW_PRINT_MODE_LINERLESS_PEEL:
+    case LW_PRINT_MODE_LINERLESS_CUT:
+    case LW_PRINT_MODE_LINERLESS_DELAYED_CUT:
+    case LW_PRINT_MODE_LINERLESS_REWIND:
+    case LW_PRINT_MODE_LINERLESS_TEAR:
     case LW_PRINT_MODE_UNSET: break;
     }
     return 0;
+}
+
+bool lw_print_mode_is_linerless(lw_print_mode m)
+{
+    return m >= LW_PRINT_MODE_LINERLESS_PEEL && m <= LW_PRINT_MODE_LINERLESS_TEAR;
+}
+
+const char *lw_print_mode_sgd(lw_print_mode m)
+{
+    if ((int)m < 0 || (size_t)m >= sizeof(print_mode_sgd) / sizeof(print_mode_sgd[0]))
+        return NULL;
+    return print_mode_sgd[m];
+}
+
+char lw_media_action_code(lw_media_action a)
+{
+    switch (a) {
+    case LW_MEDIA_ACTION_FEED: return 'F';
+    case LW_MEDIA_ACTION_CALIBRATE: return 'C';
+    case LW_MEDIA_ACTION_LENGTH: return 'L';
+    case LW_MEDIA_ACTION_NO_MOTION: return 'N';
+    case LW_MEDIA_ACTION_SHORT_CAL: return 'S';
+    case LW_MEDIA_ACTION_UNSET: break;
+    }
+    return 0;
+}
+
+const char *lw_rtc_name(lw_rtc r)
+{
+    for (const enum_entry *e = rtc_table; e->name != NULL; e++)
+        if (e->value == (int)r)
+            return e->name;
+    return "-";
 }
 
 char lw_backfeed_code(lw_backfeed b)
@@ -322,7 +459,12 @@ typedef enum value_kind {
     KIND_PRINT_MODE,
     KIND_BACKFEED,
     KIND_DITHER,
-    KIND_COMPRESSION
+    KIND_COMPRESSION,
+    KIND_ROTATION,
+    KIND_RTC,
+    KIND_MEDIA_ACTION,
+    KIND_CONTROL_CHARS,
+    KIND_CONTROL_CHAR
 } value_kind;
 
 typedef struct resolver {
@@ -410,6 +552,30 @@ static lw_parse_result parse_kind(value_kind kind, const char *text, int *value)
         *value = (int)v;
         break;
     }
+    case KIND_ROTATION:
+        r = lw_parse_rotation(text, value);
+        break;
+    case KIND_RTC: {
+        lw_rtc v = LW_RTC_UNSET;
+        r = lw_parse_rtc(text, &v);
+        *value = (int)v;
+        break;
+    }
+    case KIND_MEDIA_ACTION: {
+        lw_media_action v = LW_MEDIA_ACTION_UNSET;
+        r = lw_parse_media_action(text, &v);
+        *value = (int)v;
+        break;
+    }
+    case KIND_CONTROL_CHARS: {
+        bool b = false;
+        r = lw_parse_control_chars(text, &b);
+        *value = b ? 1 : 0;
+        break;
+    }
+    case KIND_CONTROL_CHAR:
+        r = lw_parse_control_char(text, value);
+        break;
     }
     return r;
 }
@@ -527,6 +693,24 @@ int lw_settings_resolve(lw_settings *s, lw_option_lookup_fn lookup, void *ctx, c
     s->skip_blank = resolve_value(&r, LW_OPT_SKIP_BLANK, KIND_BOOL, 0) != 0;
     resolve_commands(&r, LW_OPT_START_CMD, &s->start_commands, &s->start_commands_len);
     resolve_commands(&r, LW_OPT_END_CMD, &s->end_commands, &s->end_commands_len);
+    s->rotation = resolve_value(&r, LW_OPT_ROTATION, KIND_ROTATION, def.rotation);
+    s->mark_offset = resolve_value(&r, LW_OPT_MARK_OFFSET, KIND_OPT_INT, LW_UNSET);
+    s->stop_at_last = resolve_value(&r, LW_OPT_STOP_AT_LAST, KIND_BOOL, 0) != 0;
+    s->stop_offset = resolve_value(&r, LW_OPT_STOP_OFFSET, KIND_INT, def.stop_offset);
+    s->pause_every = resolve_value(&r, LW_OPT_PAUSE_EVERY, KIND_INT, def.pause_every);
+    s->control_printer = resolve_value(&r, LW_OPT_CONTROL_CHARS, KIND_CONTROL_CHARS, 0) != 0;
+    s->format_prefix = resolve_value(&r, LW_OPT_FORMAT_PREFIX, KIND_CONTROL_CHAR, def.format_prefix);
+    s->control_prefix = resolve_value(&r, LW_OPT_CONTROL_PREFIX, KIND_CONTROL_CHAR, def.control_prefix);
+    s->delimiter = resolve_value(&r, LW_OPT_DELIMITER, KIND_CONTROL_CHAR, def.delimiter);
+    s->rtc = (lw_rtc)resolve_value(&r, LW_OPT_RTC, KIND_RTC, LW_RTC_UNSET);
+    s->cancel_before = resolve_value(&r, LW_OPT_CANCEL_BEFORE, KIND_BOOL, 0) != 0;
+    s->cancel_delay = resolve_value(&r, LW_OPT_CANCEL_DELAY, KIND_INT, def.cancel_delay);
+    resolve_commands(&r, LW_OPT_LABEL_START_CMD, &s->label_start_commands, &s->label_start_commands_len);
+    resolve_commands(&r, LW_OPT_LABEL_END_CMD, &s->label_end_commands, &s->label_end_commands_len);
+    s->power_up_action = (lw_media_action)resolve_value(&r, LW_OPT_POWER_UP_ACTION, KIND_MEDIA_ACTION,
+                                                        LW_MEDIA_ACTION_UNSET);
+    s->head_close_action = (lw_media_action)resolve_value(&r, LW_OPT_HEAD_CLOSE_ACTION, KIND_MEDIA_ACTION,
+                                                          LW_MEDIA_ACTION_UNSET);
 
     lw_settings_clamp(s);
     return r.invalid;
@@ -546,12 +730,13 @@ static void fmt_opt_int(char *buf, size_t size, int v)
 
 void lw_settings_log(const lw_settings *s, const lw_logger *log)
 {
-    char dark[16], speed[16], top[16], left[16], tear[16];
+    char dark[16], speed[16], top[16], left[16], tear[16], mark[16];
     fmt_opt_int(dark, sizeof(dark), s->darkness);
     fmt_opt_int(speed, sizeof(speed), s->speed);
     fmt_opt_int(top, sizeof(top), s->label_top);
     fmt_opt_int(left, sizeof(left), s->label_left);
     fmt_opt_int(tear, sizeof(tear), s->tear_off);
+    fmt_opt_int(mark, sizeof(mark), s->mark_offset);
     char mt = lw_media_type_code(s->media_type), tr = lw_tracking_code(s->tracking);
     char pm = lw_print_mode_code(s->print_mode), bf = lw_backfeed_code(s->backfeed);
     lw_log(log, LW_LOG_DEBUG,
@@ -564,4 +749,14 @@ void lw_settings_log(const lw_settings *s, const lw_logger *log)
            lw_dither_name(s->dither), s->threshold, lw_compression_name(s->compression),
            s->cut_every, s->calibrate, s->save_settings, s->skip_blank, s->start_commands_len,
            s->end_commands_len);
+    char pu = lw_media_action_code(s->power_up_action), hc = lw_media_action_code(s->head_close_action);
+    const char *sgd = lw_print_mode_is_linerless(s->print_mode) ? lw_print_mode_sgd(s->print_mode) : "-";
+    lw_log(log, LW_LOG_DEBUG,
+           "Einstellungen (erweitert): Drehung=%d Markenversatz=%s BeiLetztemStoppen=%d Stoppversatz=%d "
+           "Pause=%d Steuerzeichen=%s(%c%c%c) RTC=%s Abbrechen=%d Verzögerung=%d ms "
+           "Etikettenanfang=%zu B Etikettenende=%zu B Einschalten=%c Kopf=%c Linerless=%s",
+           lw_settings_effective_rotation(s), mark, s->stop_at_last, s->stop_offset, s->pause_every,
+           s->control_printer ? "Drucker" : "Standard", s->format_prefix, s->control_prefix, s->delimiter,
+           lw_rtc_name(s->rtc), s->cancel_before, s->cancel_delay, s->label_start_commands_len,
+           s->label_end_commands_len, pu ? pu : '-', hc ? hc : '-', sgd);
 }

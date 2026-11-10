@@ -194,3 +194,75 @@ bool lw_bitmap_rotate180(lw_bitmap *bm)
     free(tmp);
     return true;
 }
+
+bool lw_bitmap_rotate_quarter(lw_bitmap *bm, int degrees)
+{
+    if (degrees != 90 && degrees != 270)
+        return true;
+    const int w = bm->width, h = bm->height;
+    lw_bitmap out;
+    lw_bitmap_init(&out);
+    if (!lw_bitmap_alloc(&out, h, w))
+        return false;
+    for (int y = 0; y < h; y++) {
+        const uint8_t *row = lw_bitmap_row(bm, y);
+        for (int xb = 0; xb < bm->bpr; xb++) {
+            uint8_t byte = row[xb];
+            if (byte == 0)
+                continue;
+            for (int bit = 0; bit < 8; bit++) {
+                if ((byte & (0x80u >> bit)) == 0)
+                    continue;
+                int x = xb * 8 + bit;
+                if (x >= w)
+                    break;
+                int nx = degrees == 90 ? h - 1 - y : y;
+                int ny = degrees == 90 ? x : w - 1 - x;
+                lw_bitmap_row(&out, ny)[nx >> 3] |= (uint8_t)(0x80u >> (nx & 7));
+            }
+        }
+    }
+    lw_bitmap_free(bm);
+    *bm = out;
+    return true;
+}
+
+int lw_bitmap_last_black_row(const lw_bitmap *bm)
+{
+    for (int y = bm->height - 1; y >= 0; y--) {
+        const uint8_t *row = lw_bitmap_row(bm, y);
+        for (int i = 0; i < bm->bpr; i++)
+            if (row[i] != 0)
+                return y;
+    }
+    return -1;
+}
+
+bool lw_bitmap_set_height(lw_bitmap *bm, int height)
+{
+    if (height < 0)
+        return false;
+    if (height == bm->height)
+        return true;
+    size_t bpr = (size_t)bm->bpr;
+    size_t old_total = lw_bitmap_size(bm);
+    size_t total = bpr * (size_t)height;
+    if (height != 0 && total / (size_t)height != bpr)
+        return false;
+    if (total > LW_BITMAP_MAX_BYTES)
+        return false;
+    if (total == 0) {
+        free(bm->data);
+        bm->data = NULL;
+        bm->height = height;
+        return true;
+    }
+    uint8_t *data = realloc(bm->data, total);
+    if (data == NULL)
+        return false;
+    if (total > old_total)
+        memset(data + old_total, 0, total - old_total);
+    bm->data = data;
+    bm->height = height;
+    return true;
+}

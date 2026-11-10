@@ -38,6 +38,15 @@ public struct ZPLCommand: Hashable, Sendable, CustomStringConvertible {
         String(prefix.rawValue) + code + parameters.joined(separator: ",")
     }
 
+    /// Gerenderte Form mit anderen Steuerzeichen (`^CC`/`^CT`/`^CD`): Formatpräfix statt `^`,
+    /// Steuerpräfix statt `~`, Trennzeichen statt `,` zwischen den Parametern. Die Parameter
+    /// selbst bleiben unverändert (z. B. Grafikdaten). Mit ``ControlCharacters/standard`` gleich
+    /// ``description``.
+    public func rendered(with characters: ControlCharacters) -> String {
+        let prefixText = prefix == .caret ? characters.formatPrefixString : characters.controlPrefixString
+        return prefixText + code + parameters.joined(separator: characters.delimiterString)
+    }
+
     /// Zweistelliger Befehlsname inkl. Präfix in Großbuchstaben, z. B. `^FO`, `~JC`, `^A`.
     ///
     /// Bei `^A` (Schrift) gehört das folgende Zeichen zum Schriftnamen, daher wird nur `^A`

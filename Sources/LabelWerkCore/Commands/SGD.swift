@@ -129,6 +129,12 @@ public enum SGD {
     /// `! U1 do "ezpl.manual_calibration" ""\r\n` – manuelle Kalibrierung (Desktop-Drucker).
     public static func manualCalibration() -> String { `do`(Variable.manualCalibration) }
 
+    /// `! U1 setvar "media.printmode" "{wert}"\r\n` – Druckmodus per SGD (für Linerless-Modi die
+    /// einzige Möglichkeit, siehe ``PrintMode/usesSGD``), z. B. `"linerless peel"`.
+    public static func setPrintMode(_ mode: PrintMode) -> String {
+        setvar(Variable.printMode, mode.sgdValue)
+    }
+
     // MARK: - Variablennamen
 
     /// Wichtige Link-OS-Variablennamen.
@@ -190,6 +196,16 @@ public enum SGD {
         public static let headCloseAction = "ezpl.head_close_action"
         /// ZPL-Modus (`zpl II`, `zpl`).
         public static let zplMode = "zpl.zpl_mode"
+        /// Vertikaler Versatz (`^LT`).
+        public static let labelTop = "zpl.label_top"
+        /// Formatpräfix (`^CC`, Standard `^`).
+        public static let caret = "zpl.caret"
+        /// Steuerpräfix (`^CT`, Standard `~`).
+        public static let controlCharacter = "zpl.control_character"
+        /// Trennzeichen (`^CD`, Standard `,`).
+        public static let delimiter = "zpl.delimiter"
+        /// Medienart (`label`, `journal` – Journal = Endlosmaterial bei Mobildruckern).
+        public static let mediaKind = "media.type"
 
         // Zähler
         /// Gesamte Drucklänge (z. B. „8560 INCHES, 21744 CENTIMETERS“).
@@ -293,6 +309,16 @@ public enum SGD {
         Variable.wlanSignalStrength,
         Variable.btEnabled, Variable.btName, Variable.btAddress,
         Variable.battery, Variable.batteryHealth,
+    ]
+
+    /// Variablen, aus denen sich die Druckeinstellungen des Druckers ablesen lassen
+    /// (`PrinterClient.readPrintSettings()`): Schwärzung, Geschwindigkeit, Medienerkennung,
+    /// Druckverfahren, Druckmodus, Versatz, Abreißposition, Einschalt-/Kopfschließ-Aktion,
+    /// Steuerzeichen.
+    public static let printSettingsVariables: [String] = [
+        Variable.tone, Variable.speed, Variable.mediaType, Variable.printMethod, Variable.printMode,
+        Variable.labelTop, Variable.leftPosition, Variable.tearOff, Variable.powerUpAction, Variable.headCloseAction,
+        Variable.caret, Variable.controlCharacter, Variable.delimiter, Variable.senseMode, Variable.mediaKind,
     ]
 
     // MARK: - Hilfen

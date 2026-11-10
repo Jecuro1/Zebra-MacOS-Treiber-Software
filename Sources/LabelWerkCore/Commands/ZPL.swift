@@ -29,7 +29,10 @@ public enum ZPL {
     }
 
     /// Wandelt eine Befehlsfolge in Text um (Zeilenaufbau wie bei ``format(_:)``).
-    public static func render(_ commands: [ZPLCommand]) -> String {
+    ///
+    /// Mit `characters` werden die Befehle mit anderen Steuerzeichen erzeugt (siehe
+    /// ``ZPLCommand/rendered(with:)``).
+    public static func render(_ commands: [ZPLCommand], characters: ControlCharacters = .standard) -> String {
         var out = ""
         var inField = false
         for command in commands {
@@ -37,7 +40,7 @@ public enum ZPL {
                 // Ein neues Feld ohne vorheriges ^FS – trotzdem lesbar umbrechen.
                 out += "\n"
             }
-            out += command.description
+            out += command.rendered(with: characters)
             if command.opensField {
                 inField = true
             } else if command.closesField {
@@ -487,11 +490,28 @@ public enum ZPL {
     /// `^MT{D|T}` – Thermodirekt oder Thermotransfer.
     public static func mediaType(_ t: MediaType) -> ZPLCommand { ZPLCommand(.caret, "MT", [t.zplCode]) }
 
-    /// `^MN{Y|M|N|A}` – Medienerkennung.
+    /// `^MN{Y|M|N|A|W}` – Medienerkennung.
     public static func mediaTracking(_ t: MediaTracking) -> ZPLCommand { ZPLCommand(.caret, "MN", [t.zplCode]) }
 
+    /// `^MN{code}` bzw. bei schwarzer Markierung mit Versatz `^MNM,{offset}` (−80…283 Punkte).
+    /// Ein Versatz bei anderen Erkennungsarten wird ignoriert.
+    public static func mediaTracking(_ t: MediaTracking, markOffset: Int?) -> ZPLCommand {
+        guard t == .blackMark, let markOffset else { return mediaTracking(t) }
+        return ZPLCommand(.caret, "MN", [t.zplCode, String(clampInt(markOffset, -80, 283))])
+    }
+
     /// `^MM{T|P|C|D|R|A|K}` – Druckmodus.
+    ///
+    /// Linerless-Modi haben keinen `^MM`-Code (``PrintMode/usesSGD``); für sie liefert diese
+    /// Funktion den Code des gleichwertigen klassischen Modus. Richtig gesetzt werden sie mit
+    /// ``SGD/setPrintMode(_:)`` – siehe ``printModeCommand(_:)``.
     public static func printMode(_ m: PrintMode) -> ZPLCommand { ZPLCommand(.caret, "MM", [m.zplCode]) }
+
+    /// `^MM{code}` für klassische Modi, `nil` für Linerless-Modi (die per SGD
+    /// `media.printmode` gesetzt werden, ``SGD/setPrintMode(_:)``).
+    public static func printModeCommand(_ m: PrintMode) -> ZPLCommand? {
+        m.mmCode.map { ZPLCommand(.caret, "MM", [$0]) }
+    }
 
     /// `~JS{A|B|N|O}` – Rückzugsfolge („Change Backfeed Sequence“). Achtung: `^JS` ist die Sensorwahl.
     public static func backfeed(_ b: BackfeedMode) -> ZPLCommand { ZPLCommand(.tilde, "JS", [b.zplCode]) }
@@ -526,6 +546,42 @@ public enum ZPL {
     /// `^MF{p},{h}` – Medienvorschub beim Einschalten (`p`) und nach dem Schließen des Kopfs (`h`).
     public static func mediaFeed(powerUp: FeedAction, headClose: FeedAction) -> ZPLCommand {
         ZPLCommand(.caret, "MF", [powerUp.rawValue, headClose.rawValue])
+    }
+
+    /// `^MF{p},{h}` mit den Werten aus ``PrintSettings`` (``MediaFeedAction``).
+    public static func mediaFeed(powerUp: MediaFeedAction, headClose: MediaFeedAction) -> ZPLCommand {
+        ZPLCommand(.caret, "MF", [powerUp.zplCode, headClose.zplCode])
+    }
+
+    /// `^ST{MM},{DD},{YYYY},{HH},{mm},{SS},M` – Echtzeituhr stellen (24-Stunden-Format, alle
+    /// Felder mit Nullen aufgefüllt), Ortszeit in `timeZone`. Muss in `^XA … ^XZ` stehen (siehe
+    /// ``realTimeClockFormat(_:timeZone:)``).
+    public static func setRealTimeClock(_ date: Date, timeZone: TimeZone = .current) -> ZPLCommand {
+        let c = clockComponents(date, timeZone: timeZone)
+        return ZPLCommand(.caret, "ST", [
+            pad(c.month, 2), pad(c.day, 2), pad(c.year, 4), pad(c.hour, 2), pad(c.minute, 2), pad(c.second, 2), "M",
+        ])
+    }
+
+    /// `^XA^ST…^XZ` – vollständiges Format zum Stellen der Uhr.
+    public static func realTimeClockFormat(_ date: Date, timeZone: TimeZone = .current) -> String {
+        startFormat().description + setRealTimeClock(date, timeZone: timeZone).description + endFormat().description
+    }
+
+    /// Datum und Uhrzeit (gregorianisch) in `timeZone` als Zahlen.
+    public static func clockComponents(_ date: Date, timeZone: TimeZone)
+        -> (year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        return (c.year ?? 1970, c.month ?? 1, c.day ?? 1, c.hour ?? 0, c.minute ?? 0, c.second ?? 0)
+    }
+
+    /// Ganzzahl wie `printf("%0*d")` (Breite inklusive Vorzeichen).
+    static func pad(_ value: Int, _ width: Int) -> String {
+        let digits = String(value.magnitude)
+        let sign = value < 0 ? "-" : ""
+        return sign + String(repeating: "0", count: max(0, width - sign.count - digits.count)) + digits
     }
 
     /// `^JUS` – aktuelle Einstellungen dauerhaft speichern.

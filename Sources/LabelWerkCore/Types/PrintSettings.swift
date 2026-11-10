@@ -50,6 +50,40 @@ public struct PrintSettings: Codable, Hashable, Sendable {
     /// Rohbefehle, die nach dem letzten Etikett gesendet werden.
     public var endCommands: String
 
+    // MARK: Erweiterungen (Windows-Treiberdialog)
+
+    /// Drehung der Seite im Uhrzeigersinn („Drehung“). Zusammen mit ``rotate180`` ergibt sich
+    /// ``effectiveRotation``.
+    public var rotation: PrintRotation
+    /// Versatz der schwarzen Markierung in Punkten −80…283 (`^MNM,{offset}`, nur bei
+    /// ``MediaTracking/blackMark``; `nil` = Druckerwert).
+    public var markOffset: Int?
+    /// „Bei letztem Element stoppen“ (nur Endlosmaterial): Seitenhöhe = letzte Zeile mit
+    /// schwarzen Punkten + 1 + ``stopOffset``.
+    public var stopAtLastElement: Bool
+    /// Stoppversatz in Punkten 0…32000 (nur mit ``stopAtLastElement``).
+    public var stopOffset: Int
+    /// Nach jeweils N Etiketten pausieren (`^PQ{n},{N},0,N`), 0…9999; 0 = keine Pause.
+    /// Hat Vorrang vor ``cutEvery``.
+    public var pauseEvery: Int
+    /// Steuerzeichen: `nil` = Standard (`^ ~ ,`), sonst die im Drucker eingestellten Zeichen („Intern“).
+    public var controlCharacters: ControlCharacters?
+    /// Echtzeituhr stellen (`^ST`); `nil` = nie.
+    public var rtcUpdate: RTCUpdate?
+    /// „Aufträge vor dem Drucken abbrechen“: `~JA` vor dem Auftrag.
+    public var cancelJobsBeforePrint: Bool
+    /// Wartezeit nach `~JA` in Millisekunden 0…10000 (der CUPS-Filter wartet selbst; beim
+    /// `JobEncoder` wartet der Aufrufer).
+    public var cancelDelayMs: Int
+    /// Rohbefehle am Anfang jedes Etiketts (nach `^XA`).
+    public var labelStartCommands: String
+    /// Rohbefehle am Ende jedes Etiketts (vor `^XZ`).
+    public var labelEndCommands: String
+    /// Aktion beim Einschalten (`^MF`, nur zusammen mit ``headCloseAction``).
+    public var powerUpAction: MediaFeedAction?
+    /// Aktion nach dem Schließen des Druckkopfs (`^MF`, nur zusammen mit ``powerUpAction``).
+    public var headCloseAction: MediaFeedAction?
+
     public init(
         darkness: Int? = nil,
         speed: Int? = nil,
@@ -71,7 +105,20 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         saveToPrinter: Bool = false,
         skipBlankLabels: Bool = false,
         startCommands: String = "",
-        endCommands: String = ""
+        endCommands: String = "",
+        rotation: PrintRotation = .r0,
+        markOffset: Int? = nil,
+        stopAtLastElement: Bool = false,
+        stopOffset: Int = 0,
+        pauseEvery: Int = 0,
+        controlCharacters: ControlCharacters? = nil,
+        rtcUpdate: RTCUpdate? = nil,
+        cancelJobsBeforePrint: Bool = false,
+        cancelDelayMs: Int = 1000,
+        labelStartCommands: String = "",
+        labelEndCommands: String = "",
+        powerUpAction: MediaFeedAction? = nil,
+        headCloseAction: MediaFeedAction? = nil
     ) {
         self.darkness = darkness
         self.speed = speed
@@ -94,6 +141,19 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         self.skipBlankLabels = skipBlankLabels
         self.startCommands = startCommands
         self.endCommands = endCommands
+        self.rotation = rotation
+        self.markOffset = markOffset
+        self.stopAtLastElement = stopAtLastElement
+        self.stopOffset = stopOffset
+        self.pauseEvery = pauseEvery
+        self.controlCharacters = controlCharacters
+        self.rtcUpdate = rtcUpdate
+        self.cancelJobsBeforePrint = cancelJobsBeforePrint
+        self.cancelDelayMs = cancelDelayMs
+        self.labelStartCommands = labelStartCommands
+        self.labelEndCommands = labelEndCommands
+        self.powerUpAction = powerUpAction
+        self.headCloseAction = headCloseAction
     }
 
     /// Standard: Alle Druckerwerte beibehalten, Schwellenwert-Rasterung, Z64.
@@ -109,8 +169,27 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         s.tearOffAdjust = tearOffAdjust.map { min(max($0, -120), 120) }
         s.threshold = min(max(threshold, 1), 254)
         s.cutEvery = min(max(cutEvery, 0), 9999)
+        s.markOffset = markOffset.map { min(max($0, -80), 283) }
+        s.stopOffset = min(max(stopOffset, 0), 32_000)
+        s.pauseEvery = min(max(pauseEvery, 0), 9999)
+        s.controlCharacters = controlCharacters?.clamped()
+        s.cancelDelayMs = min(max(cancelDelayMs, 0), 10_000)
         return s
     }
+
+    /// Wirksame Drehung: ``rotation``, falls nicht 0°, sonst 180° bei ``rotate180`` (ältere
+    /// Einstellung `lwRotate180`), sonst 0°.
+    public var effectiveRotation: PrintRotation {
+        rotation != .r0 ? rotation : (rotate180 ? .r180 : .r0)
+    }
+
+    /// Wirksame Steuerzeichen (``ControlCharacters/standard`` bei „Standard“).
+    public var effectiveControlCharacters: ControlCharacters {
+        controlCharacters?.clamped() ?? .standard
+    }
+
+    /// `true`, wenn ``powerUpAction`` und ``headCloseAction`` gesetzt sind (nur dann wird `^MF` gesendet).
+    public var hasMediaFeedActions: Bool { powerUpAction != nil && headCloseAction != nil }
 }
 
 // MARK: - CUPS-Optionen
@@ -139,6 +218,27 @@ public enum CUPSOptionName {
     public static let skipBlank = "lwSkipBlank"
     public static let startCommands = "lwStartCmd"
     public static let endCommands = "lwEndCmd"
+    public static let rotation = "lwRotation"
+    public static let markOffset = "lwMarkOffset"
+    public static let stopAtLast = "lwStopAtLast"
+    public static let stopOffset = "lwStopOffset"
+    public static let pauseEvery = "lwPauseEvery"
+    public static let controlChars = "lwControlChars"
+    public static let formatPrefix = "lwFormatPrefix"
+    public static let controlPrefix = "lwControlPrefix"
+    public static let delimiter = "lwDelimiter"
+    public static let rtc = "lwRTC"
+    public static let cancelBefore = "lwCancelBefore"
+    public static let cancelDelay = "lwCancelDelay"
+    public static let labelStartCommands = "lwLabelStartCmd"
+    public static let labelEndCommands = "lwLabelEndCmd"
+    public static let powerUpAction = "lwPowerUpAction"
+    public static let headCloseAction = "lwHeadCloseAction"
+
+    /// `lwControlChars`: Standardzeichen (`^ ~ ,`).
+    public static let controlCharsStandard = "Standard"
+    /// `lwControlChars`: im Drucker eingestellte Zeichen („Intern“, mit `lwFormatPrefix` …).
+    public static let controlCharsPrinter = "Printer"
 
     /// Wert für „Druckereinstellung beibehalten“.
     public static let defaultValue = "Default"
@@ -147,13 +247,23 @@ public enum CUPSOptionName {
         language, darkness, speed, mediaType, tracking, printMode, labelTop, labelLeft, tearOff,
         backfeed, mirror, negative, rotate180, dither, threshold, compression, cutEvery, calibrate,
         saveSettings, skipBlank, startCommands, endCommands,
+        rotation, markOffset, stopAtLast, stopOffset, pauseEvery, controlChars, formatPrefix, controlPrefix,
+        delimiter, rtc, cancelBefore, cancelDelay, labelStartCommands, labelEndCommands, powerUpAction,
+        headCloseAction,
+    ]
+
+    /// Optionen ohne PPD-Eintrag (Base64url-Rohbefehle und Steuerzeichen): nur als
+    /// Warteschlangen-Standard (`-o name-default=…`) bzw. Auftragsoption möglich.
+    public static let nonPPD: [String] = [
+        startCommands, endCommands, labelStartCommands, labelEndCommands, formatPrefix, controlPrefix, delimiter,
     ]
 }
 
 extension PrintSettings {
     /// Wandelt die Einstellungen in CUPS-Optionen um (`lpoptions`/`lpadmin -o name=value`).
     ///
-    /// Leere Start-/Endbefehle werden weggelassen.
+    /// Leere Start-/Endbefehle (auch je Etikett) werden weggelassen, ebenso `lwFormatPrefix`,
+    /// `lwControlPrefix` und `lwDelimiter` bei Standard-Steuerzeichen.
     public func cupsOptions() -> [String: String] {
         let s = clamped()
         var o: [String: String] = [:]
@@ -183,6 +293,30 @@ extension PrintSettings {
         if !s.endCommands.isEmpty {
             o[CUPSOptionName.endCommands] = CUPSCommandEncoding.encode(s.endCommands)
         }
+        o[CUPSOptionName.rotation] = s.rotation.cupsValue
+        o[CUPSOptionName.markOffset] = s.markOffset.map(String.init) ?? d
+        o[CUPSOptionName.stopAtLast] = s.stopAtLastElement ? "True" : "False"
+        o[CUPSOptionName.stopOffset] = String(s.stopOffset)
+        o[CUPSOptionName.pauseEvery] = String(s.pauseEvery)
+        if let chars = s.controlCharacters {
+            o[CUPSOptionName.controlChars] = CUPSOptionName.controlCharsPrinter
+            o[CUPSOptionName.formatPrefix] = String(chars.formatPrefix)
+            o[CUPSOptionName.controlPrefix] = String(chars.controlPrefix)
+            o[CUPSOptionName.delimiter] = String(chars.delimiter)
+        } else {
+            o[CUPSOptionName.controlChars] = CUPSOptionName.controlCharsStandard
+        }
+        o[CUPSOptionName.rtc] = s.rtcUpdate?.cupsValue ?? d
+        o[CUPSOptionName.cancelBefore] = s.cancelJobsBeforePrint ? "True" : "False"
+        o[CUPSOptionName.cancelDelay] = String(s.cancelDelayMs)
+        if !s.labelStartCommands.isEmpty {
+            o[CUPSOptionName.labelStartCommands] = CUPSCommandEncoding.encode(s.labelStartCommands)
+        }
+        if !s.labelEndCommands.isEmpty {
+            o[CUPSOptionName.labelEndCommands] = CUPSCommandEncoding.encode(s.labelEndCommands)
+        }
+        o[CUPSOptionName.powerUpAction] = s.powerUpAction?.cupsValue ?? d
+        o[CUPSOptionName.headCloseAction] = s.headCloseAction?.cupsValue ?? d
         return o
     }
 
@@ -218,6 +352,30 @@ extension PrintSettings {
         skipBlankLabels = bool(CUPSOptionName.skipBlank)
         startCommands = o[CUPSOptionName.startCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
         endCommands = o[CUPSOptionName.endCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
+        rotation = o[CUPSOptionName.rotation].flatMap(PrintRotation.init(cupsValue:)) ?? .r0
+        markOffset = int(CUPSOptionName.markOffset)
+        stopAtLastElement = bool(CUPSOptionName.stopAtLast)
+        stopOffset = int(CUPSOptionName.stopOffset) ?? 0
+        pauseEvery = int(CUPSOptionName.pauseEvery) ?? 0
+        if o[CUPSOptionName.controlChars]?.trimmingCharacters(in: .whitespaces).lowercased()
+            == CUPSOptionName.controlCharsPrinter.lowercased() {
+            // Dezimaler ASCII-Code 33…126; fehlend oder ungültig → Standardzeichen.
+            func character(_ key: String, _ fallback: UInt8) -> UInt8 {
+                guard let value = int(key), let byte = UInt8(exactly: value),
+                      ControlCharacters.validRange.contains(byte) else { return fallback }
+                return byte
+            }
+            controlCharacters = ControlCharacters(formatPrefix: character(CUPSOptionName.formatPrefix, 0x5E),
+                                                  controlPrefix: character(CUPSOptionName.controlPrefix, 0x7E),
+                                                  delimiter: character(CUPSOptionName.delimiter, 0x2C))
+        }
+        rtcUpdate = o[CUPSOptionName.rtc].flatMap(RTCUpdate.init(cupsValue:))
+        cancelJobsBeforePrint = bool(CUPSOptionName.cancelBefore)
+        cancelDelayMs = int(CUPSOptionName.cancelDelay) ?? 1000
+        labelStartCommands = o[CUPSOptionName.labelStartCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
+        labelEndCommands = o[CUPSOptionName.labelEndCommands].flatMap(CUPSCommandEncoding.decode) ?? ""
+        powerUpAction = o[CUPSOptionName.powerUpAction].flatMap(MediaFeedAction.init(cupsValue:))
+        headCloseAction = o[CUPSOptionName.headCloseAction].flatMap(MediaFeedAction.init(cupsValue:))
         self = clamped()
     }
 }
@@ -273,7 +431,20 @@ extension PrintSettings {
             saveToPrinter: value(Bool.self, .saveToPrinter) ?? false,
             skipBlankLabels: value(Bool.self, .skipBlankLabels) ?? false,
             startCommands: value(String.self, .startCommands) ?? "",
-            endCommands: value(String.self, .endCommands) ?? ""
+            endCommands: value(String.self, .endCommands) ?? "",
+            rotation: value(PrintRotation.self, .rotation) ?? .r0,
+            markOffset: value(Int.self, .markOffset),
+            stopAtLastElement: value(Bool.self, .stopAtLastElement) ?? false,
+            stopOffset: value(Int.self, .stopOffset) ?? 0,
+            pauseEvery: value(Int.self, .pauseEvery) ?? 0,
+            controlCharacters: value(ControlCharacters.self, .controlCharacters),
+            rtcUpdate: value(RTCUpdate.self, .rtcUpdate),
+            cancelJobsBeforePrint: value(Bool.self, .cancelJobsBeforePrint) ?? false,
+            cancelDelayMs: value(Int.self, .cancelDelayMs) ?? 1000,
+            labelStartCommands: value(String.self, .labelStartCommands) ?? "",
+            labelEndCommands: value(String.self, .labelEndCommands) ?? "",
+            powerUpAction: value(MediaFeedAction.self, .powerUpAction),
+            headCloseAction: value(MediaFeedAction.self, .headCloseAction)
         )
         self = clamped()
     }

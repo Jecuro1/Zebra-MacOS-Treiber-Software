@@ -69,6 +69,24 @@ bool lw_bitmap_mirror(lw_bitmap *bm);
 bool lw_bitmap_rotate180(lw_bitmap *bm);
 
 /**
+ * Dreht um 90° bzw. 270° im Uhrzeigersinn (wie MonoBitmap.rotated(.r90/.r270)):
+ *   90°:  (x, y) → (height − 1 − y, x)    270°: (x, y) → (y, width − 1 − x)
+ * Breite und Höhe werden vertauscht. Andere Winkel: keine Änderung. false bei Speichermangel
+ * oder zu großer Fläche (`bm` bleibt dann unverändert).
+ */
+bool lw_bitmap_rotate_quarter(lw_bitmap *bm, int degrees);
+
+/** Index der letzten Zeile mit mindestens einem schwarzen Punkt, −1 bei leerer Bitmap. */
+int lw_bitmap_last_black_row(const lw_bitmap *bm);
+
+/**
+ * Setzt die Höhe: kürzer → untere Zeilen entfallen, länger → weiße Zeilen werden angehängt
+ * (wie MonoBitmap.cropped(x: 0, y: 0, width: w, height: h)). false bei Speichermangel
+ * oder zu großer Fläche (`bm` bleibt dann unverändert).
+ */
+bool lw_bitmap_set_height(lw_bitmap *bm, int height);
+
+/**
  * Spiegelt eine einzelne Zeile von `src` nach `dst` (beide `bpr` Bytes, dürfen nicht
  * überlappen). Füllbits in `dst` sind danach 0.
  */
