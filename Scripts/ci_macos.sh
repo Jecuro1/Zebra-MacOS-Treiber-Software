@@ -331,17 +331,12 @@ step_install_test() {
         lw_run cupstestppd -W translations "${ppd}" || lw_die "cupstestppd lehnt $(basename "${ppd}") ab."
     fi
     # Warteschlange mit unserer PPD anlegen – cupsd prüft dabei Filterpfad und Rechte.
-    # Ohne „?waiteof=false“: macOS' cupsd weist diese Abfrage mit „Bad device-uri“ ab. Der
-    # Test-„Drucker“ liest bis zum Verbindungsende und schließt dann, das genügt dem Backend.
-    local uri added=0
-    for uri in "socket://127.0.0.1:${TEST_PORT}" "socket://localhost:${TEST_PORT}"; do
-        if lw_run sudo lpadmin -p "${TEST_QUEUE}" -E -v "${uri}" -P "${ppd}"; then
-            added=1
-            break
-        fi
-        lw_ci_warning "lpadmin lehnt ${uri} ab – nächster Versuch."
-    done
-    [[ "${added}" -eq 1 ]] || lw_die "Warteschlange ${TEST_QUEUE} konnte nicht angelegt werden."
+    # Geräte-URI ohne Abfrage: Das socket-Backend schließt nach dem Auftrag seine Senderichtung
+    # (Standard waiteof=true), der Test-„Drucker“ liest bis dahin und schließt dann selbst. Eine
+    # Abfrage bräuchte „/“ vor „?“ (socket://host:port/?waiteof=false) – CUPS (httpSeparateURI)
+    # verlangt nach einer Portnummer einen Pfad und weist „…:port?…“ mit „Bad device-uri“ ab.
+    lw_run sudo lpadmin -p "${TEST_QUEUE}" -E -v "socket://127.0.0.1:${TEST_PORT}" -P "${ppd}" ||
+        lw_die "Warteschlange ${TEST_QUEUE} konnte nicht angelegt werden."
     lpstat -p "${TEST_QUEUE}" >&2 || lw_die "Warteschlange ${TEST_QUEUE} fehlt."
     lpoptions -p "${TEST_QUEUE}" -l | grep -q '^lwDarkness' || lw_die "Warteschlange kennt die LabelWerk-Optionen nicht."
     lw_ok "Warteschlange ${TEST_QUEUE} mit $(basename "${ppd}") eingerichtet"
@@ -381,7 +376,9 @@ step_e2e_print() {
     # danach werden hier die Diagnosedaten gesammelt.
     lw_ci_run_process step_e2e_print_job || status=$?
     if [[ "${status}" -ne 0 ]]; then
-        lpstat -l -o "${TEST_QUEUE}" >&2 || true
+        # Alle Aufträge (auch abgebrochene und abgeschlossene – lpstat zeigt sonst nur offene; „-W“
+        # muss vor „-o“ stehen) und den Zustand der Warteschlange (printer-state-reasons).
+        lpstat -W all -l -o "${TEST_QUEUE}" >&2 || true
         lpstat -l -p "${TEST_QUEUE}" >&2 || true
         sudo tail -n 150 /var/log/cups/error_log >&2 || true
     fi

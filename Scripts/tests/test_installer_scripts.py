@@ -18,6 +18,9 @@ Geprüft werden – auf jedem System, also auch unter Linux in der CI –
   Treiberbaum ist,
 * ``uninstall.sh`` gegen ein Testwurzelverzeichnis (``--root``),
 * die Installer-Skripte (preinstall, postinstall) gegen ein Testvolume,
+* ``postinstall``: Beim Umstellen vorhandener Warteschlangen auf neue PPDs bleiben deren
+  Standardoptionen erhalten (Attrappe von ``lpadmin``; zusätzlich gegen einen privaten ``cupsd``,
+  sofern einer installiert ist – unter Linux ``/usr/sbin/cupsd`` oder ``$LW_TEST_CUPSD``),
 * die CI-Skripte: jeder fehlschlagende Befehl lässt seinen Schritt scheitern (eigener Prozess je
   Schritt), Optionen erreichen die Schrittprozesse, und ``ci_macos.sh`` deinstalliert nur nach
   einer tatsächlich begonnenen Probeinstallation (simuliertes macOS mit Attrappen für ``uname``
@@ -29,18 +32,23 @@ Geprüft werden – auf jedem System, also auch unter Linux in der CI –
 
 from __future__ import annotations
 
+import grp
 import gzip
 import json
 import os
 import platform
 import plistlib
+import pwd
 import re
+import shlex
 import shutil
+import socket
 import stat
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
@@ -772,10 +780,27 @@ class PackageScriptTests(unittest.TestCase):
         link = self.volume / "usr" / "local" / "bin" / "lwctl"
         self.assertTrue(link.is_symlink())
         self.assertEqual(os.readlink(link), "/Applications/LabelWerk.app/Contents/Helpers/lwctl")
+        self.assertEqual(mode(link.parent), 0o755, "neu angelegter Ordner")
         # Erneuter Lauf (Update) ersetzt den eigenen Link.
         result = run([str(script), "pkg", "/", str(self.volume)])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(link.is_symlink())
+
+    def test_cli_postinstall_keeps_permissions_of_existing_directory(self):
+        # Regression: chmod 755 nahm einem vorhandenen /usr/local/bin (Homebrew: 0775) das
+        # Schreibrecht der Gruppe „admin“.
+        script = self.render_cli_postinstall()
+        helper = self.volume / "Applications" / "LabelWerk.app" / "Contents" / "Helpers" / "lwctl"
+        helper.parent.mkdir(parents=True)
+        helper.write_text("#!/bin/sh\n", encoding="utf-8")
+        os.chmod(helper, 0o755)
+        bin_dir = self.volume / "usr" / "local" / "bin"
+        bin_dir.mkdir(parents=True)
+        os.chmod(bin_dir, 0o775)
+        result = run([str(script), "pkg", "/", str(self.volume)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((bin_dir / "lwctl").is_symlink())
+        self.assertEqual(mode(bin_dir), 0o775)
 
     def test_cli_postinstall_keeps_foreign_file(self):
         script = self.render_cli_postinstall()
@@ -796,6 +821,351 @@ class PackageScriptTests(unittest.TestCase):
         result = run([str(script), "pkg", "/", str(self.volume)])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.volume / "usr" / "local" / "bin" / "lwctl").exists())
+
+
+# ------------------------------------------------------------------------------------------------
+# postinstall: vorhandene Warteschlangen auf neue PPDs umstellen
+# ------------------------------------------------------------------------------------------------
+
+DRIVER_POSTINSTALL = INSTALLER / "pkg" / "scripts" / "driver" / "postinstall"
+# Wie im Paket: /bin/bash (auf macOS Bash 3.2).
+SYSTEM_BASH = "/bin/bash" if Path("/bin/bash").exists() else "bash"
+
+
+def shell_functions(script: Path, *names: str) -> str:
+    """Schneidet Funktionsdefinitionen („name() {“ … „}“ am Zeilenanfang) aus einem Skript aus."""
+    text = script.read_text(encoding="utf-8")
+    parts = []
+    for name in names:
+        match = re.search(rf"^{re.escape(name)}\(\) \{{\n.*?^\}}\n", text, re.M | re.S)
+        if match is None:
+            raise AssertionError(f"Funktion {name} fehlt in {script}")
+        parts.append(match.group(0))
+    return "\n".join(parts)
+
+
+def run_refresh_queues(lpadmin: str, cups_ppd_dir: Path, ppd_dir: Path,
+                       env: Optional[Dict[str, str]] = None) -> subprocess.CompletedProcess:
+    """Führt refresh_queues() aus dem driver-postinstall mit eigenen Pfaden aus."""
+    script = "set -euo pipefail\n" \
+             "log() { printf 'LabelWerk postinstall: %s\\n' \"$*\"; }\n" \
+             f"LPADMIN={shlex.quote(lpadmin)}\n" \
+             f"CUPS_PPD_DIR={shlex.quote(str(cups_ppd_dir))}\n" \
+             f"PPD_DIR={shlex.quote(str(ppd_dir))}\n" \
+             + shell_functions(DRIVER_POSTINSTALL, "queue_defaults", "refresh_queues") \
+             + "\nrefresh_queues\n"
+    return run([SYSTEM_BASH, "-c", script], env=env)
+
+
+def ppd_defaults(path: Path) -> Dict[str, str]:
+    """*Default-Zeilen einer (ungepackten) PPD."""
+    defaults: Dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = re.match(r"^\*Default([^:\s]+):\s*(\S+)", line)
+        if match:
+            defaults.setdefault(match.group(1), match.group(2))
+    return defaults
+
+
+QUEUE_PPD = """*PPD-Adobe: "4.3"\r
+*FileVersion: "1.0.0"\r
+*lwModel: "zd421t"\r
+*DefaultColorSpace: Gray\r
+*OpenUI *PageSize/Media Size: PickOne\r
+*DefaultPageSize: w288h288\r
+*PageSize w288h288/2.00 x 4.00": ""\r
+*CloseUI: *PageSize\r
+*OpenUI *Resolution/Resolution: PickOne\r
+*DefaultResolution: 203dpi\r
+*CloseUI: *Resolution\r
+*OpenUI *lwDarkness/Darkness: PickOne\r
+*DefaultlwDarkness: 15\r
+*CloseUI: *lwDarkness\r
+*OpenUI *lwRotate180: Boolean\r
+*DefaultlwRotate180: True\r
+*CloseUI: *lwRotate180\r
+"""
+
+
+class QueueRefreshTests(unittest.TestCase):
+    """refresh_queues() mit einer lpadmin-Attrappe: Die alten Standardwerte gehen mit ins -P."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-refresh-"))
+        self.cups_ppd = self.tmp / "etc-cups-ppd"
+        self.cups_ppd.mkdir()
+        self.ppds = self.tmp / "PPDs"
+        self.ppds.mkdir()
+        self.new_ppd = self.ppds / "LabelWerk-zd421t-203dpi.ppd.gz"
+        self.new_ppd.write_bytes(gzip.compress(b'*PPD-Adobe: "4.3"\n'))
+        self.calls = self.tmp / "lpadmin.log"
+        self.lpadmin = write_executable(self.tmp / "lpadmin", f'''#!/bin/sh
+for argument in "$@"; do printf '%s\\n' "$argument" >> "{self.calls}"; done
+printf -- '--\\n' >> "{self.calls}"
+''')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def lpadmin_calls(self) -> List[List[str]]:
+        if not self.calls.exists():
+            return []
+        calls: List[List[str]] = [[]]
+        for line in self.calls.read_text(encoding="utf-8").splitlines():
+            if line == "--":
+                calls.append([])
+            else:
+                calls[-1].append(line)
+        return [call for call in calls if call]
+
+    def test_defaults_of_old_ppd_are_passed_to_lpadmin(self):
+        (self.cups_ppd / "Lager.ppd").write_text(QUEUE_PPD, encoding="utf-8")
+        result = run_refresh_queues(str(self.lpadmin), self.cups_ppd, self.ppds)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.lpadmin_calls(), [[
+            "-p", "Lager", "-P", str(self.new_ppd),
+            "-o", "PageSize=w288h288", "-o", "Resolution=203dpi", "-o", "lwDarkness=15",
+            "-o", "lwRotate180=True",
+        ]])
+        self.assertIn("„Lager“ auf LabelWerk-zd421t-203dpi.ppd.gz aktualisiert (4 Standardwerte übernommen)",
+                      result.stdout)
+
+    def test_queue_without_options_and_foreign_queues(self):
+        # Ohne *OpenUI-Optionen: lpadmin ohne „-o“ (leeres Feld unter „set -u“, auch in Bash 3.2).
+        (self.cups_ppd / "Schlicht.ppd").write_text(
+            '*PPD-Adobe: "4.3"\n*lwModel: "zd421t"\n*DefaultResolution: 203dpi\n', encoding="utf-8")
+        (self.cups_ppd / "Fremd.ppd").write_text(
+            '*PPD-Adobe: "4.3"\n*OpenUI *PageSize: PickOne\n*DefaultPageSize: A4\n', encoding="utf-8")
+        (self.cups_ppd / "Alt.ppd").write_text(
+            '*PPD-Adobe: "4.3"\n*lwModel: "entfallen"\n*DefaultResolution: 203dpi\n', encoding="utf-8")
+        result = run_refresh_queues(str(self.lpadmin), self.cups_ppd, self.ppds)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.lpadmin_calls(), [["-p", "Schlicht", "-P", str(self.new_ppd)]])
+        self.assertIn("„Alt“: keine passende neue PPD", result.stdout)
+        self.assertIn("1 Warteschlangen aktualisiert, 1 unverändert.", result.stdout)
+
+    def test_failing_lpadmin_leaves_queue_unchanged(self):
+        (self.cups_ppd / "Lager.ppd").write_text(QUEUE_PPD, encoding="utf-8")
+        write_executable(self.lpadmin, "#!/bin/sh\nexit 1\n")
+        result = run_refresh_queues(str(self.lpadmin), self.cups_ppd, self.ppds)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("konnte nicht aktualisiert werden", result.stdout)
+        self.assertIn("0 Warteschlangen aktualisiert, 1 unverändert.", result.stdout)
+
+
+def find_test_cupsd() -> Optional[Path]:
+    """cupsd für einen privaten Testserver: ``$LW_TEST_CUPSD`` oder ``/usr/sbin/cupsd`` (nicht macOS)."""
+    configured = os.environ.get("LW_TEST_CUPSD")
+    if configured:
+        return Path(configured)
+    if IS_MACOS:
+        return None  # den System-cupsd von macOS nicht für Tests zweckentfremden
+    candidate = Path("/usr/sbin/cupsd")
+    return candidate if candidate.exists() else None
+
+
+def find_lpadmin() -> Optional[str]:
+    found = shutil.which("lpadmin")
+    if found:
+        return found
+    return "/usr/sbin/lpadmin" if Path("/usr/sbin/lpadmin").exists() else None
+
+
+def free_tcp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+@unittest.skipUnless(find_test_cupsd(), "kein cupsd für einen privaten Testserver (LW_TEST_CUPSD)")
+@unittest.skipUnless(find_lpadmin(), "lpadmin fehlt (cups-client)")
+class QueueRefreshCupsdTests(unittest.TestCase):
+    """refresh_queues() gegen einen privaten cupsd mit echten LabelWerk-PPDs.
+
+    Regression: ``lpadmin -P`` allein ersetzt die PPD samt ihrer *Default-Zeilen – ein Update
+    setzte so Schwärzung, Etikettenformat usw. aller Warteschlangen zurück.
+    """
+
+    QUEUE = "LabelWerkTest"
+
+    def setUp(self):
+        # Aufräumen über addCleanup: läuft auch, wenn setUp scheitert oder den Test überspringt.
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-cupsd-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        os.chmod(self.tmp, 0o755)
+        self.lpadmin = find_lpadmin() or "lpadmin"
+        self.old_ppds = self.generate_ppds("old", "1.0.0")
+        self.new_ppds = self.generate_ppds("new", "9.9.9")
+        self.root = self.tmp / "cups"
+        for name in ("etc", "spool/tmp", "cache", "state", "bin", "share/mime", "log"):
+            (self.root / name).mkdir(parents=True)
+        # Minimale MIME-Datenbank; Filter braucht der Test nicht.
+        (self.root / "share" / "mime" / "mime.types").write_text(
+            "application/pdf pdf string(0,%PDF)\n"
+            "application/vnd.cups-raster string(0,\"RaSt\") string(0,\"tSaR\")\n", encoding="utf-8")
+        (self.root / "share" / "mime" / "mime.convs").write_text("", encoding="utf-8")
+        self.port = free_tcp_port()
+        self.write_config()
+        self.server: Optional[subprocess.Popen] = None
+        self.env = clean_env(CUPS_SERVER=f"127.0.0.1:{self.port}", LANG="C", LC_ALL="C")
+        self.start_cupsd()
+
+    def write_config(self):
+        if IS_ROOT:
+            # Als root wechselt cupsd für Hilfsprogramme zu User/Group (nie root).
+            user, group = "lp", "lp"
+            try:
+                pwd.getpwnam(user)
+                grp.getgrnam(group)
+            except KeyError:
+                user, group = "nobody", grp.getgrgid(pwd.getpwnam("nobody").pw_gid).gr_name
+        else:
+            user = pwd.getpwuid(os.getuid()).pw_name
+            group = grp.getgrgid(os.getgid()).gr_name
+        # SystemGroup muss sich von Group unterscheiden (sonst bricht cupsd ab); ohne Anmeldung
+        # in der Richtlinie oben spielt sie keine Rolle.
+        system_group = grp.getgrgid(0).gr_name
+        root = self.root
+        (root / "etc" / "cupsd.conf").write_text(f"""LogLevel debug
+Listen 127.0.0.1:{self.port}
+Browsing No
+WebInterface No
+DefaultAuthType None
+<Location />
+  Order allow,deny
+  Allow all
+</Location>
+<Policy default>
+  <Limit All>
+    Order deny,allow
+  </Limit>
+</Policy>
+""", encoding="utf-8")
+        (root / "etc" / "cups-files.conf").write_text(f"""ServerRoot {root}/etc
+RequestRoot {root}/spool
+TempDir {root}/spool/tmp
+CacheDir {root}/cache
+StateDir {root}/state
+ServerBin {root}/bin
+DataDir {root}/share
+ErrorLog {root}/log/error_log
+AccessLog {root}/log/access_log
+PageLog {root}/log/page_log
+Printcap {root}/printcap
+User {user}
+Group {group}
+SystemGroup {system_group}
+FileDevice No
+""", encoding="utf-8")
+
+    def error_log(self) -> str:
+        path = self.root / "log" / "error_log"
+        if not path.exists():
+            return ""
+        return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-40:])
+
+    def start_cupsd(self):
+        cupsd = find_test_cupsd()
+        assert cupsd is not None
+        # Eine Kopie des Programms: AppArmor-Profile (Ubuntu) gelten nur für /usr/sbin/cupsd.
+        binary = self.tmp / "cupsd"
+        shutil.copy2(cupsd, binary)
+        stderr_path = self.root / "log" / "stderr"
+        with open(stderr_path, "wb") as stderr_file:
+            self.server = subprocess.Popen(
+                [str(binary), "-f", "-c", str(self.root / "etc" / "cupsd.conf"),
+                 "-s", str(self.root / "etc" / "cups-files.conf")],
+                env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr_file)
+        self.addCleanup(self.stop_cupsd)
+        lpstat = shutil.which("lpstat") or "lpstat"
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if self.server.poll() is not None:
+                break
+            probe = run([lpstat, "-r"], env=self.env, timeout=10)
+            if "is running" in probe.stdout:
+                return
+            time.sleep(0.2)
+        self.stop_cupsd()
+        stderr = stderr_path.read_text(encoding="utf-8", errors="replace").strip()
+        self.skipTest(f"privater cupsd startet nicht: {stderr}\n{self.error_log()}")
+
+    def stop_cupsd(self):
+        if self.server is None:
+            return
+        if self.server.poll() is None:
+            self.server.terminate()
+            try:
+                self.server.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                self.server.kill()
+                self.server.wait()
+        self.server = None
+
+    def generate_ppds(self, name: str, version: str) -> Path:
+        output = self.tmp / name
+        result = run([sys.executable, str(REPO_ROOT / "Driver" / "ppd" / "generate_ppds.py"), "--model", "zd421t",
+                      "--gzip", "--output", str(output), "--file-version", version, "--quiet"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((output / "LabelWerk-zd421t-203dpi.ppd.gz").is_file())
+        return output
+
+    def create_queue(self, *options: str) -> Path:
+        """Legt die Warteschlange mit der alten PPD an (Vorbereitung, nicht der geprüfte Code)."""
+        args = ["-p", self.QUEUE, "-E", "-v", "file:///dev/null",
+                "-P", str(self.old_ppds / "LabelWerk-zd421t-203dpi.ppd.gz")]
+        for option in options:
+            args += ["-o", option]
+        result = run([self.lpadmin, *args], env=self.env, timeout=60)
+        if result.returncode != 0:
+            self.skipTest(f"privater cupsd legt keine Warteschlange an: {result.stderr.strip()}\n{self.error_log()}")
+        return self.root / "etc" / "ppd" / f"{self.QUEUE}.ppd"
+
+    def test_update_keeps_chosen_defaults(self):
+        queue_ppd = self.create_queue("PageSize=w288h288", "lwDarkness=15", "lwSpeed=4", "lwMediaType=DirectThermal")
+        before = ppd_defaults(queue_ppd)
+        self.assertEqual((before["PageSize"], before["lwDarkness"], before["lwSpeed"], before["lwMediaType"]),
+                         ("w288h288", "15", "4", "DirectThermal"))
+        self.assertIn('*FileVersion: "1.0.0"', queue_ppd.read_text(encoding="utf-8"))
+
+        result = run_refresh_queues(self.lpadmin, self.root / "etc" / "ppd", self.new_ppds, env=self.env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"„{self.QUEUE}“ auf LabelWerk-zd421t-203dpi.ppd.gz aktualisiert", result.stdout)
+
+        text = queue_ppd.read_text(encoding="utf-8")
+        self.assertIn('*FileVersion: "9.9.9"', text, "die Warteschlange nutzt die neue PPD")
+        after = ppd_defaults(queue_ppd)
+        for option in ("PageSize", "PageRegion", "Resolution", "lwDarkness", "lwSpeed", "lwMediaType"):
+            self.assertEqual(after.get(option), before.get(option), option)
+
+        # Die übernommenen Werte landen nur in der PPD, nicht als zusätzliche Warteschlangenoptionen.
+        self.stop_cupsd()
+        printers = (self.root / "etc" / "printers.conf").read_text(encoding="utf-8")
+        self.assertIn(f"<Printer {self.QUEUE}>", printers)
+        self.assertNotRegex(printers, r"(?m)^Option ")
+
+    def test_custom_page_size_survives(self):
+        queue_ppd = self.create_queue("PageSize=Custom.288x400")
+        self.assertEqual(ppd_defaults(queue_ppd)["PageSize"], "Custom.288x400")
+        result = run_refresh_queues(self.lpadmin, self.root / "etc" / "ppd", self.new_ppds, env=self.env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('*FileVersion: "9.9.9"', queue_ppd.read_text(encoding="utf-8"))
+        self.assertEqual(ppd_defaults(queue_ppd)["PageSize"], "Custom.288x400")
+
+    def test_values_unknown_to_new_ppd_fall_back_to_its_defaults(self):
+        queue_ppd = self.create_queue("lwSpeed=4")
+        # Alte PPD mit einer entfallenen Option und einer entfallenen Auswahl.
+        text = queue_ppd.read_text(encoding="utf-8").replace("*DefaultlwDarkness: Default", "*DefaultlwDarkness: 99")
+        text += "*OpenUI *lwEntfallen/Entfallen: PickOne\n*DefaultlwEntfallen: Ja\n*CloseUI: *lwEntfallen\n"
+        queue_ppd.write_text(text, encoding="utf-8")
+        result = run_refresh_queues(self.lpadmin, self.root / "etc" / "ppd", self.new_ppds, env=self.env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("1 Warteschlangen aktualisiert, 0 unverändert.", result.stdout)
+        text = queue_ppd.read_text(encoding="utf-8")
+        self.assertIn('*FileVersion: "9.9.9"', text)
+        self.assertNotIn("lwEntfallen", text)
+        after = ppd_defaults(queue_ppd)
+        self.assertEqual((after["lwDarkness"], after["lwSpeed"]), ("Default", "4"))
 
 
 # ------------------------------------------------------------------------------------------------

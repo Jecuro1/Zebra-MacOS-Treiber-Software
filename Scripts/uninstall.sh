@@ -177,8 +177,8 @@ if [[ "${PURGE_USER_DATA}" == "1" ]]; then
     # damit die Ausweichwege greifen.
     user_home=""
     if command -v dscl >/dev/null 2>&1; then
-        user_home="$(dscl /Search -read "/Users/${TARGET_USER}" NFSHomeDirectory 2>/dev/null \
-            | sed -n -e 's/^NFSHomeDirectory: //p' -e '/^NFSHomeDirectory:$/{n;s/^ //p;}' || true)"
+        dscl_record="$(dscl /Search -read "/Users/${TARGET_USER}" NFSHomeDirectory 2>/dev/null || true)"
+        user_home="$(printf '%s\n' "${dscl_record}" | sed -n -e 's/^NFSHomeDirectory: //p' -e '/^NFSHomeDirectory:$/{n;s/^ //p;}')"
     fi
     if [[ -z "${user_home}" ]] && command -v getent >/dev/null 2>&1; then
         user_home="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f6 || true)"

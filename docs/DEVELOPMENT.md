@@ -72,7 +72,11 @@ nur, wenn ein Python mit `zxing-cpp` und Pillow gefunden wird (`LABELWERK_ZXING_
 `PATH`), zwei Tests in `LabelWerkTransportTests`, die das Linux-Verhalten von `listen(…, 0)`
 voraussetzen, nur unter Linux. Die Konformitätstests in `Scripts/tests` benötigen ein gebautes
 `lwctl` und den Filter (`swift build --product lwctl`, `make -C Driver/filter tests`) – fehlen
-sie, werden sie übersprungen, mit `LW_REQUIRE_CONFORMANCE=1` schlagen sie dann fehl.
+sie, werden sie übersprungen, mit `LW_REQUIRE_CONFORMANCE=1` schlagen sie dann fehl. Ob
+`postinstall` beim Umstellen auf neue PPDs die Standardoptionen der Warteschlangen behält, prüft
+`QueueRefreshCupsdTests` gegen einen privaten `cupsd` (eigener Port und eigene Verzeichnisse, der
+System-Druckdienst bleibt unberührt) – nur unter Linux mit installiertem `/usr/sbin/cupsd`
+(Paket `cups-daemon`) oder mit `LW_TEST_CUPSD=/pfad/zu/cupsd`, sonst übersprungen.
 
 Speicherfehler im Filter findet `make -C Driver/filter asan` (AddressSanitizer + UBSan) bzw.
 `make -C Driver/filter valgrind`.
@@ -98,7 +102,9 @@ make uninstall-dev                  # Treiber wieder entfernen (App bleibt)
 ```
 
 `install-dev` nutzt dieselben `preinstall`/`postinstall`-Skripte wie das Paket und verändert
-keine bestehenden Systemordner. Ohne Drucker lässt sich ein Auftrag direkt prüfen: Der Filter
+keine bestehenden Systemordner; vorhandene LabelWerk-Warteschlangen behalten dabei ihre
+Standardoptionen (ein bloßes `lpadmin -p … -P neue.ppd.gz` setzt sie dagegen auf die Werte der
+neuen PPD zurück). Ohne Drucker lässt sich ein Auftrag direkt prüfen: Der Filter
 liest eine Rasterdatei und schreibt den Druckauftrag auf die Standardausgabe
 (`Driver/filter/tests/run_e2e.py` zeigt, wie Rasterdaten mit `mkraster` erzeugt werden).
 
@@ -222,6 +228,7 @@ LabelWerk-<Version>.pkg            productbuild-Archiv (Installer/pkg/distributi
 │   ├── preinstall                 alte Treiberversion und LabelWerk-PPDs entfernen
 │   └── postinstall                Rechte festziehen, Quarantäne entfernen, cupsd neu starten,
 │                                  vorhandene LabelWerk-Warteschlangen auf neue PPDs umstellen
+│                                  (lpadmin -P mit den *Default-Werten der alten PPD als -o)
 └── LabelWerkCLI.pkg               ohne Nutzlast; postinstall legt /usr/local/bin/lwctl an
 ```
 

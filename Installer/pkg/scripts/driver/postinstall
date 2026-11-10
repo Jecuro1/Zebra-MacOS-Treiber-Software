@@ -9,8 +9,10 @@
 #     weder für Gruppe noch für andere schreibbar sind (sonst „Filter … has insecure permissions“).
 #  2. Quarantäne-Attribute entfernen.
 #  3. Nur auf dem Startvolume: cupsd neu starten, damit Filter und PPDs sofort bekannt sind, und
-#     vorhandene LabelWerk-Warteschlangen auf die neuen PPDs aktualisieren. CUPS übernimmt dabei
-#     die bisher gewählten Standardoptionen der Warteschlange.
+#     vorhandene LabelWerk-Warteschlangen auf die neuen PPDs aktualisieren. „lpadmin -P“ übernimmt
+#     die Standardwerte der neuen PPD; die bisher gewählten Standardoptionen der Warteschlange
+#     (Schwärzung, Etikettenformat …) werden deshalb aus ihrer alten PPD gelesen und im selben
+#     Aufruf mit „-o“ wieder gesetzt. Werte, die die neue PPD nicht mehr kennt, verwirft lpadmin.
 #
 # Fehler beim Neustart oder Aktualisieren brechen die Installation nicht ab (der Treiber ist dann
 # trotzdem installiert); sie werden in /var/log/install.log protokolliert.
@@ -87,9 +89,43 @@ wait_for_scheduler() {
     return 1
 }
 
-# Aktualisiert Warteschlangen, deren PPD von LabelWerk stammt (*lwModel), auf die neue PPD.
+# Gibt die Standardwerte aller Optionen (*OpenUI) einer PPD aus, je Zeile „Option=Wert“.
+queue_defaults() {
+    awk '
+        { sub(/\r$/, "") }
+        /^\*OpenUI[ \t]+\*/ {
+            # „*OpenUI *PageSize/Media Size: PickOne“ → PageSize
+            name = $2
+            sub(/^\*/, "", name)
+            sub(/:.*$/, "", name)
+            slash = index(name, "/")
+            if (slash > 0) name = substr(name, 1, slash - 1)
+            if (name != "" && !(name in known)) { known[name] = 1; order[++count] = name }
+            next
+        }
+        /^\*Default[^ \t:]+:/ {
+            key = $0
+            sub(/^\*Default/, "", key)
+            sub(/:.*$/, "", key)
+            value = $0
+            sub(/^[^:]*:[ \t]*/, "", value)
+            sub(/[ \t].*$/, "", value)
+            if (!(key in defaults)) defaults[key] = value
+        }
+        END {
+            for (i = 1; i <= count; i++) {
+                name = order[i]
+                if ((name in defaults) && defaults[name] != "") print name "=" defaults[name]
+            }
+        }
+    ' "$1"
+}
+
+# Aktualisiert Warteschlangen, deren PPD von LabelWerk stammt (*lwModel), auf die neue PPD und
+# behält dabei ihre Standardoptionen (siehe oben).
 refresh_queues() {
-    local queue_ppd queue model dpi new_ppd updated=0 skipped=0
+    local queue_ppd queue model dpi new_ppd default carried updated=0 skipped=0
+    local -a carry
     [[ -d "${CUPS_PPD_DIR}" ]] || return 0
     for queue_ppd in "${CUPS_PPD_DIR}"/*.ppd; do
         [[ -f "${queue_ppd}" ]] || continue
@@ -103,8 +139,14 @@ refresh_queues() {
             skipped=$((skipped + 1))
             continue
         fi
-        if "${LPADMIN}" -p "${queue}" -P "${new_ppd}" >/dev/null 2>&1; then
-            log "Warteschlange „${queue}“ auf $(basename "${new_ppd}") aktualisiert."
+        carry=()
+        carried=0
+        while IFS= read -r default; do
+            carry+=(-o "${default}")
+            carried=$((carried + 1))
+        done < <(queue_defaults "${queue_ppd}")
+        if "${LPADMIN}" -p "${queue}" -P "${new_ppd}" ${carry[@]+"${carry[@]}"} >/dev/null 2>&1; then
+            log "Warteschlange „${queue}“ auf $(basename "${new_ppd}") aktualisiert (${carried} Standardwerte übernommen)."
             updated=$((updated + 1))
         else
             log "Warteschlange „${queue}“ konnte nicht aktualisiert werden (lpadmin-Fehler) – unverändert."

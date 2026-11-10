@@ -34,8 +34,12 @@ if [[ -e "${LINK}" || -L "${LINK}" ]]; then
     fi
 fi
 
-mkdir -p "${BIN_DIR}"
-chmod 755 "${BIN_DIR}" 2>/dev/null || true
+# Rechte nur für einen hier neu angelegten Ordner setzen: Ein vorhandenes /usr/local/bin (bei
+# Homebrew auf Intel-Macs <Benutzer>:admin 0775) bleibt, wie es ist.
+if [[ ! -d "${BIN_DIR}" ]]; then
+    mkdir -p "${BIN_DIR}"
+    chmod 755 "${BIN_DIR}" 2>/dev/null || true
+fi
 ln -s "${HELPER}" "${LINK}"
 log "${LINK} → ${HELPER}"
 exit 0

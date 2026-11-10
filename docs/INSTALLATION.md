@@ -84,7 +84,8 @@ Einfach das neuere Paket installieren. Vor der Installation entfernt das Paket d
 Treiberversion vollständig (auch PPDs inzwischen entfallener Modelle). Bereits eingerichtete
 LabelWerk-Warteschlangen bleiben erhalten und werden anschließend automatisch auf die neuen
 PPD-Dateien umgestellt; die gewählten Standardoptionen (Schwärzung, Geschwindigkeit,
-Etikettenformat …) bleiben dabei bestehen.
+Etikettenformat …) übernimmt das Paket dabei aus der bisherigen PPD der Warteschlange. Nur ein
+Wert, den die neue Treiberversion nicht mehr anbietet, fällt auf deren Standard zurück.
 
 Unter **Treiber & Warteschlangen** zeigt die App, ob der installierte Treiber zur App passt, und
 bietet **„Auf <Version> aktualisieren“** bzw. **„Erneut installieren“** (repariert Dateien und
@@ -226,7 +227,8 @@ kompletten Druckweg (CUPS → LabelWerk-Filter → Drucker).
 
 ```bash
 lpstat -t                                    # Druckdienst, Warteschlangen, Aufträge
-lpstat -l -o Versand                         # Aufträge mit Zustand/Fehlermeldung
+lpstat -l -o Versand                         # offene Aufträge mit Zustand/Fehlermeldung
+lpstat -W all -l -o Versand                  # auch abgebrochene und abgeschlossene Aufträge
 cupsenable Versand && cupsaccept Versand     # angehaltene Warteschlange wieder aktivieren
 ```
 

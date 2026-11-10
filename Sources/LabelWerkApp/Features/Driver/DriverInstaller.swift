@@ -404,7 +404,10 @@ final class DriverInstaller {
             "set -e",
             "/bin/mkdir -p \(q(ppdDirectory))",
             "/bin/rm -rf \(q(root))",
-            "/usr/bin/ditto \(q(sourceRoot)) \(q(root))",
+            // --noqtn: Quarantäne einer heruntergeladenen App nicht auf die Filter übertragen
+            // (cupsd würde sie sonst ggf. nicht ausführen); zusätzlich explizit entfernen.
+            "/usr/bin/ditto --noqtn \(q(sourceRoot)) \(q(root))",
+            "/usr/bin/xattr -dr com.apple.quarantine \(q(root)) 2>/dev/null || true",
             "/usr/sbin/chown -R root:wheel \(q(root))",
             "/usr/bin/find \(q(root)) -type d -exec /bin/chmod 755 {} +",
             "/usr/bin/find \(q(root)) -type f -exec /bin/chmod 644 {} +",
@@ -413,7 +416,7 @@ final class DriverInstaller {
             "/usr/bin/find \(q(root)) -type f -name '*.sh' -exec /bin/chmod 755 {} +",
             "/bin/rm -f \(q(ppdDirectory))/LabelWerk-*.ppd.gz \(q(ppdDirectory))/LabelWerk-*.ppd",
             "for f in \(q(sourcePPDs))/LabelWerk-*.ppd*; do if [ -e \"$f\" ]; then /bin/cp -f \"$f\" \(q(ppdDirectory))/; fi; done",
-            "for f in \(q(ppdDirectory))/LabelWerk-*.ppd*; do if [ -e \"$f\" ]; then /usr/sbin/chown root:wheel \"$f\"; /bin/chmod 644 \"$f\"; fi; done",
+            "for f in \(q(ppdDirectory))/LabelWerk-*.ppd*; do if [ -e \"$f\" ]; then /usr/sbin/chown root:wheel \"$f\"; /bin/chmod 644 \"$f\"; /usr/bin/xattr -d com.apple.quarantine \"$f\" 2>/dev/null || true; fi; done",
             restartCUPSCommand,
         ]
         return commands.joined(separator: "; ")
