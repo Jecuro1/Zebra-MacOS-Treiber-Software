@@ -1252,18 +1252,45 @@ def selftest() -> None:
     assert points_to_hundredths_mm(595.0) == 20990 and points_to_hundredths_mm(842.0) == 29704
     assert points_to_hundredths_mm(0.0) is None and points_to_hundredths_mm(float("nan")) is None
     label = Settings(label_width=10400, label_height=7620)
-    assert fit_plan(label, 10, 10, (595.0, 842.0), 203, 203) == (831, 609)
+    assert fit_plan(label, 10, 10, (595.0, 842.0), 203, 203) == (831, 609, 12, 12)
+    assert fit_plan(label, 10, 10, (595.0, 842.0), 300, 600) == (1228, 1800, 18, 35)
     assert fit_plan(label, 10, 10, (295.0, 216.0), 203, 203) is None            # w295h216 passt
     assert fit_plan(replace(label, rotation=90), 10, 10, (216.0, 295.0), 203, 203) is None
-    assert fit_plan(replace(label, rotation=270), 10, 10, (595.0, 842.0), 203, 203) == (609, 831)
+    assert fit_plan(replace(label, rotation=270), 10, 10, (595.0, 842.0), 203, 203) == (609, 831, 12, 12)
     assert fit_plan(replace(label, tracking="Continuous"), 10, 10, (295.0, 842.0), 203, 203) is None
-    assert fit_plan(replace(label, tracking="Continuous"), 10, 10, (595.0, 842.0), 203, 203) == (831, None)
+    assert fit_plan(replace(label, tracking="Continuous"), 10, 10, (595.0, 842.0), 203, 203) == (831, None, 12, 12)
     assert fit_plan(replace(label, fit_to_label="Off"), 10, 10, (595.0, 842.0), 203, 203) is None
     assert fit_plan(Settings(), 10, 10, (595.0, 842.0), 203, 203) is None
-    assert fit_target_size(100, 50, 200, 200) == (100, 50)
+    assert [fit_margin(d) for d in (152, 203, 254, 300, 600)] == [9, 12, 15, 18, 35]
+    assert fit_box(FitPlan(831, 609, 12, 12), 5, 5) == (807, 585)
+    assert fit_box(FitPlan(20, 30, 10, 14), 5, 5) == (20, 2)                     # Rand zu groß → ganze Seite
+    assert fit_box(FitPlan(831, None, 12, 12), 5, 40000) == (807, 40000)
+    assert fit_box(FitPlan(None, 609, 12, 12), 7, 5) == (32000, 585)
+    assert fit_target_size(100, 50, 200, 200) == (200, 100)                      # vergrößern
     assert fit_target_size(400, 100, 200, 200) == (200, 50)
     assert fit_target_size(100, 400, 200, 200) == (50, 200)
-    assert fit_target_size(3, 1000, 200, None) == (3, 1000) and fit_target_size(1000, 3, 200, None) == (200, 1)
+    assert fit_target_size(401, 3, 200, 200) == (200, 1)                         # 1,496 → 1
+    assert fit_target_size(3, 1000, 200, 32000) == (96, 32000)                   # freie Länge höchstens 32000
+    assert fit_target_size(1000, 3, 200, 32000) == (200, 1)
+    # Drehung: Bruchvergleich s90 > 1,1·s0 ⇔ Kurzform aus §8 (C/Swift), Richtung nach dem Inhalt
+    for _ in range(3000):
+        bw, bh = rng.randint(1, 60), rng.randint(1, 60)
+        plan = FitPlan(rng.randint(1, 80), rng.randint(1, 80), rng.randint(0, 9), rng.randint(0, 9))
+        iw, ih = fit_box(plan, bw, bh)
+        short = 90 if 10 * bh > 11 * bw and 10 * iw > 11 * ih else 270 if 10 * bw > 11 * bh and 10 * ih > 11 * iw else 0
+        assert fit_rotation(bw, bh, plan) == short, (bw, bh, plan)
+    assert fit_rotation(305, 416, FitPlan(831, 609, 12, 12)) == 90               # Fall aus der Meldung
+    assert fit_rotation(100, 110, FitPlan(831, 609, 12, 12)) == 0                # 10 % genügen nicht
+    assert fit_rotation(416, 305, FitPlan(812, 1218, 12, 12)) == 270             # quer auf 4 × 6 Zoll
+    assert fit_rotation(305, 416, FitPlan(831, None, 12, 12)) == 0               # freie Länge: nie drehen
+    for _ in range(50):
+        w, h = rng.randint(1, 9), rng.randint(1, 9)
+        img = bytes(rng.randint(0, 255) for _ in range(w * h))
+        cw_ = rotate_luminance(img, w, h, 90)
+        ccw = rotate_luminance(img, w, h, 270)
+        assert all(cw_[x * h + (h - 1 - y)] == img[y * w + x] for y in range(h) for x in range(w))
+        assert all(ccw[(w - 1 - x) * h + y] == img[y * w + x] for y in range(h) for x in range(w))
+        assert rotate_luminance(cw_, h, w, 270) == img
 
     def brute(lum, width, x0, y0, bw, bh, tw, th):
         out = bytearray()
@@ -1278,21 +1305,51 @@ def selftest() -> None:
                 out.append((acc + bw * bh // 2) // (bw * bh))
         return bytes(out)
 
-    for _ in range(60):
-        w, h = rng.randint(1, 23), rng.randint(1, 19)
+    for _ in range(90):                                                          # verkleinern und vergrößern
+        w, h = rng.randint(1, 17), rng.randint(1, 13)
         lum = bytes(rng.randint(0, 255) for _ in range(w * h))
         x0, y0 = rng.randint(0, w - 1), rng.randint(0, h - 1)
         bw, bh = rng.randint(1, w - x0), rng.randint(1, h - y0)
-        tw, th = rng.randint(1, bw), rng.randint(1, bh)
+        tw, th = rng.randint(1, 2 * bw + 3), rng.randint(1, 2 * bh + 3)
         assert area_average(lum, w, x0, y0, bw, bh, tw, th) == brute(lum, w, x0, y0, bw, bh, tw, th)
+    assert area_average(bytes([0, 255]), 2, 0, 0, 2, 1, 4, 1) == bytes([0, 0, 255, 255])   # ganzzahlig: Kopien
+    assert area_average(bytes([0, 255]), 2, 0, 0, 2, 1, 3, 1) == bytes([0, 128, 255])
     page = bytes([255] * 50 + [255, 0, 255, 255, 100] + [255] * 45)          # 10 × 10, Inhalt in Zeile 5
     assert content_bounds(page, 10, 10) == (1, 5, 4, 1)
     assert content_bounds(bytes([250] * 12), 4, 3) is None and content_bounds(bytes([249]), 1, 1) == (0, 0, 1, 1)
+    # 254 dpi: Rand 15 Punkte ist größer als das Etikett (10 × 10) → ganze Seite; 4 × 1 → 10 × 3 an (0, 3)
     w, h, out = fit_page(page, 10, 10, Settings(label_width=100, label_height=100), (500.0, 500.0), 254, 254)
-    assert (w, h) == (10, 10) and out[4 * 10 + 3:4 * 10 + 7] == bytes([0, 255, 255, 100])   # mittig: (3, 4)
+    assert (w, h) == (10, 10) and out[:30] == b"\xff" * 30 and out[60:] == b"\xff" * 40
+    assert out[30:60] == area_average(page, 10, 1, 5, 4, 1, 10, 3)
     assert fit_page(bytes([255] * 4), 2, 2, Settings(label_width=100, label_height=100), (500.0, 500.0),
                     254, 254) == (10, 10, b"\xff" * 100)
 
+    def label_image(w, h):
+        """Etikett mit schwarzem Rahmen (Inhaltsrahmen = ganzes Bild) und Marke oben links."""
+        return bytes(0 if x in (0, w - 1) or y in (0, h - 1) or (x < 6 and y < 5) else rng.randint(0, 255)
+                     for y in range(h) for x in range(w))
+
+    def on_page(img, w, h, pw, ph):
+        lum = bytearray(b"\xff" * (pw * ph))
+        ox, oy = (pw - w) // 2, (ph - h) // 2
+        for y in range(h):
+            lum[(oy + y) * pw + ox:(oy + y) * pw + ox + w] = img[y * w:(y + 1) * w]
+        return bytes(lum)
+
+    # Meldung: halb so großes, gegen den Uhrzeigersinn gedrehtes Etikett mitten auf A4 hoch → aufrecht,
+    # 10-fach (Etikett 43 × 33 mm bei 254 dpi, Rand 1,5 mm: 400 × 300 Punkte Inhalt bei (15, 15)).
+    upright = label_image(40, 30)
+    page = on_page(rotate_luminance(upright, 40, 30, 270), 30, 40, 120, 160)
+    w, h, out = fit_page(page, 120, 160, Settings(label_width=4300, label_height=3300), (595.0, 842.0), 254, 254)
+    assert (w, h) == (430, 330)
+    assert all(out[(15 + y) * 430 + 15 + x] == upright[(y // 10) * 40 + x // 10] for y in range(300) for x in range(400))
+    assert content_bounds(out, w, h) == (15, 15, 400, 300)
+    # Querformat-Inhalt (im Uhrzeigersinn gedrehtes Hochformat-Etikett) auf Hochformat-Etikett → zurück
+    tall = label_image(30, 40)
+    page = on_page(rotate_luminance(tall, 30, 40, 90), 40, 30, 160, 120)
+    w, h, out = fit_page(page, 160, 120, Settings(label_width=3300, label_height=4300), (842.0, 595.0), 254, 254)
+    assert (w, h) == (330, 430)
+    assert all(out[(15 + y) * 330 + 15 + x] == tall[(y // 10) * 30 + x // 10] for y in range(400) for x in range(300))
 
 __all__ = [
     "Bitmap", "Settings", "DITHERS", "dither", "luminance_from_samples", "luminance_line",
@@ -1302,7 +1359,7 @@ __all__ = [
     "label_sequence", "preprocess", "resolve_collate", "parse_copies", "selftest", "rotate_quarter",
     "last_black_row", "with_height", "set_time_line", "LINERLESS_SGD", "STANDARD_CONTROL_CHARS",
     "points_to_hundredths_mm", "fit_plan", "content_bounds", "fit_target_size", "area_average", "fit_page",
-    "fit_images", "LABEL_SIZE_MAX",
+    "fit_images", "LABEL_SIZE_MAX", "FitPlan", "fit_margin", "fit_box", "fit_rotation", "rotate_luminance",
 ]
 
 
