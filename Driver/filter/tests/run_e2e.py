@@ -382,6 +382,16 @@ class Runner:
         seq = ref.label_sequence(len(pages), ctx.copies, ctx.collate)
         expected = [(pages[i][0], q) for i, q in seq]
         actual = [(int(a), int(b)) for a, b in re.findall(r"^PAGE: (\d+) (\d+)$", stderr, re.M)]
+        if any(",h=0" in page or page.startswith("h=0") for page in ctx.case.pages):
+            # Seiten mit Höhe 0: Ob libcups sie liefert (macOS) oder vorher abbricht/überspringt
+            # (Linux, CUPS 2.3/2.4), ist versionsabhängig. Liefert sie libcups, zählt der Filter sie
+            # in der Rasterseitennummer mit (z. B. 1, 3). Geprüft werden daher Mengen und die
+            # streng steigende Reihenfolge, nicht die absolute Nummer.
+            numbers = [n for n, _ in actual]
+            self.check([q for _, q in actual] == [q for _, q in expected]
+                       and all(a < b for a, b in zip(numbers, numbers[1:])),
+                       "PAGE-Meldungen %r, erwartet Mengen %r" % (actual[:8], [q for _, q in expected][:8]), errors)
+            return
         self.check(actual == expected, "PAGE-Meldungen %r, erwartet %r" % (actual[:8], expected[:8]), errors)
 
     def verify_zpl_graphics(self, ctx: Context, output: bytes, errors: List[str]):
