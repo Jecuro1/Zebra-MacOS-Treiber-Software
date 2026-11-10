@@ -937,6 +937,25 @@ def fit_cases() -> List[Case]:
              dict(label, lwLanguage="CPCL")))
     add(Case("anpassen-negativ-spiegeln-180", [sized_page(*a4, extra=corner)],
              dict(label, lwNegative="True", lwMirror="True", lwRotation="180", lwLanguage="EPL")))
+    # Drehen, Vergrößern, Rand (Fall aus der Meldung: halb so großes Etikett, von macOS gegen den
+    # Uhrzeigersinn gedreht, mitten auf A4 hoch → aufrecht und formatfüllend abzüglich 1,5 mm)
+    cw_note, ccw_note = ["im Uhrzeigersinn gedreht"], ["gegen den Uhrzeigersinn gedreht"]
+    add(Case("anpassen-a4-halb-gedreht-meldung", [sized_page(*a4, extra="pattern=text,seed=5,bx=686,by=979,"
+                                                                       "bw=305,bh=416")],
+             dict(label, lwCompression="Z64"), stderr_has=note + cw_note, quick=True))
+    add(Case("anpassen-a4-halb-gedreht-EPL", [sized_page(*a4, extra="pattern=bars,bx=686,by=979,bw=305,bh=416")],
+             dict(label, lwLanguage="EPL", lwDither="Stucki"), stderr_has=cw_note))
+    add(Case("anpassen-4x6-quer-inhalt", [sized_page(*letter, extra="pattern=text,seed=3,bx=100,by=200,"
+                                                                    "bw=1000,bh=600")],
+             {"lwLabelWidth": "10160", "lwLabelHeight": "15240"}, stderr_has=ccw_note))
+    add(Case("anpassen-a4-klein-vergroessert", [sized_page(*a4, extra="pattern=checker,bx=40,by=50,bw=200,bh=150")],
+             dict(label, lwDither="Ordered"), stderr_lacks=cw_note + ccw_note))
+    add(Case("anpassen-600dpi-gedreht", [sized_page(200.0, 150.0, dpi=600, extra="pattern=text,seed=9,bx=300,"
+                                                                                  "by=200,bw=500,bh=800")],
+             {"lwLabelWidth": "5000", "lwLabelHeight": "3000", "lwCompression": "ACS"}, stderr_has=cw_note))
+    add(Case("anpassen-endlos-vergroessert", [sized_page(*a4, extra="pattern=bars,bx=30,by=100,bw=300,bh=400")],
+             {"lwLabelWidth": "8000", "lwMediaTracking": "Continuous", "lwRotation": "90"},
+             stderr_lacks=cw_note + ccw_note))
     # Unverändert: passende Seite (± 2 mm), Off, kein Etikett, PPD-Standard Off
     add(Case("anpassen-passend-unveraendert", [sized_page(296.0, 218.0, extra="pattern=text,seed=6")], label,
              expect=unfitted, stderr_lacks=note, quick=True))

@@ -94,8 +94,15 @@ UTILITY_PATH = "/Applications/LabelWerk.app"
 COLOR_MODEL_CODE = (
     "<</cupsColorSpace 18/cupsBitsPerColor 8/cupsColorOrder 0/cupsCompression 0>>setpagedevice"
 )
-#: Hersteller im ``*1284DeviceID`` (USB-Gerätekennung der Zebra-Drucker).
+#: Hersteller im ``*1284DeviceID`` (USB-/SNMP-Gerätekennung der Zebra-Drucker). Link-OS-Drucker
+#: melden ihn mit Leerzeichen vor dem Semikolon (``MANUFACTURER:Zebra Technologies ;``), ältere
+#: Geräte ohne (Belege in README.md „Gerätezuordnung“).
 IEEE1284_MANUFACTURER = "Zebra Technologies"
+#: Ausstattung der Link-OS-Drucker im Katalog (``features``).
+LINK_OS_FEATURE = "linkOS"
+#: Baureihen, deren Drucker als ``MODEL:`` den Variantennamen ohne Auflösung melden
+#: (``ZTC GX420d`` statt ``ZTC GX420-203dpi ZPL``; Beleg: Treibertabelle von LPrint).
+IEEE1284_PLAIN_MODEL_FAMILIES = ("GX",)
 
 #: Kleinste eigene Seitengröße (Breite × Höhe) in Punkten: 0,5 × 0,25 Zoll.
 CUSTOM_MIN_WIDTH_PT = 36.0
@@ -159,7 +166,7 @@ PRINT_MODE_CUPS = {
 LINERLESS_PRINT_MODES = ("linerlessPeel", "linerlessCut", "linerlessDelayedCut", "linerlessRewind",
                          "linerlessTear")
 LINERLESS_FEATURE = "linerless"
-#: ``CMD:``-Kürzel im IEEE-1284-Geräte-String.
+#: ``COMMAND SET:``-Kürzel im IEEE-1284-Geräte-String.
 LANGUAGE_IEEE1284 = {"zpl": "ZPL", "epl": "EPL2", "cpcl": "CPCL"}
 #: Anzeigenamen der generischen PPDs.
 GENERIC_NAMES = {"zpl": "Generic ZPL", "epl": "Generic EPL2", "cpcl": "Generic CPCL"}
@@ -845,12 +852,13 @@ class Target:
     print_modes: Tuple[str, ...]     # Rohwerte
     default_stock: Stock
     page_sizes: Tuple[PageSize, ...]
-    ieee1284_model: Optional[str]    # ``MDL:``-Wert oder ``None``
+    ieee1284_model: Optional[str]    # ``MODEL:``-Wert oder ``None``
     ieee1284_names: Tuple[str, ...]  # alle IEEE-1284-Namen des Modells (für ``*Product``)
     model_number: int
     is_generic: bool
     pc_file_name: str = ""
     linerless: bool = False          # Ausstattung „linerless“ (Linerless-Modi in ZPL)
+    link_os: bool = False            # Ausstattung „linkOS“ (Herstellername mit Leerzeichen)
 
     @property
     def stem(self) -> str:
@@ -885,12 +893,19 @@ class Target:
 
     @property
     def device_id(self) -> Optional[str]:
-        """``*1284DeviceID`` oder ``None`` (generische PPDs)."""
+        """``*1284DeviceID`` oder ``None`` (generische PPDs).
+
+        Mit denselben Schlüsselnamen und in derselben Reihenfolge, wie Zebra-Drucker ihre
+        Gerätekennung per USB, SNMP und ``^HZA`` melden (``MANUFACTURER:…;COMMAND SET:…;MODEL:…;``):
+        CUPS (``cups-driverd``, ``regex_device_id``) vergleicht die Schlüssel wörtlich – mit
+        ``MFG:``/``MDL:`` fände macOS die PPD für ``MANUFACTURER:``/``MODEL:`` nicht.
+        """
         if not self.ieee1284_model:
             return None
         commands = ",".join(LANGUAGE_IEEE1284[lang] for lang in self.languages)
-        return (f"MFG:{IEEE1284_MANUFACTURER};CMD:{commands};"
-                f"MDL:{self.ieee1284_model};CLS:PRINTER;")
+        manufacturer = IEEE1284_MANUFACTURER + (" " if self.link_os else "")
+        return (f"MANUFACTURER:{manufacturer};COMMAND SET:{commands};"
+                f"MODEL:{self.ieee1284_model};CLASS:PRINTER;")
 
     @property
     def products(self) -> List[str]:
@@ -968,13 +983,15 @@ class Target:
                 raise CatalogError(f"{self.stem}: Format „{page.stock.id}“: {exc}") from exc
 
 
-def select_ieee1284_model(entries: Sequence[str], dpi: int) -> Optional[str]:
-    """Wählt den ``MDL:``-Wert für eine Auflösung.
+def select_ieee1284_model(entries: Sequence[str], dpi: int, prefer_plain: bool = False) -> Optional[str]:
+    """Wählt den ``MODEL:``-Wert für eine Auflösung.
 
     Reihenfolge: (1) ``ZTC …``-Eintrag mit passender Auflösung (``-203dpi``), (2) erster
     ``ZTC …``-Eintrag ohne Auflösungsangabe, (3) erster sonstige Eintrag ohne fremde Auflösung
     (``ZDesigner …`` sind Windows-Treibernamen und werden übersprungen), (4) erster Eintrag.
     Damit ordnet macOS einen „ZTC ZD421-300dpi ZPL“ automatisch der 300-dpi-PPD zu.
+    ``prefer_plain`` (Baureihen aus ``IEEE1284_PLAIN_MODEL_FAMILIES``) tauscht (1) und (2): Diese
+    Drucker melden den Variantennamen ohne Auflösung (``ZTC GX420d``).
     """
     if not entries:
         return None
@@ -985,12 +1002,11 @@ def select_ieee1284_model(entries: Sequence[str], dpi: int) -> Optional[str]:
         return int(match.group(1)) if match else None
 
     ztc = [e for e in entries if e.upper().startswith("ZTC ")]
-    for entry in ztc:
-        if resolution_of(entry) == dpi:
-            return entry
-    for entry in ztc:
-        if resolution_of(entry) is None:
-            return entry
+    with_dpi = [e for e in ztc if resolution_of(e) == dpi]
+    plain = [e for e in ztc if resolution_of(e) is None]
+    for group in ((plain, with_dpi) if prefer_plain else (with_dpi, plain)):
+        if group:
+            return group[0]
     for entry in entries:
         if not entry.lower().startswith("zdesigner") and resolution_of(entry) in (None, dpi):
             return entry
@@ -1063,11 +1079,13 @@ def build_targets(catalog: Catalog) -> List[Target]:
                 print_modes=model.print_modes,
                 default_stock=default_stock,
                 page_sizes=page_sizes_for(catalog, model.print_width_mm, model.max_label_length_mm, default_stock),
-                ieee1284_model=select_ieee1284_model(model.ieee1284, dpi),
+                ieee1284_model=select_ieee1284_model(
+                    model.ieee1284, dpi, prefer_plain=model.family in IEEE1284_PLAIN_MODEL_FAMILIES),
                 ieee1284_names=model.ieee1284,
                 model_number=index + 1,
                 is_generic=False,
                 linerless=LINERLESS_FEATURE in model.features,
+                link_os=LINK_OS_FEATURE in model.features,
             ))
     for index, (language, dpi) in enumerate(GENERIC_TARGETS):
         targets.append(build_generic_target(catalog, language, dpi, GENERIC_MODEL_NUMBER_BASE + index + 1))

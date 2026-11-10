@@ -8,7 +8,8 @@ import LabelWerkCore
 /// und einer über CUPS sind dadurch byte-gleich.
 ///
 /// Vor dem Rastern (nur ``encode(images:pageSizes:copies:collate:)``): Schritt F „An Etikett
-/// anpassen“ (``LabelFit``) für Seiten, deren Größe nicht zum Etikett passt.
+/// anpassen“ (``LabelFit``) für Seiten, deren Größe nicht zum Etikett passt – Inhalt zuschneiden,
+/// bei Bedarf um 90° drehen, auf das Etikett abzüglich 1,5 mm Rand skalieren, mittig setzen.
 ///
 /// Ablauf je Seite (Vorverarbeitung):
 /// 0. Wirksame Drehung (``PrintSettings/effectiveRotation``) 90° bzw. 270° → Bitmap im
@@ -133,7 +134,8 @@ public struct JobEncoder: Sendable {
 
     /// Schritt F aus §8 für ein Bild: legt eine Seite, deren Größe (`pageSize`, Punkte) um mehr als
     /// 2 mm vom Etikett (`settings.labelWidthHundredthsMM` × `labelHeightHundredthsMM`) abweicht,
-    /// auf das Etikett (Auflösung des Encoders in beide Richtungen). Sonst unverändert.
+    /// auf das Etikett (Auflösung des Encoders in beide Richtungen; Inhalt ggf. gedreht und
+    /// vergrößert bzw. verkleinert, 1,5 mm Rand). Sonst unverändert.
     public func fitted(_ image: GrayImage, pageSize: PageSizePoints?) -> GrayImage {
         guard let plan = LabelFit.plan(settings: settings, pageSize: pageSize, xDPI: resolution.dpi,
                                        yDPI: resolution.dpi, imageWidth: image.width, imageHeight: image.height)

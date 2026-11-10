@@ -12,7 +12,9 @@
  *      volle Seitenbreite rastern und auf die Druckbreite abschneiden. Weicht die Seitengröße
  *      (cupsPageSize) um mehr als 2 mm vom Etikett der Warteschlange ab (lwLabelWidth/
  *      lwLabelHeight, lwFitToLabel=Auto), wird die Seite zuerst ganz gelesen und an das Etikett
- *      angepasst (§8 „F“, lw_fit) – sonst zeilenweise ohne Seitenpuffer.
+ *      angepasst (§8 „F“, lw_fit: Inhalt zuschneiden, bei Bedarf um 90° drehen, auf das Etikett
+ *      abzüglich 1,5 mm Rand vergrößern bzw. verkleinern, mittig setzen) – sonst zeilenweise ohne
+ *      Seitenpuffer.
  *   3. Seiten byte-genau nach §8 kodieren (lw_job) und nach stdout schreiben.
  *
  * Meldungen an CUPS auf stderr: "INFO:", "WARNING:", "ERROR:", "DEBUG:", "PAGE: n m".
@@ -394,14 +396,16 @@ static page_result process_page(cups_raster_t *ras, const cups_page_header2_t *h
         memcpy(image + (size_t)y * (size_t)width, lum, (size_t)width);
     }
     uint8_t *fitted = NULL;
-    int fitted_w = 0, fitted_h = 0;
+    int fitted_w = 0, fitted_h = 0, turn = LW_FIT_TURN_NONE;
     row_source buffered = stream;
     page_result result;
-    if (lw_fit_apply(&plan, image, width, height, &fitted, &fitted_w, &fitted_h)) {
+    if (lw_fit_apply(&plan, image, width, height, &fitted, &fitted_w, &fitted_h, &turn)) {
         lw_log(log, LW_LOG_INFO,
                "Seite %d (%.0f × %.0f mm) passt nicht zum Etikett – der Inhalt wird automatisch auf "
-               "das Etikett gelegt (%d × %d Punkte).",
-               page_number, page_w * 25.4 / 72.0, page_h * 25.4 / 72.0, fitted_w, fitted_h);
+               "das Etikett gelegt (%d × %d Punkte%s).",
+               page_number, page_w * 25.4 / 72.0, page_h * 25.4 / 72.0, fitted_w, fitted_h,
+               turn == LW_FIT_TURN_CW ? ", um 90° im Uhrzeigersinn gedreht"
+               : turn == LW_FIT_TURN_CCW ? ", um 90° gegen den Uhrzeigersinn gedreht" : "");
         free(image);
         buffered.image = fitted;
         buffered.image_stride = (size_t)fitted_w;
