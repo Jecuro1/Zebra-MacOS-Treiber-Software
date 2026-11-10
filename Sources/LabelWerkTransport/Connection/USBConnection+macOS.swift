@@ -223,7 +223,7 @@ final class USBPrinterSession: @unchecked Sendable {
 
             let started = ContinuousClock.now
             let result = Self.transfer { (count: UnsafeMutablePointer<Int>) in
-                try outPipe.sendIORequest(with: buffer, bytesTransferred: count, completionTimeout: Self.slice)
+                try outPipe.__sendIORequest(with: buffer, bytesTransferred: count, completionTimeout: Self.slice)
             }
             let elapsed = started.duration(to: .now).timeInterval
             let transferred = max(0, min(result.count, end - offset))
@@ -260,7 +260,7 @@ final class USBPrinterSession: @unchecked Sendable {
             let requested = min(remaining, Self.slice)
             let started = ContinuousClock.now
             let result = Self.transfer { (count: UnsafeMutablePointer<Int>) in
-                try inPipe.sendIORequest(with: buffer, bytesTransferred: count, completionTimeout: requested)
+                try inPipe.__sendIORequest(with: buffer, bytesTransferred: count, completionTimeout: requested)
             }
             let elapsed = started.duration(to: .now).timeInterval
             let received = max(0, min(result.count, buffer.length))
@@ -281,7 +281,8 @@ final class USBPrinterSession: @unchecked Sendable {
 
     /// Führt eine IOUSBHost-Übertragung aus und liefert die übertragene Byteanzahl – auch im Fehlerfall.
     ///
-    /// `NSUInteger *` wird in Swift als `UnsafeMutablePointer<Int>` importiert.
+    /// `NSUInteger *` wird in Swift als `UnsafeMutablePointer<Int>` importiert. Die synchrone
+    /// Bulk-Methode ist `NS_REFINED_FOR_SWIFT` und erscheint daher als `__sendIORequest`.
     private static func transfer(
         _ body: (UnsafeMutablePointer<Int>) throws -> Void
     ) -> (count: Int, error: Error?) {
