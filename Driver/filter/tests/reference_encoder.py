@@ -33,8 +33,7 @@ import sys
 import time
 import zlib
 from dataclasses import dataclass, field, replace
-from fractions import Fraction
-from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 # --------------------------------------------------------------------------------------------
 # §4.1 Rasterung
@@ -976,16 +975,6 @@ FIT_CONTENT_LEVEL = 250        # Inhalt ⇔ L < 250
 FIT_TOLERANCE = 200            # 1/100 mm (2 mm)
 FIT_MAX_DOTS = 32000
 FIT_MAX_PAGE_POINTS = 100000.0
-FIT_MARGIN = 150               # 1/100 mm Sicherheitsrand je Seite (1,5 mm)
-
-
-class FitPlan(NamedTuple):
-    """Schritt F.1: Etikett ``W × H`` in Punkten der Seite (None = frei) und Sicherheitsrand je Seite
-    (``mx`` links/rechts, ``my`` oben/unten)."""
-    width: Optional[int]
-    height: Optional[int]
-    margin_x: int = 0
-    margin_y: int = 0
 
 
 def points_to_hundredths_mm(points: float) -> Optional[int]:
@@ -995,14 +984,9 @@ def points_to_hundredths_mm(points: float) -> Optional[int]:
     return int(math.floor(points * 2540.0 / 72.0 + 0.5))
 
 
-def fit_margin(dpi: int) -> int:
-    """1,5 mm in Punkten, kaufmännisch gerundet: (150 · dpi + 1270) // 2540."""
-    return (FIT_MARGIN * dpi + 1270) // 2540
-
-
 def fit_plan(s: Settings, width: int, height: int, page_size: Optional[Tuple[float, float]],
-             xdpi: int, ydpi: int) -> Optional[FitPlan]:
-    """Schritt F.1: Etikett (W, H) in Punkten (None = freie Seite) mit Rand oder None = keine Anpassung."""
+             xdpi: int, ydpi: int) -> Optional[Tuple[Optional[int], Optional[int]]]:
+    """Schritt F.1: Zielgröße (W, H) in Punkten (None = freie Seite) oder None = keine Anpassung."""
     if s.fit_to_label != "Auto" or s.label_width <= 0 or page_size is None or width <= 0 or height <= 0:
         return None
     page_w, page_h = (points_to_hundredths_mm(v) for v in page_size)
@@ -1021,49 +1005,7 @@ def fit_plan(s: Settings, width: int, height: int, page_size: Optional[Tuple[flo
     for value in (target_w, target_h):
         if value is not None and not 1 <= value <= FIT_MAX_DOTS:
             return None
-    return FitPlan(target_w, target_h, fit_margin(xdpi), fit_margin(ydpi))
-
-
-def _inner(side: int, margin: int) -> int:
-    """Feste Etikettenseite abzüglich Rand auf beiden Seiten (zu klein → ganze Seite)."""
-    inner = side - 2 * margin
-    return inner if inner >= 1 else side
-
-
-def fit_box(plan: FitPlan, rw: int, rh: int) -> Tuple[int, int]:
-    """Schritt F.4: Zielrahmen (BW, BH) für Inhalt ``rw × rh`` – feste Seite W − 2·mx bzw. H − 2·my,
-    freie Seite max(Inhalt, 32000)."""
-    box_w = _inner(plan.width, plan.margin_x) if plan.width is not None else max(rw, FIT_MAX_DOTS)
-    box_h = _inner(plan.height, plan.margin_y) if plan.height is not None else max(rh, FIT_MAX_DOTS)
-    return box_w, box_h
-
-
-def fit_rotation(bw: int, bh: int, plan: FitPlan) -> int:
-    """Schritt F.3: 90 (im Uhrzeigersinn), 270 (gegen den Uhrzeigersinn) oder 0.
-
-    Gedreht wird nur bei festem Etikett und nur, wenn der Inhalt gedreht mehr als 10 % größer
-    würde: s90 > 1,1 · s0 mit s0 = min(W'/bw, H'/bh), s90 = min(W'/bh, H'/bw) – als Brüche exakt
-    ausgewertet (die Gleichwertigkeit mit der Kurzform in C/Swift prüft ``selftest``)."""
-    if plan.width is None or plan.height is None:
-        return 0
-    inner_w, inner_h = fit_box(plan, bw, bh)
-    s0 = min(Fraction(inner_w, bw), Fraction(inner_h, bh))
-    s90 = min(Fraction(inner_w, bh), Fraction(inner_h, bw))
-    if s90 * 10 <= s0 * 11:
-        return 0
-    return 90 if bh > bw else 270           # Hochformat-Inhalt auf Querformat-Etikett → rechts herum
-
-
-def rotate_luminance(lum: bytes, width: int, height: int, turn: int) -> bytes:
-    """Dreht ein Luminanzbild (``width × height``, zeilenweise) um 90° (im Uhrzeigersinn:
-    (x, y) → (height − 1 − y, x)) oder 270° ((x, y) → (y, width − 1 − x)); Ergebnis height × width."""
-    if turn == 90:
-        rows = [lum[x::width][::-1] for x in range(width)]               # neue Zeile x: Spalte x von unten
-    elif turn == 270:
-        rows = [lum[x::width] for x in range(width - 1, -1, -1)]         # neue Zeile: Spalte w−1−… von oben
-    else:
-        raise ValueError("Drehung %r" % turn)
-    return b"".join(bytes(row) for row in rows)
+    return target_w, target_h
 
 
 _CONTENT_TABLE = bytes(1 if v < FIT_CONTENT_LEVEL else 0 for v in range(256))
@@ -1087,12 +1029,23 @@ def content_bounds(lum: bytes, width: int, height: int) -> Optional[Tuple[int, i
     return left, top, right - left + 1, bottom - top + 1
 
 
-def fit_target_size(rw: int, rh: int, box_w: int, box_h: int) -> Tuple[int, int]:
-    """Schritt F.4: größte Größe mit dem Seitenverhältnis von ``rw × rh`` im Rahmen ``box_w × box_h``
-    (vergrößern und verkleinern; die abhängige Seite kaufmännisch gerundet, mindestens 1)."""
-    if box_w * rh <= box_h * rw:
-        return box_w, max(1, (2 * rh * box_w + rw) // (2 * rw))
-    return max(1, (2 * rw * box_h + rh) // (2 * rh)), box_h
+def fit_target_size(bw: int, bh: int, target_w: Optional[int], target_h: Optional[int]) -> Tuple[int, int]:
+    """Schritt F.3: nie vergrößern, Seitenverhältnis behalten (gerundet, mindestens 1)."""
+    def scaled_h() -> int:
+        return max(1, (2 * bh * target_w + bw) // (2 * bw))
+
+    def scaled_w() -> int:
+        return max(1, (2 * bw * target_h + bh) // (2 * bh))
+
+    if target_w is not None and target_h is not None:
+        if bw <= target_w and bh <= target_h:
+            return bw, bh
+        if target_w * bh <= target_h * bw:
+            return target_w, scaled_h()
+        return scaled_w(), target_h
+    if target_w is not None:
+        return (bw, bh) if bw <= target_w else (target_w, scaled_h())
+    return (bw, bh) if bh <= target_h else (scaled_w(), target_h)
 
 
 def _axis_spans(source: int, target: int) -> List[Tuple[int, int, List[Tuple[int, int]]]]:
@@ -1113,9 +1066,8 @@ def _axis_spans(source: int, target: int) -> List[Tuple[int, int, List[Tuple[int
 
 
 def area_average(lum: bytes, width: int, x0: int, y0: int, bw: int, bh: int, tw: int, th: int) -> bytes:
-    """Schritt F.5: Flächenmittel des Ausschnitts (x0, y0, bw, bh) auf tw × th – verkleinern **und**
-    vergrößern (je Achse unabhängig): exakte Summe der Teilflächen, einmal gerundet: (S + T/2) / T
-    mit T = bw·bh."""
+    """Schritt F.4: Flächenmittel des Ausschnitts (x0, y0, bw, bh) auf tw × th – exakte Summe der
+    Teilflächen, einmal gerundet: (S + T/2) / T mit T = bw·bh."""
     rows = [lum[(y0 + y) * width + x0:(y0 + y) * width + x0 + bw] for y in range(bh)]
     if tw == bw and th == bh:
         return b"".join(rows)
@@ -1135,10 +1087,11 @@ def area_average(lum: bytes, width: int, x0: int, y0: int, bw: int, bh: int, tw:
         acc = [0] * tw
         contributions = [(y, th) for y in range(a, b)] + edges
         for y, weight in contributions:
-            acc = [value + weight * part for value, part in zip(acc, horizontal(y))]
+            sums = horizontal(y)
+            for X in range(tw):
+                acc[X] += weight * sums[X]
         out += bytes((value + total // 2) // total for value in acc)
-        # Spätere Zielzeilen brauchen nur Quellzeilen ab der letzten hier benutzten (beim Vergrößern
-        # dieselbe Quellzeile für mehrere Zielzeilen, beim Verkleinern höchstens die Randzeile).
+        # Eine Quellzeile gehört zu höchstens zwei aufeinanderfolgenden Zielzeilen.
         last = max(y for y, _ in contributions)
         for key in [key for key in cache if key < last]:
             del cache[key]
@@ -1151,21 +1104,16 @@ def fit_page(lum: bytes, width: int, height: int, s: Settings, page_size: Option
     plan = fit_plan(s, width, height, page_size, xdpi, ydpi)
     if plan is None:
         return width, height, lum
+    target_w, target_h = plan
     bounds = content_bounds(lum, width, height)
     if bounds is None:                                                   # leere Seite → leeres Etikett
-        cw, ch = plan.width or 1, plan.height or 1
+        cw, ch = target_w or 1, target_h or 1
         return cw, ch, b"\xff" * (cw * ch)
     x0, y0, bw, bh = bounds
-    turn = fit_rotation(bw, bh, plan)
-    if turn:                                                             # Ausschnitt drehen, dann skalieren
-        cut = b"".join(lum[(y0 + y) * width + x0:(y0 + y) * width + x0 + bw] for y in range(bh))
-        source, stride, sx, sy, rw, rh = rotate_luminance(cut, bw, bh, turn), bh, 0, 0, bh, bw
-    else:
-        source, stride, sx, sy, rw, rh = lum, width, x0, y0, bw, bh
-    tw, th = fit_target_size(rw, rh, *fit_box(plan, rw, rh))
-    scaled = area_average(source, stride, sx, sy, rw, rh, tw, th)
-    cw = plan.width if plan.width is not None else tw
-    ch = plan.height if plan.height is not None else th
+    tw, th = fit_target_size(bw, bh, target_w, target_h)
+    scaled = area_average(lum, width, x0, y0, bw, bh, tw, th)
+    cw = target_w if target_w is not None else tw
+    ch = target_h if target_h is not None else th
     ox, oy = (cw - tw) // 2, (ch - th) // 2
     canvas = bytearray(b"\xff" * (cw * ch))
     for y in range(th):
@@ -1252,45 +1200,18 @@ def selftest() -> None:
     assert points_to_hundredths_mm(595.0) == 20990 and points_to_hundredths_mm(842.0) == 29704
     assert points_to_hundredths_mm(0.0) is None and points_to_hundredths_mm(float("nan")) is None
     label = Settings(label_width=10400, label_height=7620)
-    assert fit_plan(label, 10, 10, (595.0, 842.0), 203, 203) == (831, 609, 12, 12)
-    assert fit_plan(label, 10, 10, (595.0, 842.0), 300, 600) == (1228, 1800, 18, 35)
+    assert fit_plan(label, 10, 10, (595.0, 842.0), 203, 203) == (831, 609)
     assert fit_plan(label, 10, 10, (295.0, 216.0), 203, 203) is None            # w295h216 passt
     assert fit_plan(replace(label, rotation=90), 10, 10, (216.0, 295.0), 203, 203) is None
-    assert fit_plan(replace(label, rotation=270), 10, 10, (595.0, 842.0), 203, 203) == (609, 831, 12, 12)
+    assert fit_plan(replace(label, rotation=270), 10, 10, (595.0, 842.0), 203, 203) == (609, 831)
     assert fit_plan(replace(label, tracking="Continuous"), 10, 10, (295.0, 842.0), 203, 203) is None
-    assert fit_plan(replace(label, tracking="Continuous"), 10, 10, (595.0, 842.0), 203, 203) == (831, None, 12, 12)
+    assert fit_plan(replace(label, tracking="Continuous"), 10, 10, (595.0, 842.0), 203, 203) == (831, None)
     assert fit_plan(replace(label, fit_to_label="Off"), 10, 10, (595.0, 842.0), 203, 203) is None
     assert fit_plan(Settings(), 10, 10, (595.0, 842.0), 203, 203) is None
-    assert [fit_margin(d) for d in (152, 203, 254, 300, 600)] == [9, 12, 15, 18, 35]
-    assert fit_box(FitPlan(831, 609, 12, 12), 5, 5) == (807, 585)
-    assert fit_box(FitPlan(20, 30, 10, 14), 5, 5) == (20, 2)                     # Rand zu groß → ganze Seite
-    assert fit_box(FitPlan(831, None, 12, 12), 5, 40000) == (807, 40000)
-    assert fit_box(FitPlan(None, 609, 12, 12), 7, 5) == (32000, 585)
-    assert fit_target_size(100, 50, 200, 200) == (200, 100)                      # vergrößern
+    assert fit_target_size(100, 50, 200, 200) == (100, 50)
     assert fit_target_size(400, 100, 200, 200) == (200, 50)
     assert fit_target_size(100, 400, 200, 200) == (50, 200)
-    assert fit_target_size(401, 3, 200, 200) == (200, 1)                         # 1,496 → 1
-    assert fit_target_size(3, 1000, 200, 32000) == (96, 32000)                   # freie Länge höchstens 32000
-    assert fit_target_size(1000, 3, 200, 32000) == (200, 1)
-    # Drehung: Bruchvergleich s90 > 1,1·s0 ⇔ Kurzform aus §8 (C/Swift), Richtung nach dem Inhalt
-    for _ in range(3000):
-        bw, bh = rng.randint(1, 60), rng.randint(1, 60)
-        plan = FitPlan(rng.randint(1, 80), rng.randint(1, 80), rng.randint(0, 9), rng.randint(0, 9))
-        iw, ih = fit_box(plan, bw, bh)
-        short = 90 if 10 * bh > 11 * bw and 10 * iw > 11 * ih else 270 if 10 * bw > 11 * bh and 10 * ih > 11 * iw else 0
-        assert fit_rotation(bw, bh, plan) == short, (bw, bh, plan)
-    assert fit_rotation(305, 416, FitPlan(831, 609, 12, 12)) == 90               # Fall aus der Meldung
-    assert fit_rotation(100, 110, FitPlan(831, 609, 12, 12)) == 0                # 10 % genügen nicht
-    assert fit_rotation(416, 305, FitPlan(812, 1218, 12, 12)) == 270             # quer auf 4 × 6 Zoll
-    assert fit_rotation(305, 416, FitPlan(831, None, 12, 12)) == 0               # freie Länge: nie drehen
-    for _ in range(50):
-        w, h = rng.randint(1, 9), rng.randint(1, 9)
-        img = bytes(rng.randint(0, 255) for _ in range(w * h))
-        cw_ = rotate_luminance(img, w, h, 90)
-        ccw = rotate_luminance(img, w, h, 270)
-        assert all(cw_[x * h + (h - 1 - y)] == img[y * w + x] for y in range(h) for x in range(w))
-        assert all(ccw[(w - 1 - x) * h + y] == img[y * w + x] for y in range(h) for x in range(w))
-        assert rotate_luminance(cw_, h, w, 270) == img
+    assert fit_target_size(3, 1000, 200, None) == (3, 1000) and fit_target_size(1000, 3, 200, None) == (200, 1)
 
     def brute(lum, width, x0, y0, bw, bh, tw, th):
         out = bytearray()
@@ -1305,51 +1226,21 @@ def selftest() -> None:
                 out.append((acc + bw * bh // 2) // (bw * bh))
         return bytes(out)
 
-    for _ in range(90):                                                          # verkleinern und vergrößern
-        w, h = rng.randint(1, 17), rng.randint(1, 13)
+    for _ in range(60):
+        w, h = rng.randint(1, 23), rng.randint(1, 19)
         lum = bytes(rng.randint(0, 255) for _ in range(w * h))
         x0, y0 = rng.randint(0, w - 1), rng.randint(0, h - 1)
         bw, bh = rng.randint(1, w - x0), rng.randint(1, h - y0)
-        tw, th = rng.randint(1, 2 * bw + 3), rng.randint(1, 2 * bh + 3)
+        tw, th = rng.randint(1, bw), rng.randint(1, bh)
         assert area_average(lum, w, x0, y0, bw, bh, tw, th) == brute(lum, w, x0, y0, bw, bh, tw, th)
-    assert area_average(bytes([0, 255]), 2, 0, 0, 2, 1, 4, 1) == bytes([0, 0, 255, 255])   # ganzzahlig: Kopien
-    assert area_average(bytes([0, 255]), 2, 0, 0, 2, 1, 3, 1) == bytes([0, 128, 255])
     page = bytes([255] * 50 + [255, 0, 255, 255, 100] + [255] * 45)          # 10 × 10, Inhalt in Zeile 5
     assert content_bounds(page, 10, 10) == (1, 5, 4, 1)
     assert content_bounds(bytes([250] * 12), 4, 3) is None and content_bounds(bytes([249]), 1, 1) == (0, 0, 1, 1)
-    # 254 dpi: Rand 15 Punkte ist größer als das Etikett (10 × 10) → ganze Seite; 4 × 1 → 10 × 3 an (0, 3)
     w, h, out = fit_page(page, 10, 10, Settings(label_width=100, label_height=100), (500.0, 500.0), 254, 254)
-    assert (w, h) == (10, 10) and out[:30] == b"\xff" * 30 and out[60:] == b"\xff" * 40
-    assert out[30:60] == area_average(page, 10, 1, 5, 4, 1, 10, 3)
+    assert (w, h) == (10, 10) and out[4 * 10 + 3:4 * 10 + 7] == bytes([0, 255, 255, 100])   # mittig: (3, 4)
     assert fit_page(bytes([255] * 4), 2, 2, Settings(label_width=100, label_height=100), (500.0, 500.0),
                     254, 254) == (10, 10, b"\xff" * 100)
 
-    def label_image(w, h):
-        """Etikett mit schwarzem Rahmen (Inhaltsrahmen = ganzes Bild) und Marke oben links."""
-        return bytes(0 if x in (0, w - 1) or y in (0, h - 1) or (x < 6 and y < 5) else rng.randint(0, 255)
-                     for y in range(h) for x in range(w))
-
-    def on_page(img, w, h, pw, ph):
-        lum = bytearray(b"\xff" * (pw * ph))
-        ox, oy = (pw - w) // 2, (ph - h) // 2
-        for y in range(h):
-            lum[(oy + y) * pw + ox:(oy + y) * pw + ox + w] = img[y * w:(y + 1) * w]
-        return bytes(lum)
-
-    # Meldung: halb so großes, gegen den Uhrzeigersinn gedrehtes Etikett mitten auf A4 hoch → aufrecht,
-    # 10-fach (Etikett 43 × 33 mm bei 254 dpi, Rand 1,5 mm: 400 × 300 Punkte Inhalt bei (15, 15)).
-    upright = label_image(40, 30)
-    page = on_page(rotate_luminance(upright, 40, 30, 270), 30, 40, 120, 160)
-    w, h, out = fit_page(page, 120, 160, Settings(label_width=4300, label_height=3300), (595.0, 842.0), 254, 254)
-    assert (w, h) == (430, 330)
-    assert all(out[(15 + y) * 430 + 15 + x] == upright[(y // 10) * 40 + x // 10] for y in range(300) for x in range(400))
-    assert content_bounds(out, w, h) == (15, 15, 400, 300)
-    # Querformat-Inhalt (im Uhrzeigersinn gedrehtes Hochformat-Etikett) auf Hochformat-Etikett → zurück
-    tall = label_image(30, 40)
-    page = on_page(rotate_luminance(tall, 30, 40, 90), 40, 30, 160, 120)
-    w, h, out = fit_page(page, 160, 120, Settings(label_width=3300, label_height=4300), (842.0, 595.0), 254, 254)
-    assert (w, h) == (330, 430)
-    assert all(out[(15 + y) * 330 + 15 + x] == tall[(y // 10) * 30 + x // 10] for y in range(400) for x in range(300))
 
 __all__ = [
     "Bitmap", "Settings", "DITHERS", "dither", "luminance_from_samples", "luminance_line",
@@ -1359,7 +1250,7 @@ __all__ = [
     "label_sequence", "preprocess", "resolve_collate", "parse_copies", "selftest", "rotate_quarter",
     "last_black_row", "with_height", "set_time_line", "LINERLESS_SGD", "STANDARD_CONTROL_CHARS",
     "points_to_hundredths_mm", "fit_plan", "content_bounds", "fit_target_size", "area_average", "fit_page",
-    "fit_images", "LABEL_SIZE_MAX", "FitPlan", "fit_margin", "fit_box", "fit_rotation", "rotate_luminance",
+    "fit_images", "LABEL_SIZE_MAX",
 ]
 
 

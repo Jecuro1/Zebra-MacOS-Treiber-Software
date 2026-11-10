@@ -25,10 +25,6 @@ struct SavedPrinter: Codable, Identifiable, Hashable {
     var addedAt: Date
     /// Notizen / Standort.
     var location: String
-    /// Weitere macOS-Warteschlangen desselben Geräts, die LabelWerk automatisch auf den LabelWerk-Treiber
-    /// umgestellt hat (z. B. „10.62.13.19“ aus „Drucker & Scanner“, `QueueSyncService`). Sie werden wie
-    /// `cupsQueueName` auf dem Stand der Einstellungen gehalten.
-    var adoptedQueueNames: [String] = []
 
     init(
         id: UUID = UUID(),
@@ -269,7 +265,6 @@ extension SavedPrinter {
             addedAt: c.value(.addedAt, default: Date()),
             location: c.value(.location, default: "")
         )
-        adoptedQueueNames = c.value(.adoptedQueueNames, default: [])
     }
 }
 
