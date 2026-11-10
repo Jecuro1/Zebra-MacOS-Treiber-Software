@@ -6,8 +6,9 @@ ist zugleich der Schlüssel (Deutsch ist die Entwicklungssprache). Dieses Skript
 
 * durchsucht ``Sources/LabelWerkApp/**/*.swift`` nach ``tr("…")``-Aufrufen mit Literal-Schlüssel
   (Kommentare und andere Strings werden korrekt übersprungen, Escape-Sequenzen ausgewertet),
-* nimmt zusätzlich die ``displayName``-Texte der Kern-Aufzählungen auf, die die App dynamisch über
-  ``tr(wert.displayName)`` übersetzt (abschaltbar mit ``--no-dynamic``),
+* nimmt zusätzlich die Texte aus Kernmodulen auf, die die App dynamisch übersetzt – etwa
+  ``tr(wert.displayName)``, ``tr(action.detail)`` oder ``tr(alert.title)`` (siehe
+  ``DEFAULT_DYNAMIC_SOURCES``; abschaltbar mit ``--no-dynamic``),
 * schreibt ``Installer/Resources/de.lproj/Localizable.strings`` (Identität: Schlüssel = Wert),
 * führt ``Installer/Resources/en.lproj/Localizable.strings`` zusammen: vorhandene Übersetzungen
   bleiben erhalten, neue Schlüssel erhalten den deutschen Text und die Markierung ``/* TODO-EN */``,
@@ -42,14 +43,41 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCES = [REPO_ROOT / "Sources" / "LabelWerkApp"]
 DEFAULT_RESOURCES = REPO_ROOT / "Installer" / "Resources"
-# Dateien, deren `displayName`-Texte die App dynamisch mit `tr(x.displayName)` übersetzt.
-DEFAULT_DYNAMIC_SOURCES = [
-    REPO_ROOT / "Sources" / "LabelWerkCore" / "Types" / "Enums.swift",
-    REPO_ROOT / "Sources" / "LabelWerkCore" / "Types" / "LabelStock.swift",
-]
 TODO_MARKER = "TODO-EN"
-DYNAMIC_GROUP = "Dynamische Schlüssel (displayName aus LabelWerkCore)"
+DYNAMIC_GROUP_PREFIX = "Dynamisch: "
 OBSOLETE_GROUP = "Nicht mehr verwendet"
+DEFAULT_DYNAMIC_MEMBERS = ("displayName",)
+# Namen von SF Symbols („tray“, „thermometer.high“ …) sind keine Oberflächentexte.
+_SYMBOL_NAME = re.compile(r"[a-z][a-z0-9]*(?:\.[a-z0-9]+)*")
+
+
+@dataclass(frozen=True)
+class DynamicSource:
+    """Swift-Datei mit Texten, die die App zur Laufzeit über ``tr(wert.<member>)`` übersetzt.
+
+    ``members`` sind Namen von berechneten Eigenschaften (``var displayName: String { … }``) oder
+    Funktionen (``static func catalog(…) -> … { … }``), deren Stringausdrücke als Schlüssel gelten.
+    Mit ``+`` verkettete Literale werden zu einem Schlüssel zusammengefügt. ``skip_symbols``
+    überspringt Werte, die wie SF-Symbol-Namen aussehen (nötig für Tupel aus Titel, Text, Symbol).
+    """
+
+    path: Path
+    members: Tuple[str, ...] = DEFAULT_DYNAMIC_MEMBERS
+    skip_symbols: bool = False
+
+
+# Kernquellen, deren Texte die App dynamisch übersetzt:
+#   tr(mode.displayName), tr(stock.category.displayName) …   → Enums.swift, LabelStock.swift
+#   tr(action.displayName), tr(action.detail)                 → PrinterAction.swift
+#   tr(alert.title), tr(alert.recovery)                       → PrinterAlert.swift (PrinterAlert.catalog)
+DEFAULT_DYNAMIC_SOURCES = [
+    DynamicSource(REPO_ROOT / "Sources" / "LabelWerkCore" / "Types" / "Enums.swift"),
+    DynamicSource(REPO_ROOT / "Sources" / "LabelWerkCore" / "Types" / "LabelStock.swift"),
+    DynamicSource(REPO_ROOT / "Sources" / "LabelWerkCore" / "Commands" / "PrinterAction.swift",
+                  members=("displayName", "detail")),
+    DynamicSource(REPO_ROOT / "Sources" / "LabelWerkStatus" / "PrinterAlert.swift",
+                  members=("catalog",), skip_symbols=True),
+]
 
 IDENT_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 
@@ -82,6 +110,7 @@ class KeyUse:
     line: int
     has_arguments: bool = False
     dynamic: bool = False
+    group: Optional[str] = None
 
 
 @dataclass
@@ -238,7 +267,7 @@ class SwiftScanner:
                 if code == "(":
                     literal.interpolated = True
                     pos = self._skip_interpolation(pos + 1)
-                    parts.append("￼")
+                    parts.append("\ufffc")  # Platzhalter für den interpolierten Ausdruck
                     continue
                 simple = {"0": "\0", "\\": "\\", "t": "\t", "n": "\n", "r": "\r", '"': '"', "'": "'"}
                 if code in simple:
@@ -379,35 +408,71 @@ class SwiftScanner:
         ))
         return literal.end
 
-    # -- displayName-Blöcke ----------------------------------------------------------------
+    # -- Dynamische Quellen (displayName, detail, catalog …) ----------------------------------
 
-    def scan_display_names(self, result: ScanResult) -> None:
-        """Nimmt alle interpolationsfreien Literale aus `var displayName: String { … }` auf."""
-        pattern = re.compile(r"\bvar\s+displayName\s*:\s*String\s*\{")
+    def scan_members(self, result: ScanResult, members: Sequence[str], skip_symbols: bool = False,
+                     group: Optional[str] = None) -> None:
+        """Nimmt die Stringausdrücke aus den Rümpfen der genannten Eigenschaften/Funktionen auf.
+
+        Erkannt werden ``var <name>: String { … }`` und ``func <name>(…) … { … }`` (auch mit
+        ``public``/``static`` davor). Aus ``"a" + "b"`` wird der Schlüssel ``"ab"``; Ausdrücke mit
+        Interpolation oder mehrzeiligen Literalen werden übersprungen.
+        """
+        if not members:
+            return
+        names = "|".join(re.escape(name) for name in members)
+        pattern = re.compile(
+            rf"\b(?:var\s+(?:{names})\s*:\s*String\s*\{{|func\s+(?:{names})\s*\([^)]*\)[^{{}}]*\{{)")
         for match in pattern.finditer(self.text):
             if self._in_comment_or_string(match.start()):
                 continue
-            pos = match.end()
-            depth = 1
-            while pos < len(self.text) and depth > 0:
-                if self.text.startswith("//", pos):
-                    pos = self._skip_line_comment(pos)
+            self._scan_block(match.end(), result, skip_symbols, group)
+
+    def _scan_block(self, pos: int, result: ScanResult, skip_symbols: bool, group: Optional[str]) -> None:
+        depth = 1
+        text = self.text
+        while pos < len(text) and depth > 0:
+            if text.startswith("//", pos):
+                pos = self._skip_line_comment(pos)
+                continue
+            if text.startswith("/*", pos):
+                pos = self._skip_block_comment(pos)
+                continue
+            if self.is_string_start(pos):
+                line = self.line_of(pos)
+                value, usable, pos = self._read_string_expression(pos)
+                if usable and value and not (skip_symbols and _SYMBOL_NAME.fullmatch(value)):
+                    result.add(KeyUse(key=value, path=self.path, line=line, dynamic=True, group=group))
+                continue
+            char = text[pos]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+            pos += 1
+
+    def _read_string_expression(self, pos: int) -> Tuple[str, bool, int]:
+        """Liest ``"a" + "b" + …`` ab `pos`: (Wert, verwendbar, Position dahinter)."""
+        parts: List[str] = []
+        usable = True
+        while True:
+            literal = self.read_string(pos)
+            parts.append(literal.value)
+            if literal.interpolated or literal.multiline or literal.problems:
+                usable = False
+            pos = literal.end
+            after = self.skip_trivia(pos)
+            if after < len(self.text) and self.text[after] == "+":
+                operand = self.skip_trivia(after + 1)
+                if self.is_string_start(operand):
+                    pos = operand
                     continue
-                if self.text.startswith("/*", pos):
-                    pos = self._skip_block_comment(pos)
-                    continue
-                if self.is_string_start(pos):
-                    literal = self.read_string(pos)
-                    if not literal.interpolated and not literal.multiline and literal.value:
-                        result.add(KeyUse(key=literal.value, path=self.path, line=self.line_of(pos), dynamic=True))
-                    pos = literal.end
-                    continue
-                char = self.text[pos]
-                if char == "{":
-                    depth += 1
-                elif char == "}":
-                    depth -= 1
-                pos += 1
+                usable = False  # "a" + variable – kein fester Schlüssel
+            return "".join(parts), usable, pos
+
+    def scan_display_names(self, result: ScanResult) -> None:
+        """Kompatibilität: wie :meth:`scan_members` mit ``displayName``."""
+        self.scan_members(result, DEFAULT_DYNAMIC_MEMBERS)
 
     def _in_comment_or_string(self, target: int) -> bool:
         pos = 0
@@ -469,7 +534,31 @@ def relative(path: Path) -> str:
         return str(path)
 
 
-def scan_sources(sources: Sequence[Path], dynamic_sources: Sequence[Path]) -> ScanResult:
+def _as_dynamic_source(source) -> DynamicSource:
+    if isinstance(source, DynamicSource):
+        return source
+    return DynamicSource(Path(source))
+
+
+def parse_dynamic_source(spec: str) -> DynamicSource:
+    """Kommandozeilenform ``PFAD[:mitglied,mitglied…][:symbols]`` → :class:`DynamicSource`.
+
+    Beispiel: ``Sources/LabelWerkStatus/PrinterAlert.swift:catalog:symbols``.
+    """
+    parts = spec.split(":")
+    path = Path(parts[0])
+    members: Tuple[str, ...] = DEFAULT_DYNAMIC_MEMBERS
+    skip_symbols = False
+    for part in parts[1:]:
+        if part == "symbols":
+            skip_symbols = True
+        elif part:
+            members = tuple(name.strip() for name in part.split(",") if name.strip())
+    return DynamicSource(path, members, skip_symbols)
+
+
+def scan_sources(sources: Sequence[Path], dynamic_sources: Sequence) -> ScanResult:
+    """Durchsucht App-Quellen nach tr()-Aufrufen und dynamische Quellen nach Texten."""
     result = ScanResult()
     for path in swift_files(sources):
         text = path.read_text(encoding="utf-8")
@@ -479,18 +568,26 @@ def scan_sources(sources: Sequence[Path], dynamic_sources: Sequence[Path]) -> Sc
         except SwiftSyntaxError as error:
             result.diagnostics.append(Diagnostic(relative(path), 0, f"Datei nicht lesbar: {error}", is_error=True))
     literal_keys = set(result.keys)
-    for path in dynamic_sources:
+    for raw_source in dynamic_sources:
+        source = _as_dynamic_source(raw_source)
+        path = source.path
         if not path.is_file():
             result.diagnostics.append(Diagnostic(relative(path), 0, "Quelle für dynamische Schlüssel fehlt."))
             continue
+        name = relative(path)
+        for prefix in ("Sources/",):
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+        group = f"{DYNAMIC_GROUP_PREFIX}{name} ({', '.join(source.members)})"
         scanner = SwiftScanner(path.read_text(encoding="utf-8"), relative(path))
         try:
-            scanner.scan_display_names(result)
+            scanner.scan_members(result, source.members, source.skip_symbols, group)
         except SwiftSyntaxError as error:
             result.diagnostics.append(Diagnostic(relative(path), 0, f"Datei nicht lesbar: {error}", is_error=True))
     # Schlüssel, die auch als Literal vorkommen, gelten nicht als dynamisch.
     for key in literal_keys:
         result.keys[key].dynamic = False
+        result.keys[key].group = None
     return result
 
 
@@ -511,7 +608,7 @@ def parse_strings(text: str, path: str = "<strings>") -> List[StringsEntry]:
     entries: List[StringsEntry] = []
     pos = 0
     length = len(text)
-    if text.startswith("﻿"):
+    if text.startswith("\ufeff"):
         pos = 1
 
     def line_at(index: int) -> int:
@@ -626,7 +723,7 @@ def escape_strings(value: str) -> str:
             out.append("\\t")
         elif char == "\r":
             out.append("\\r")
-        elif ord(char) < 0x20 or char in "  ":
+        elif ord(char) < 0x20 or char in "\u2028\u2029":
             out.append(f"\\U{ord(char):04X}")
         else:
             out.append(char)
@@ -701,9 +798,10 @@ class MergeOutcome:
 HEADER_EN = """/* LabelWerk – englische Übersetzungen (en.lproj/Localizable.strings)
  *
  * Gepflegt mit Scripts/extract_strings.py – Schlüssel = deutscher Quelltext aus tr("…").
- * Neue Einträge enthalten zunächst den deutschen Text und die Markierung TODO-EN: Übersetzung
- * eintragen und die Markierung entfernen. Formatplatzhalter (%@, %d, %.1f, %1$@ …) müssen in
- * Anzahl und Typ erhalten bleiben; die Reihenfolge lässt sich mit %1$@, %2$@ … ändern.
+ * Neue Einträge enthalten zunächst den deutschen Text und eine Offen-Markierung als Kommentar
+ * hinter dem Eintrag (Liste: --list-todo): Übersetzung eintragen und die Markierung entfernen.
+ * Formatplatzhalter (%@, %d, %.1f, %1$@ …) müssen in Anzahl und Typ erhalten bleiben; die
+ * Reihenfolge lässt sich mit %1$@, %2$@ … ändern. Prüfen: extract_strings.py --check --strict
  */"""
 
 HEADER_DE = """/* LabelWerk – deutsche Texte (de.lproj/Localizable.strings)
@@ -715,19 +813,19 @@ HEADER_DE = """/* LabelWerk – deutsche Texte (de.lproj/Localizable.strings)
 
 def _group_title(use: KeyUse) -> str:
     if use.dynamic:
-        return DYNAMIC_GROUP
+        return use.group or f"{DYNAMIC_GROUP_PREFIX}{use.path}"
     path = use.path
     prefix = "Sources/LabelWerkApp/"
     return path[len(prefix):] if path.startswith(prefix) else path
 
 
 def _ordered_groups(keys: Dict[str, KeyUse]) -> List[Tuple[str, List[KeyUse]]]:
+    """Abschnitte: App-Dateien alphabetisch, danach die dynamischen Quellen."""
     groups: Dict[str, List[KeyUse]] = {}
     for use in keys.values():
         groups.setdefault(_group_title(use), []).append(use)
-    titles = sorted(t for t in groups if t != DYNAMIC_GROUP)
-    if DYNAMIC_GROUP in groups:
-        titles.append(DYNAMIC_GROUP)
+    titles = sorted(t for t in groups if not t.startswith(DYNAMIC_GROUP_PREFIX))
+    titles += sorted(t for t in groups if t.startswith(DYNAMIC_GROUP_PREFIX))
     ordered = []
     for title in titles:
         uses = sorted(groups[title], key=lambda u: (u.path, u.line, u.key))
@@ -819,12 +917,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prune", action="store_true",
                         help="nicht mehr verwendete Übersetzungen entfernen statt aufzubewahren")
     parser.add_argument("--no-dynamic", action="store_true",
-                        help="displayName-Texte aus LabelWerkCore nicht aufnehmen")
+                        help="dynamisch übersetzte Texte aus Kernmodulen nicht aufnehmen")
     parser.add_argument("--list-todo", action="store_true", help="unübersetzte Schlüssel ausgeben")
     parser.add_argument("--sources", nargs="+", type=Path, default=None,
                         help="zu durchsuchende Verzeichnisse/Dateien (Standard: Sources/LabelWerkApp)")
-    parser.add_argument("--dynamic-sources", nargs="*", type=Path, default=None,
-                        help="Swift-Dateien mit displayName-Texten (Standard: LabelWerkCore/Types/…)")
+    parser.add_argument("--dynamic-sources", nargs="*", type=parse_dynamic_source, default=None,
+                        metavar="PFAD[:MITGLIEDER][:symbols]",
+                        help="Swift-Dateien mit dynamisch übersetzten Texten, z. B. Enums.swift oder "
+                             "PrinterAlert.swift:catalog:symbols (Standard: siehe DEFAULT_DYNAMIC_SOURCES)")
     parser.add_argument("--resources", type=Path, default=DEFAULT_RESOURCES,
                         help="Verzeichnis mit de.lproj/ und en.lproj/ (Standard: Installer/Resources)")
     parser.add_argument("-q", "--quiet", action="store_true", help="nur Warnungen und Fehler ausgeben")

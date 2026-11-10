@@ -131,11 +131,6 @@
 "Datei auswählen …" = "Datei auswählen …";
 
 /* MARK: Features/Designer/DesignerEditorPane.swift */
-"Vorlage übernehmen?" = "Vorlage übernehmen?";
-"Dokument ersetzen" = "Dokument ersetzen";
-"Als weiteres Etikett anhängen" = "Als weiteres Etikett anhängen";
-"Abbrechen" = "Abbrechen";
-"„%@“ ersetzt den Inhalt des Editors – oder wird als zusätzliches Etikett angehängt." = "„%@“ ersetzt den Inhalt des Editors – oder wird als zusätzliches Etikett angehängt.";
 "Designer-Etikett" = "Designer-Etikett";
 "Titel" = "Titel";
 "Titel für Auftragsverlauf und Dateinamen" = "Titel für Auftragsverlauf und Dateinamen";
@@ -157,7 +152,6 @@
 "⌘↩ druckt · Datei hierher ziehen" = "⌘↩ druckt · Datei hierher ziehen";
 "Loslassen zum Öffnen" = "Loslassen zum Öffnen";
 "ZPL- und Textdateien werden geöffnet, Bilder als Grafik eingefügt." = "ZPL- und Textdateien werden geöffnet, Bilder als Grafik eingefügt.";
-"Angehängt: %@" = "Angehängt: %@";
 "Vorlage: %@" = "Vorlage: %@";
 "Eingefügt: %@" = "Eingefügt: %@";
 "Bereits sauber formatiert" = "Bereits sauber formatiert";
@@ -178,6 +172,7 @@
 /* MARK: Features/Designer/DesignerFiles.swift */
 "„%@“ ist zu groß für den Editor (höchstens 16 MB)." = "„%@“ ist zu groß für den Editor (höchstens 16 MB).";
 "„%@“ ist keine lesbare Textdatei." = "„%@“ ist keine lesbare Textdatei.";
+"„%@“ enthält Binärdaten (z. B. ein ZebraDesigner-Etikett) und kann nicht als ZPL-Text bearbeitet werden." = "„%@“ enthält Binärdaten (z. B. ein ZebraDesigner-Etikett) und kann nicht als ZPL-Text bearbeitet werden.";
 "„%@“ enthält keine darstellbaren Seiten." = "„%@“ enthält keine darstellbaren Seiten.";
 
 /* MARK: Features/Designer/DesignerImageControls.swift */
@@ -203,10 +198,11 @@
 "Sehr feine Fehlerdiffusion für maximalen Detailreichtum." = "Sehr feine Fehlerdiffusion für maximalen Detailreichtum.";
 
 /* MARK: Features/Designer/DesignerImageWorkspace.swift */
-"PDF · %d Seiten · gerendert mit %d dpi" = "PDF · %d Seiten · gerendert mit %d dpi";
-"Bild · %d × %d Pixel" = "Bild · %d × %d Pixel";
 "Andere Datei …" = "Andere Datei …";
 "Datei schließen" = "Datei schließen";
+"Bild · %d × %d Pixel" = "Bild · %d × %d Pixel";
+"PDF · erste %d von %d Seiten · gerendert mit %d dpi" = "PDF · erste %d von %d Seiten · gerendert mit %d dpi";
+"PDF · %d Seiten · gerendert mit %d dpi" = "PDF · %d Seiten · gerendert mit %d dpi";
 "%d × %d Punkte" = "%d × %d Punkte";
 "%d dpi" = "%d dpi";
 "Schwarzanteil %@" = "Schwarzanteil %@";
@@ -247,6 +243,7 @@
 "R: Arbeitsspeicher – bis zum Neustart" = "R: Arbeitsspeicher – bis zum Neustart";
 "Speicherbedarf" = "Speicherbedarf";
 "Aufruf im Etikett" = "Aufruf im Etikett";
+"Abbrechen" = "Abbrechen";
 "Speichern" = "Speichern";
 
 /* MARK: Features/Designer/DesignerModels.swift */
@@ -291,6 +288,9 @@
 "Hinweise (%d)" = "Hinweise (%d)";
 "Keine Elemente auf diesem Etikett." = "Keine Elemente auf diesem Etikett.";
 "Keine Hinweise – alle Befehle wurden verstanden." = "Keine Hinweise – alle Befehle wurden verstanden.";
+
+/* MARK: Features/Designer/DesignerStore.swift */
+"Angehängt: %@" = "Angehängt: %@";
 
 /* MARK: Features/Designer/DesignerTemplates.swift */
 "Versandetikett" = "Versandetikett";
@@ -372,7 +372,13 @@
 "BARCODE-TESTBLATT" = "BARCODE-TESTBLATT";
 
 /* MARK: Features/Designer/DesignerView.swift */
+"Dokument ersetzen?" = "Dokument ersetzen?";
+"Vorlage übernehmen?" = "Vorlage übernehmen?";
+"Dokument ersetzen" = "Dokument ersetzen";
+"Als weiteres Etikett anhängen" = "Als weiteres Etikett anhängen";
+"Der Editor enthält Änderungen. „%@“ ersetzt den Inhalt – oder wird als zusätzliches Etikett angehängt." = "Der Editor enthält Änderungen. „%@“ ersetzt den Inhalt – oder wird als zusätzliches Etikett angehängt.";
 "ZPL live gestalten, Bilder und PDFs gestochen scharf rastern – und direkt drucken." = "ZPL live gestalten, Bilder und PDFs gestochen scharf rastern – und direkt drucken.";
+"Übernommen: %@" = "Übernommen: %@";
 "In den Designer übernommen" = "In den Designer übernommen";
 "Kein Drucker" = "Kein Drucker";
 "Zieldrucker und Etikettenformat wählen" = "Zieldrucker und Etikettenformat wählen";
@@ -404,8 +410,8 @@
 "Ein Feld pro Zeile" = "Ein Feld pro Zeile";
 
 /* MARK: Features/Designer/DesignerZPLWorkspace.swift */
-"Drucker ist auf %@ eingestellt" = "Drucker ist auf %@ eingestellt";
-"ZPL wird nur von Druckern mit ZPL-Sprache verstanden. Ändere die Sprache in den Druckeinstellungen." = "ZPL wird nur von Druckern mit ZPL-Sprache verstanden. Ändere die Sprache in den Druckeinstellungen.";
+"%@: wird als Grafik gedruckt" = "%@: wird als Grafik gedruckt";
+"Der Drucker versteht kein ZPL. LabelWerk rastert jedes Etikett pixelgenau in Druckerauflösung und sendet es als Grafik in der Druckersprache – mit den Treibereinstellungen des Druckers." = "Der Drucker versteht kein ZPL. LabelWerk rastert jedes Etikett pixelgenau in Druckerauflösung und sendet es als Grafik in der Druckersprache – mit den Treibereinstellungen des Druckers.";
 "Kopiert" = "Kopiert";
 "ZPL kopieren" = "ZPL kopieren";
 "PNG …" = "PNG …";
@@ -415,6 +421,8 @@
 "%@ · %d Etiketten × %d Kopien · %@" = "%@ · %d Etiketten × %d Kopien · %@";
 "Kein Etikettenformat gefunden" = "Kein Etikettenformat gefunden";
 "Das Dokument enthält kein Format zwischen ^XA und ^XZ." = "Das Dokument enthält kein Format zwischen ^XA und ^XZ.";
+"Zu viele Etiketten für den Grafikdruck" = "Zu viele Etiketten für den Grafikdruck";
+"Die ^PQ-Mengen ergeben %d einzeln gerasterte Etiketten (höchstens %d)." = "Die ^PQ-Mengen ergeben %d einzeln gerasterte Etiketten (höchstens %d).";
 "Etikett als PNG exportieren" = "Etikett als PNG exportieren";
 
 /* MARK: Features/Discovery/DiscoveryCards.swift */
@@ -949,6 +957,7 @@
 "Gefunden in" = "Gefunden in";
 "Installiert" = "Installiert";
 "Modelle in der Datei" = "Modelle in der Datei";
+"SHA-256" = "SHA-256";
 "Erwartete Prüfsumme (optional)" = "Erwartete Prüfsumme (optional)";
 "SHA-256 von der Download-Seite einfügen" = "SHA-256 von der Download-Seite einfügen";
 "Prüfergebnis" = "Prüfergebnis";
@@ -1082,6 +1091,7 @@
 "Feste Adresse – ideal, wenn der Drucker immer unter derselben IP erreichbar sein soll." = "Feste Adresse – ideal, wenn der Drucker immer unter derselben IP erreichbar sein soll.";
 "DNS-Server (optional)" = "DNS-Server (optional)";
 "Hostname (optional)" = "Hostname (optional)";
+"lager-zd421" = "lager-zd421";
 "Aktuell zugewiesen: %@" = "Aktuell zugewiesen: %@";
 "· Gateway %@" = "· Gateway %@";
 "Die Adresse wird beim nächsten Start vom DHCP-Server bezogen." = "Die Adresse wird beim nächsten Start vom DHCP-Server bezogen.";
@@ -1098,6 +1108,7 @@
 "WLAN ist ausgeschaltet. Einschalten, um den Drucker mit einem Funknetz zu verbinden." = "WLAN ist ausgeschaltet. Einschalten, um den Drucker mit einem Funknetz zu verbinden.";
 "Name und Sichtbarkeit für die Kopplung mit Mac, iPhone oder Scanner" = "Name und Sichtbarkeit für die Kopplung mit Mac, iPhone oder Scanner";
 "Die Bluetooth-Werte konnten nicht gelesen werden – der Drucker unterstützt diese Abfrage eventuell nicht." = "Die Bluetooth-Werte konnten nicht gelesen werden – der Drucker unterstützt diese Abfrage eventuell nicht.";
+"ZD421-Lager" = "ZD421-Lager";
 "Sichtbarkeit" = "Sichtbarkeit";
 "Für andere Geräte sichtbar" = "Für andere Geräte sichtbar";
 "Nur zum Koppeln nötig – danach ausschalten erhöht die Sicherheit." = "Nur zum Koppeln nötig – danach ausschalten erhöht die Sicherheit.";
@@ -1115,12 +1126,17 @@
 "Übernehmen & neu starten" = "Übernehmen & neu starten";
 "ohne Neustart" = "ohne Neustart";
 "Drucker wieder verbunden" = "Drucker wieder verbunden";
+"Drucker antwortet nicht" = "Drucker antwortet nicht";
+"Neue Adresse übernehmen" = "Neue Adresse übernehmen";
 "Drucker startet neu …" = "Drucker startet neu …";
 "Die Änderungen sind sofort aktiv." = "Die Änderungen sind sofort aktiv.";
 "Die neuen Netzwerkeinstellungen sind aktiv." = "Die neuen Netzwerkeinstellungen sind aktiv.";
+"Unter der bisherigen Adresse meldet sich der Drucker nicht – per DHCP hat er vermutlich eine neue erhalten. Sie steht auf dem Konfigurationsetikett oder wird über die Druckersuche gefunden." = "Unter der bisherigen Adresse meldet sich der Drucker nicht – per DHCP hat er vermutlich eine neue erhalten. Sie steht auf dem Konfigurationsetikett oder wird über die Druckersuche gefunden.";
+"Nach dem Neustart kam keine Verbindung zustande. Prüfe, ob der Drucker eingeschaltet und im Netzwerk erreichbar ist, und versuche es erneut." = "Nach dem Neustart kam keine Verbindung zustande. Prüfe, ob der Drucker eingeschaltet und im Netzwerk erreichbar ist, und versuche es erneut.";
 "Der Drucker übernimmt die neue Adresse. Stelle die Verbindung um, damit LabelWerk ihn weiterhin erreicht." = "Der Drucker übernimmt die neue Adresse. Stelle die Verbindung um, damit LabelWerk ihn weiterhin erreicht.";
-"Der Drucker bezieht seine Adresse jetzt per DHCP. Die neue Adresse steht auf dem Konfigurationsetikett oder wird über die Druckersuche gefunden." = "Der Drucker bezieht seine Adresse jetzt per DHCP. Die neue Adresse steht auf dem Konfigurationsetikett oder wird über die Druckersuche gefunden.";
+"Der Drucker bezieht seine Adresse jetzt per DHCP. LabelWerk versucht es zuerst unter der bisherigen Adresse; hat er eine neue erhalten, findet ihn die Druckersuche." = "Der Drucker bezieht seine Adresse jetzt per DHCP. LabelWerk versucht es zuerst unter der bisherigen Adresse; hat er eine neue erhalten, findet ihn die Druckersuche.";
 "Die Verbindung wird nach dem Neustart automatisch wiederhergestellt." = "Die Verbindung wird nach dem Neustart automatisch wiederhergestellt.";
+"Die automatische Wiederverbindung wurde unterbrochen. Verbinde dich erneut, sobald der Drucker bereit ist." = "Die automatische Wiederverbindung wurde unterbrochen. Verbinde dich erneut, sobald der Drucker bereit ist.";
 "Die Verbindung verwendet jetzt %@." = "Die Verbindung verwendet jetzt %@.";
 "Verbindung auf %@ umstellen" = "Verbindung auf %@ umstellen";
 "Jetzt verbinden" = "Jetzt verbinden";
@@ -1585,11 +1601,12 @@
 "Hex-Dump kopieren" = "Hex-Dump kopieren";
 "Warte auf Antwort" = "Warte auf Antwort";
 "Direkt mit dem Drucker sprechen" = "Direkt mit dem Drucker sprechen";
-"Sende ZPL-, SGD- oder JSON-Befehle mit ⌘↩. Antworten erscheinen hier – als Text mit sichtbaren Steuerzeichen oder als Hex-Dump." = "Sende ZPL-, SGD- oder JSON-Befehle mit ⌘↩. Antworten erscheinen hier – als Text mit sichtbaren Steuerzeichen oder als Hex-Dump.";
-"Diese Verbindung kann nur senden: Befehle und Dateien werden übertragen, Antworten des Druckers sind nicht verfügbar." = "Diese Verbindung kann nur senden: Befehle und Dateien werden übertragen, Antworten des Druckers sind nicht verfügbar.";
 "⌘↩ sendet" = "⌘↩ sendet";
 "Bausteine unten" = "Bausteine unten";
 "Referenz rechts" = "Referenz rechts";
+"Diese Verbindung kann nur senden: Befehle und Dateien werden übertragen, Antworten des Druckers sind nicht verfügbar." = "Diese Verbindung kann nur senden: Befehle und Dateien werden übertragen, Antworten des Druckers sind nicht verfügbar.";
+"Sende ZPL-, SGD- oder JSON-Befehle mit ⌘↩. Antworten erscheinen hier – als Text mit sichtbaren Steuerzeichen oder als Hex-Dump." = "Sende ZPL-, SGD- oder JSON-Befehle mit ⌘↩. Antworten erscheinen hier – als Text mit sichtbaren Steuerzeichen oder als Hex-Dump.";
+"Sende ZPL-, SGD- oder JSON-Befehle mit ⌘↩. Antworten erscheinen hier als Text mit sichtbaren Steuerzeichen." = "Sende ZPL-, SGD- oder JSON-Befehle mit ⌘↩. Antworten erscheinen hier als Text mit sichtbaren Steuerzeichen.";
 
 /* MARK: Features/Terminal/TerminalView.swift */
 "Diese Verbindung (macOS-Warteschlange) überträgt nur Daten zum Drucker. Antworten wie Status, Konfiguration oder SGD-Werte sind nicht verfügbar." = "Diese Verbindung (macOS-Warteschlange) überträgt nur Daten zum Drucker. Antworten wie Status, Konfiguration oder SGD-Werte sind nicht verfügbar.";
@@ -1733,17 +1750,17 @@
 "Anführungszeichen sind in SGD-Werten nicht erlaubt." = "Anführungszeichen sind in SGD-Werten nicht erlaubt.";
 "Bitte einen der erlaubten Werte wählen." = "Bitte einen der erlaubten Werte wählen.";
 "Bitte eine ganze Zahl eingeben." = "Bitte eine ganze Zahl eingeben.";
-"Erlaubt sind Werte von %d bis %d." = "Erlaubt sind Werte von %d bis %d.";
+"Erlaubt sind Werte von %ld bis %ld." = "Erlaubt sind Werte von %ld bis %ld.";
 "Bitte eine Zahl eingeben." = "Bitte eine Zahl eingeben.";
 "Erlaubt sind Werte von %@ bis %@." = "Erlaubt sind Werte von %@ bis %@.";
 "Bitte eine gültige IPv4-Adresse eingeben (z. B. 192.168.1.20)." = "Bitte eine gültige IPv4-Adresse eingeben (z. B. 192.168.1.20).";
-"Erlaubt sind %d bis %d Zeichen." = "Erlaubt sind %d bis %d Zeichen.";
+"Erlaubt sind %ld bis %ld Zeichen." = "Erlaubt sind %ld bis %ld Zeichen.";
 "%d Auswahlwerte" = "%d Auswahlwerte";
-"Ganzzahl %d … %d" = "Ganzzahl %d … %d";
+"Ganzzahl %ld … %ld" = "Ganzzahl %ld … %ld";
 "Ganzzahl" = "Ganzzahl";
 "Zahl %@ … %@" = "Zahl %@ … %@";
 "Zahl" = "Zahl";
-"Text, %d–%d Zeichen" = "Text, %d–%d Zeichen";
+"Text, %ld–%ld Zeichen" = "Text, %ld–%ld Zeichen";
 "%@ · %d Variablen · gelesen um %@" = "%@ · %d Variablen · gelesen um %@";
 "Einstellungs-Explorer" = "Einstellungs-Explorer";
 "Alle Variablen exportieren …" = "Alle Variablen exportieren …";
@@ -1799,7 +1816,9 @@
 "JSON-Export" = "JSON-Export";
 "Über diese Verbindung können keine Einstellungen gelesen werden." = "Über diese Verbindung können keine Einstellungen gelesen werden.";
 "Explorer öffnen" = "Explorer öffnen";
+"%@ meldet keine SGD-Unterstützung – eventuell liefert der Drucker keine Werte." = "%@ meldet keine SGD-Unterstützung – eventuell liefert der Drucker keine Werte.";
 "%@ unterstützt keine SGD-Befehle. Im Entwicklermodus lässt sich der Explorer trotzdem öffnen." = "%@ unterstützt keine SGD-Befehle. Im Entwicklermodus lässt sich der Explorer trotzdem öffnen.";
+"Der Explorer ändert Geräteeinstellungen direkt und ist deshalb Teil des Entwicklermodus." = "Der Explorer ändert Geräteeinstellungen direkt und ist deshalb Teil des Entwicklermodus.";
 "Entwicklermodus aktivieren" = "Entwicklermodus aktivieren";
 "Druckerwerkzeuge" = "Druckerwerkzeuge";
 "Alle Gerätebefehle für %@ – mit Live-Rückmeldung, geführter Kalibrierung und vollem Zugriff auf die Einstellungen." = "Alle Gerätebefehle für %@ – mit Live-Rückmeldung, geführter Kalibrierung und vollem Zugriff auf die Einstellungen.";
@@ -1879,7 +1898,37 @@
 "Programm konnte nicht gestartet werden: %@" = "Programm konnte nicht gestartet werden: %@";
 "„%@“ ist fehlgeschlagen (Code %d): %@" = "„%@“ ist fehlgeschlagen (Code %d): %@";
 
-/* MARK: Dynamische Schlüssel (displayName aus LabelWerkCore) */
+/* MARK: Dynamisch: LabelWerkCore/Commands/PrinterAction.swift (displayName, detail) */
+"Berichte & Testdrucke" = "Berichte & Testdrucke";
+"Medien & Sensoren" = "Medien & Sensoren";
+"Auftragssteuerung" = "Auftragssteuerung";
+"Wartung" = "Wartung";
+"Netzwerkkonfiguration drucken" = "Netzwerkkonfiguration drucken";
+"Sensorprofil drucken" = "Sensorprofil drucken";
+"Pausieren" = "Pausieren";
+"Alle Aufträge abbrechen" = "Alle Aufträge abbrechen";
+"Aktuellen Auftrag abbrechen" = "Aktuellen Auftrag abbrechen";
+"Drucker neu starten" = "Drucker neu starten";
+"Werkseinstellungen wiederherstellen" = "Werkseinstellungen wiederherstellen";
+"Netzwerkeinstellungen zurücksetzen" = "Netzwerkeinstellungen zurücksetzen";
+"Dateiliste drucken" = "Dateiliste drucken";
+"Druckt ein Etikett mit allen aktuellen Einstellungen, Zählerständen und der Firmware-Version." = "Druckt ein Etikett mit allen aktuellen Einstellungen, Zählerständen und der Firmware-Version.";
+"Druckt die Netzwerkeinstellungen mit IP-Adresse, WLAN-Status und MAC-Adresse." = "Druckt die Netzwerkeinstellungen mit IP-Adresse, WLAN-Status und MAC-Adresse.";
+"Misst Etikettenlänge und Lücke neu und stellt Medien- und Farbbandsensor ein." = "Misst Etikettenlänge und Lücke neu und stellt Medien- und Farbbandsensor ein.";
+"Kalibriert die Sensoren und druckt das Sensorprofil zur Fehlersuche bei der Etikettenerkennung." = "Kalibriert die Sensoren und druckt das Sensorprofil zur Fehlersuche bei der Etikettenerkennung.";
+"Schiebt ein leeres Etikett bis zur nächsten Abreißposition vor." = "Schiebt ein leeres Etikett bis zur nächsten Abreißposition vor.";
+"Hält den Druck nach dem aktuellen Etikett an, bis er fortgesetzt wird." = "Hält den Druck nach dem aktuellen Etikett an, bis er fortgesetzt wird.";
+"Setzt einen angehaltenen Druck fort." = "Setzt einen angehaltenen Druck fort.";
+"Löscht alle Aufträge, die sich noch im Speicher des Druckers befinden." = "Löscht alle Aufträge, die sich noch im Speicher des Druckers befinden.";
+"Bricht nur den Auftrag ab, der gerade gedruckt wird." = "Bricht nur den Auftrag ab, der gerade gedruckt wird.";
+"Startet den Drucker neu, als würde er aus- und wieder eingeschaltet." = "Startet den Drucker neu, als würde er aus- und wieder eingeschaltet.";
+"Setzt alle Druckereinstellungen dauerhaft auf den Auslieferungszustand zurück." = "Setzt alle Druckereinstellungen dauerhaft auf den Auslieferungszustand zurück.";
+"Setzt IP-, WLAN- und Netzwerkeinstellungen zurück; der Drucker startet anschließend neu." = "Setzt IP-, WLAN- und Netzwerkeinstellungen zurück; der Drucker startet anschließend neu.";
+"Speichert die aktuellen Einstellungen, damit sie auch nach dem Ausschalten erhalten bleiben." = "Speichert die aktuellen Einstellungen, damit sie auch nach dem Ausschalten erhalten bleiben.";
+"Druckt ein Testetikett mit Rahmen, Barcodes, Schwärzungsskala und Millimeterlineal." = "Druckt ein Testetikett mit Rahmen, Barcodes, Schwärzungsskala und Millimeterlineal.";
+"Druckt eine Liste aller Schriften, Grafiken und Formate im Druckerspeicher." = "Druckt eine Liste aller Schriften, Grafiken und Formate im Druckerspeicher.";
+
+/* MARK: Dynamisch: LabelWerkCore/Types/Enums.swift (displayName) */
 "ZPL II" = "ZPL II";
 "EPL2" = "EPL2";
 "CPCL" = "CPCL";
@@ -1913,6 +1962,8 @@
 "Ethernet" = "Ethernet";
 "Seriell" = "Seriell";
 "Parallel" = "Parallel";
+
+/* MARK: Dynamisch: LabelWerkCore/Types/LabelStock.swift (displayName) */
 "Versand" = "Versand";
 "Produkt" = "Produkt";
 "Barcode" = "Barcode";
@@ -1921,3 +1972,46 @@
 "Schmuck" = "Schmuck";
 "Armband" = "Armband";
 "Benutzerdefiniert" = "Benutzerdefiniert";
+
+/* MARK: Dynamisch: LabelWerkStatus/PrinterAlert.swift (catalog) */
+"Abdeckung öffnen, eine neue Etikettenrolle einlegen und das Material unter den Führungen bis über die Abreißkante ziehen. Abdeckung schließen und die Vorschubtaste (FEED) drücken; bei anderem Material anschließend kalibrieren." = "Abdeckung öffnen, eine neue Etikettenrolle einlegen und das Material unter den Führungen bis über die Abreißkante ziehen. Abdeckung schließen und die Vorschubtaste (FEED) drücken; bei anderem Material anschließend kalibrieren.";
+"Druckkopf öffnen, die leere Farbbandrolle entnehmen und eine neue Rolle mit der beschichteten Seite zum Etikett einlegen; den Anfang an der Aufwickelspindel befestigen. Druckkopf schließen. Für Druck ohne Farbband in den Einstellungen „Thermodirekt“ wählen." = "Druckkopf öffnen, die leere Farbbandrolle entnehmen und eine neue Rolle mit der beschichteten Seite zum Etikett einlegen; den Anfang an der Aufwickelspindel befestigen. Druckkopf schließen. Für Druck ohne Farbband in den Einstellungen „Thermodirekt“ wählen.";
+"Druckkopf bzw. Abdeckung schließen und hörbar einrasten lassen. Dabei prüfen, dass Etiketten und Farbband glatt unter dem Druckkopf liegen." = "Druckkopf bzw. Abdeckung schließen und hörbar einrasten lassen. Dabei prüfen, dass Etiketten und Farbband glatt unter dem Druckkopf liegen.";
+"Drucker pausiert" = "Drucker pausiert";
+"Die Pause-Taste am Drucker drücken oder in LabelWerk „Fortsetzen“ wählen. Wartende Aufträge werden danach automatisch gedruckt." = "Die Pause-Taste am Drucker drücken oder in LabelWerk „Fortsetzen“ wählen. Wartende Aufträge werden danach automatisch gedruckt.";
+"Schneidwerk blockiert" = "Schneidwerk blockiert";
+"Drucker ausschalten, das Schneidwerk auf eingeklemmtes Material prüfen und Reste vorsichtig entfernen, ohne die Klinge zu berühren. Klebereste mit Isopropanol entfernen und den Drucker wieder einschalten." = "Drucker ausschalten, das Schneidwerk auf eingeklemmtes Material prüfen und Reste vorsichtig entfernen, ohne die Klinge zu berühren. Klebereste mit Isopropanol entfernen und den Drucker wieder einschalten.";
+"Druckkopf überhitzt" = "Druckkopf überhitzt";
+"Der Druck wird angehalten, bis der Druckkopf abgekühlt ist. Drucker einige Minuten ruhen lassen und danach Schwärzung oder Druckgeschwindigkeit reduzieren." = "Der Druck wird angehalten, bis der Druckkopf abgekühlt ist. Drucker einige Minuten ruhen lassen und danach Schwärzung oder Druckgeschwindigkeit reduzieren.";
+"Motor überhitzt" = "Motor überhitzt";
+"Drucker ausschalten und mindestens 10 Minuten abkühlen lassen. Lüftungsschlitze freihalten und bei Dauerbetrieb die Druckgeschwindigkeit senken." = "Drucker ausschalten und mindestens 10 Minuten abkühlen lassen. Lüftungsschlitze freihalten und bei Dauerbetrieb die Druckgeschwindigkeit senken.";
+"Defektes Druckkopfelement" = "Defektes Druckkopfelement";
+"Einzelne Heizpunkte drucken nicht (weiße Linien in Vorschubrichtung). Druckkopf mit einem Reinigungsstift reinigen; bleiben die Linien, den Druckkopf ersetzen. Barcodes bis dahin im Leiterformat (um 90° gedreht) drucken." = "Einzelne Heizpunkte drucken nicht (weiße Linien in Vorschubrichtung). Druckkopf mit einem Reinigungsstift reinigen; bleiben die Linien, den Druckkopf ersetzen. Barcodes bis dahin im Leiterformat (um 90° gedreht) drucken.";
+"Druckkopf nicht erkannt" = "Druckkopf nicht erkannt";
+"Drucker ausschalten, Druckkopfkabel und -stecker auf festen Sitz prüfen und den Druckkopf korrekt einrasten lassen. Drucker wieder einschalten; bleibt der Fehler, den Service kontaktieren." = "Drucker ausschalten, Druckkopfkabel und -stecker auf festen Sitz prüfen und den Druckkopf korrekt einrasten lassen. Drucker wieder einschalten; bleibt der Fehler, den Service kontaktieren.";
+"Empfangspuffer voll" = "Empfangspuffer voll";
+"Der Drucker nimmt vorübergehend keine Daten an. Warten, bis laufende Aufträge gedruckt sind, oder „Aufträge abbrechen“ wählen und große Grafiken komprimiert (Z64) senden." = "Der Drucker nimmt vorübergehend keine Daten an. Warten, bis laufende Aufträge gedruckt sind, oder „Aufträge abbrechen“ wählen und große Grafiken komprimiert (Z64) senden.";
+"Druckkopf zu kalt" = "Druckkopf zu kalt";
+"Der Drucker ist kälter als seine Betriebstemperatur. In eine wärmere Umgebung (über 5 °C) bringen und vor dem Drucken einige Minuten akklimatisieren lassen." = "Der Drucker ist kälter als seine Betriebstemperatur. In eine wärmere Umgebung (über 5 °C) bringen und vor dem Drucken einige Minuten akklimatisieren lassen.";
+"Druckkopf zu heiß" = "Druckkopf zu heiß";
+"Die Druckkopftemperatur liegt über dem Betriebsbereich. Drucker abkühlen lassen, die Schwärzung (Darkness) reduzieren und für ausreichende Belüftung sorgen." = "Die Druckkopftemperatur liegt über dem Betriebsbereich. Drucker abkühlen lassen, die Schwärzung (Darkness) reduzieren und für ausreichende Belüftung sorgen.";
+"Konfiguration verloren" = "Konfiguration verloren";
+"Der Drucker hat seine gespeicherte Konfiguration verloren und Standardwerte geladen. Einstellungen in LabelWerk prüfen, erneut übertragen und mit „Einstellungen speichern“ dauerhaft sichern." = "Der Drucker hat seine gespeicherte Konfiguration verloren und Standardwerte geladen. Einstellungen in LabelWerk prüfen, erneut übertragen und mit „Einstellungen speichern“ dauerhaft sichern.";
+"Kalibrierung erforderlich" = "Kalibrierung erforderlich";
+"Etiketten korrekt einlegen und in LabelWerk „Kalibrieren“ wählen oder die Kalibrierung am Bedienfeld starten. Danach eine Testseite drucken." = "Etiketten korrekt einlegen und in LabelWerk „Kalibrieren“ wählen oder die Kalibrierung am Bedienfeld starten. Danach eine Testseite drucken.";
+"Druckkopf reinigen" = "Druckkopf reinigen";
+"Drucker ausschalten, Druckkopf öffnen und die Heizzeile mit einem Reinigungsstift oder einem mit Isopropanol (mind. 99 %) befeuchteten Tuch von der Mitte nach außen abwischen. Eine Minute trocknen lassen und schließen." = "Drucker ausschalten, Druckkopf öffnen und die Heizzeile mit einem Reinigungsstift oder einem mit Isopropanol (mind. 99 %) befeuchteten Tuch von der Mitte nach außen abwischen. Eine Minute trocknen lassen und schließen.";
+"Druckkopf ersetzen" = "Druckkopf ersetzen";
+"Der Druckkopf hat das Ende seiner Lebensdauer erreicht. Einen zu Modell und Auflösung passenden Ersatzdruckkopf einbauen und danach den Druckkopfzähler zurücksetzen." = "Der Druckkopf hat das Ende seiner Lebensdauer erreicht. Einen zu Modell und Auflösung passenden Ersatzdruckkopf einbauen und danach den Druckkopfzähler zurücksetzen.";
+"Etiketten fast leer" = "Etiketten fast leer";
+"Eine neue Etikettenrolle bereitlegen und nach dem aktuellen Auftrag einlegen." = "Eine neue Etikettenrolle bereitlegen und nach dem aktuellen Auftrag einlegen.";
+"Etikett entnehmen" = "Etikett entnehmen";
+"Im Spendemodus wartet ein Etikett an der Spendekante. Etikett abnehmen – der nächste Druck startet danach automatisch." = "Im Spendemodus wartet ein Etikett an der Spendekante. Etikett abnehmen – der nächste Druck startet danach automatisch.";
+"Papiervorschubfehler" = "Papiervorschubfehler";
+"Papierweg auf Stau oder schräg eingelegtes Material prüfen, Material neu einlegen, die Führungen an die Etikettenbreite anpassen und anschließend kalibrieren." = "Papierweg auf Stau oder schräg eingelegtes Material prüfen, Material neu einlegen, die Führungen an die Etikettenbreite anpassen und anschließend kalibrieren.";
+"Schwarze Markierung nicht gefunden" = "Schwarze Markierung nicht gefunden";
+"Prüfen, ob das Material schwarze Markierungen auf der Rückseite hat und der Sensor darüber steht. Andernfalls die Medienerkennung auf „Etiketten mit Lücke“ umstellen und kalibrieren." = "Prüfen, ob das Material schwarze Markierungen auf der Rückseite hat und der Sensor darüber steht. Andernfalls die Medienerkennung auf „Etiketten mit Lücke“ umstellen und kalibrieren.";
+"Ungültige Firmware-Konfiguration" = "Ungültige Firmware-Konfiguration";
+"Drucker aus- und wieder einschalten. Bleibt der Fehler bestehen, die passende Firmware in LabelWerk unter „Firmware“ erneut übertragen." = "Drucker aus- und wieder einschalten. Bleibt der Fehler bestehen, die passende Firmware in LabelWerk unter „Firmware“ erneut übertragen.";
+"Drucker nicht erreichbar" = "Drucker nicht erreichbar";
+"Prüfen, ob der Drucker eingeschaltet und verbunden ist (USB-Kabel, Netzwerk oder Bluetooth-Kopplung), und danach „Neu verbinden“ wählen." = "Prüfen, ob der Drucker eingeschaltet und verbunden ist (USB-Kabel, Netzwerk oder Bluetooth-Kopplung), und danach „Neu verbinden“ wählen.";

@@ -88,7 +88,7 @@ elif [[ -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_PASSWORD:-}" && -n "${TEAM_ID:
     AUTH=(--apple-id "${NOTARY_APPLE_ID}" --password "${NOTARY_PASSWORD}" --team-id "${TEAM_ID}")
     AUTH_LABEL="Apple-ID ${NOTARY_APPLE_ID} (Team ${TEAM_ID})"
 elif [[ "${LW_DRY_RUN}" == "1" ]]; then
-    AUTH=(--keychain-profile "<NOTARY_KEYCHAIN_PROFILE>")
+    AUTH=(--keychain-profile "NOTARY_KEYCHAIN_PROFILE")
     AUTH_LABEL="(keine Anmeldedaten – Probelauf)"
 else
     lw_die "Keine Anmeldedaten für den Notardienst. Empfohlen: einmalig
@@ -104,7 +104,7 @@ notary() {
     local arg
     for arg in "$@"; do
         if [[ "${hide_next}" == "1" ]]; then
-            shown+=("******")
+            shown+=("VERBORGEN")
             hide_next=0
             continue
         fi

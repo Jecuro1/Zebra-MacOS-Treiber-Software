@@ -263,8 +263,21 @@ fi
 step "Dateien entfernen"
 if [[ ${#TARGETS[@]} -gt 0 ]]; then
     for target in "${TARGETS[@]}"; do
+        case "${target}" in
+            "${PPD_DIR}"/*)
+                # PPD-Dateien im Probelauf nicht einzeln auflisten (über 100 Stück).
+                if [[ "${DRY_RUN}" == "1" ]]; then
+                    continue
+                fi
+                ;;
+            *) ;;
+        esac
         run rm -rf "${target}"
     done
+    if [[ "${DRY_RUN}" == "1" && "${PPD_COUNT}" -gt 0 ]]; then
+        printf '%s    $ rm -f %s/LabelWerk-*.ppd.gz %s/LabelWerk-*.ppd   # %s Dateien%s\n' \
+            "${C_DIM}" "${PPD_DIR}" "${PPD_DIR}" "${PPD_COUNT}" "${C_RESET}"
+    fi
 fi
 if [[ ${#USER_TARGETS[@]} -gt 0 ]]; then
     if [[ "${SYSTEM_ROOT}" == "1" && "${DRY_RUN}" != "1" ]] && command -v defaults >/dev/null 2>&1; then

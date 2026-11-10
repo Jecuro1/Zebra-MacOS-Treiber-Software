@@ -284,3 +284,95 @@ lw_is_macho() {
 lw_human_size() {
     du -sh "$1" 2>/dev/null | cut -f1
 }
+
+# --- CI (GitHub Actions) ---------------------------------------------------------------------
+
+# 1 = Ausgabe für GitHub Actions (Gruppen, Anmerkungen).
+lw_in_github_actions() {
+    [[ "${GITHUB_ACTIONS:-}" == "true" ]]
+}
+
+# Beginnt eine einklappbare Gruppe im CI-Protokoll (sonst eine normale Schrittüberschrift).
+lw_ci_group() {
+    if lw_in_github_actions; then
+        printf '::group::%s\n' "$*"
+    else
+        lw_step "$*"
+    fi
+}
+
+# Beendet eine mit lw_ci_group begonnene Gruppe.
+lw_ci_endgroup() {
+    if lw_in_github_actions; then
+        printf '::endgroup::\n'
+    fi
+}
+
+# Warnung, die in GitHub Actions zusätzlich als Anmerkung am Lauf erscheint.
+lw_ci_warning() {
+    if lw_in_github_actions; then
+        printf '::warning title=LabelWerk::%s\n' "$*"
+    fi
+    lw_warn "$*"
+}
+
+# Fehlermeldung als Anmerkung (ohne Abbruch).
+lw_ci_error() {
+    if lw_in_github_actions; then
+        printf '::error title=LabelWerk::%s\n' "$*"
+    fi
+    printf '%s  ✗ Fehler:%s %s\n' "${LW_C_RED}${LW_C_BOLD}" "${LW_C_RESET}" "$*" >&2
+}
+
+# Fügt ein Verzeichnis dem PATH hinzu – in GitHub Actions auch für alle folgenden Schritte.
+lw_ci_add_path() {
+    local directory="$1"
+    PATH="${directory}:${PATH}"
+    export PATH
+    if lw_in_github_actions && [[ -n "${GITHUB_PATH:-}" ]]; then
+        printf '%s\n' "${directory}" >> "${GITHUB_PATH}"
+    fi
+}
+
+# Anzahl paralleler Jobs: LW_JOBS, sonst alle Prozessorkerne.
+lw_jobs() {
+    if [[ -n "${LW_JOBS:-}" ]]; then
+        printf '%s' "${LW_JOBS}"
+    elif command -v nproc >/dev/null 2>&1; then
+        nproc
+    elif command -v sysctl >/dev/null 2>&1; then
+        sysctl -n hw.ncpu
+    else
+        printf '2'
+    fi
+}
+
+# Führt einen benannten CI-Schritt aus, misst die Dauer und meldet das Ergebnis.
+# $1: Name, $2: Funktionsname, weitere Argumente gehen an die Funktion.
+#
+# Der Schritt läuft in einer Subshell mit aktivem `set -e`: Jeder fehlschlagende Befehl beendet
+# den Schritt (ein Aufruf in einem `||`-Kontext würde `set -e` für die ganze Funktion abschalten).
+# Änderungen an Variablen (z. B. PATH) wirken deshalb nicht über den Schritt hinaus.
+lw_ci_run_step() {
+    local name="$1"
+    local function="$2"
+    shift 2
+    local started status=0
+    started="$(date +%s)"
+    lw_ci_group "Schritt „${name}“"
+    set +e
+    (
+        set -euo pipefail
+        "${function}" "$@"
+    )
+    status=$?
+    set -e
+    lw_ci_endgroup
+    local elapsed=$(( $(date +%s) - started ))
+    if [[ "${status}" -eq 0 ]]; then
+        lw_ok "Schritt „${name}“ erfolgreich (${elapsed} s)"
+    else
+        lw_ci_error "Schritt „${name}“ fehlgeschlagen (Exitcode ${status}, ${elapsed} s)"
+    fi
+    return "${status}"
+}

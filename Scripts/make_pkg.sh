@@ -105,9 +105,9 @@ if [[ "${SKIP_BUILD}" != "1" ]]; then
     "${SCRIPT_DIR}/build_app.sh" ${build_args[@]+"${build_args[@]}"}
 fi
 
-lw_require_file "${APP}/Contents/Info.plist" "App-Bundle" "zuerst Scripts/build_app.sh ausführen."
+lw_require_file "${APP}/Contents/Info.plist" "App-Bundle" "Zuerst Scripts/build_app.sh ausführen."
 lw_require_file "${DRIVER_ROOT}/Library/Printers/LabelWerk/Filter/rastertolabelwerk" "Treiberbaum" \
-    "zuerst Scripts/build_driver.sh ausführen."
+    "Zuerst Scripts/build_driver.sh ausführen."
 if [[ "${LW_DRY_RUN}" != "1" ]]; then
     bundle_version="$(plutil -extract CFBundleShortVersionString raw -o - "${APP}/Contents/Info.plist")"
     [[ "${bundle_version}" == "${VERSION}" ]] \

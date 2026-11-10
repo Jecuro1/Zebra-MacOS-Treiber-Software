@@ -1,0 +1,156 @@
+# LabelWerk – Continuous Integration
+#
+#   linux  läuft bei jedem Push und Pull Request: Modellkatalog, Swift-Kern und lwctl (Build +
+#          Tests), CUPS-Filter (C-Unit- und End-to-End-Tests), PPD-Generator mit cupstestppd,
+#          Python-/Shell-Werkzeuge, Treiberbaum und Probeläufe der macOS-Skripte.
+#   macos  ist teuer (macOS-Minuten) und läuft deshalb nur manuell (workflow_dispatch) sowie bei
+#          Pushes auf „main“ und „claude/**“: Swift-Tests inkl. App, Universal-Filter, App-Bundle,
+#          Installationspaket, Probeinstallation mit Testdruck über CUPS; lädt App (ZIP) und
+#          Paket als Artefakte hoch.
+#
+# Alle Schritte stecken in Scripts/ci_linux.sh bzw. Scripts/ci_macos.sh und lassen sich lokal
+# genauso ausführen (siehe docs/DEVELOPMENT.md).
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Auf „main“ jeden Lauf zu Ende führen, sonst überholte Läufe abbrechen.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  SWIFT_VERSION: "6.4.2"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  linux:
+    name: Linux (Kern, Filter, PPD, Werkzeuge)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Quelltext auschecken
+        uses: actions/checkout@v4
+
+      - name: Swift-Toolchain aus dem Zwischenspeicher
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/labelwerk/swift
+          key: swift-${{ env.SWIFT_VERSION }}-ubuntu24.04-${{ runner.arch }}
+
+      - name: Abhängigkeiten (apt, Swift ${{ env.SWIFT_VERSION }})
+        run: Scripts/ci_linux.sh --install-deps setup
+
+      - name: Lint (Shell, Python, YAML, Property-Listen)
+        run: Scripts/ci_linux.sh lint
+
+      - name: Modellkatalog
+        run: Scripts/ci_linux.sh catalog
+
+      - name: Swift bauen
+        run: Scripts/ci_linux.sh build
+
+      - name: Swift-Tests
+        run: Scripts/ci_linux.sh test-swift
+
+      - name: CUPS-Filter testen
+        run: Scripts/ci_linux.sh test-driver
+
+      - name: PPD-Dateien erzeugen und prüfen
+        run: Scripts/ci_linux.sh test-ppd
+
+      - name: Werkzeug-Tests (Scripts/tests)
+        run: Scripts/ci_linux.sh test-scripts
+
+      - name: Treiberbaum und Probeläufe der macOS-Skripte
+        run: Scripts/ci_linux.sh driver-tree
+
+      - name: Lokalisierung (nur Warnung)
+        continue-on-error: true
+        run: Scripts/ci_linux.sh --strict-strings strings
+
+  macos:
+    name: macOS (App, Universal-Filter, Paket)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/claude/')))
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Quelltext auschecken
+        uses: actions/checkout@v4
+
+      - name: Neuestes stabiles Xcode auswählen
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Werkzeuge
+        run: Scripts/ci_macos.sh setup
+
+      - name: Modellkatalog
+        run: Scripts/ci_macos.sh catalog
+
+      - name: Swift-Tests (inkl. App-Ziel)
+        run: Scripts/ci_macos.sh test-swift
+
+      - name: Universal-Filter bauen und testen
+        run: Scripts/ci_macos.sh test-driver
+
+      - name: PPD-Dateien erzeugen und prüfen
+        run: Scripts/ci_macos.sh test-ppd
+
+      - name: Werkzeug-Tests (Scripts/tests)
+        run: Scripts/ci_macos.sh test-scripts
+
+      - name: App-Bundle (Release, Universal Binary, ad hoc signiert)
+        run: Scripts/ci_macos.sh app
+
+      - name: Installationspaket (unsigniert)
+        run: Scripts/ci_macos.sh pkg
+
+      - name: Paketinhalt prüfen
+        run: Scripts/ci_macos.sh verify-pkg
+
+      - name: Probeinstallation, Testdruck über CUPS, Deinstallation
+        run: Scripts/ci_macos.sh install-test e2e-print
+
+      - name: Artefakte vorbereiten
+        if: success() || failure()
+        run: Scripts/ci_macos.sh artifacts
+
+      - name: App hochladen (ZIP)
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LabelWerk-app-${{ github.sha }}
+          path: |
+            dist/*-app.zip
+            dist/*-dSYM.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Installationspaket hochladen
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LabelWerk-pkg-${{ github.sha }}
+          path: |
+            dist/*.pkg
+            dist/*.pkg.sha256
+          if-no-files-found: warn
+          retention-days: 14
