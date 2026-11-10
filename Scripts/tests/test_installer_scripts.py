@@ -334,8 +334,8 @@ class BuildScriptTests(unittest.TestCase):
 
     def test_scripts_are_executable_bash_with_strict_mode(self):
         for path in SHELL_SCRIPTS:
-            if path == COMMON:
-                continue
+            if path.parent == INSTALLER / "lib":
+                continue  # Bibliotheken (common.sh, release.sh) werden nur mit `source` eingebunden.
             with self.subTest(script=path.name):
                 self.assertTrue(os.access(path, os.X_OK), f"{path} ist nicht ausführbar")
                 text = path.read_text(encoding="utf-8")

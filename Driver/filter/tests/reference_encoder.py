@@ -33,7 +33,8 @@ import sys
 import time
 import zlib
 from dataclasses import dataclass, field, replace
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from fractions import Fraction
+from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
 # --------------------------------------------------------------------------------------------
 # §4.1 Rasterung
@@ -975,6 +976,16 @@ FIT_CONTENT_LEVEL = 250        # Inhalt ⇔ L < 250
 FIT_TOLERANCE = 200            # 1/100 mm (2 mm)
 FIT_MAX_DOTS = 32000
 FIT_MAX_PAGE_POINTS = 100000.0
+FIT_MARGIN = 150               # 1/100 mm Sicherheitsrand je Seite (1,5 mm)
+
+
+class FitPlan(NamedTuple):
+    """Schritt F.1: Etikett ``W × H`` in Punkten der Seite (None = frei) und Sicherheitsrand je Seite
+    (``mx`` links/rechts, ``my`` oben/unten)."""
+    width: Optional[int]
+    height: Optional[int]
+    margin_x: int = 0
+    margin_y: int = 0
 
 
 def points_to_hundredths_mm(points: float) -> Optional[int]:
@@ -984,9 +995,14 @@ def points_to_hundredths_mm(points: float) -> Optional[int]:
     return int(math.floor(points * 2540.0 / 72.0 + 0.5))
 
 
+def fit_margin(dpi: int) -> int:
+    """1,5 mm in Punkten, kaufmännisch gerundet: (150 · dpi + 1270) // 2540."""
+    return (FIT_MARGIN * dpi + 1270) // 2540
+
+
 def fit_plan(s: Settings, width: int, height: int, page_size: Optional[Tuple[float, float]],
-             xdpi: int, ydpi: int) -> Optional[Tuple[Optional[int], Optional[int]]]:
-    """Schritt F.1: Zielgröße (W, H) in Punkten (None = freie Seite) oder None = keine Anpassung."""
+             xdpi: int, ydpi: int) -> Optional[FitPlan]:
+    """Schritt F.1: Etikett (W, H) in Punkten (None = freie Seite) mit Rand oder None = keine Anpassung."""
     if s.fit_to_label != "Auto" or s.label_width <= 0 or page_size is None or width <= 0 or height <= 0:
         return None
     page_w, page_h = (points_to_hundredths_mm(v) for v in page_size)
@@ -1005,7 +1021,49 @@ def fit_plan(s: Settings, width: int, height: int, page_size: Optional[Tuple[flo
     for value in (target_w, target_h):
         if value is not None and not 1 <= value <= FIT_MAX_DOTS:
             return None
-    return target_w, target_h
+    return FitPlan(target_w, target_h, fit_margin(xdpi), fit_margin(ydpi))
+
+
+def _inner(side: int, margin: int) -> int:
+    """Feste Etikettenseite abzüglich Rand auf beiden Seiten (zu klein → ganze Seite)."""
+    inner = side - 2 * margin
+    return inner if inner >= 1 else side
+
+
+def fit_box(plan: FitPlan, rw: int, rh: int) -> Tuple[int, int]:
+    """Schritt F.4: Zielrahmen (BW, BH) für Inhalt ``rw × rh`` – feste Seite W − 2·mx bzw. H − 2·my,
+    freie Seite max(Inhalt, 32000)."""
+    box_w = _inner(plan.width, plan.margin_x) if plan.width is not None else max(rw, FIT_MAX_DOTS)
+    box_h = _inner(plan.height, plan.margin_y) if plan.height is not None else max(rh, FIT_MAX_DOTS)
+    return box_w, box_h
+
+
+def fit_rotation(bw: int, bh: int, plan: FitPlan) -> int:
+    """Schritt F.3: 90 (im Uhrzeigersinn), 270 (gegen den Uhrzeigersinn) oder 0.
+
+    Gedreht wird nur bei festem Etikett und nur, wenn der Inhalt gedreht mehr als 10 % größer
+    würde: s90 > 1,1 · s0 mit s0 = min(W'/bw, H'/bh), s90 = min(W'/bh, H'/bw) – als Brüche exakt
+    ausgewertet (die Gleichwertigkeit mit der Kurzform in C/Swift prüft ``selftest``)."""
+    if plan.width is None or plan.height is None:
+        return 0
+    inner_w, inner_h = fit_box(plan, bw, bh)
+    s0 = min(Fraction(inner_w, bw), Fraction(inner_h, bh))
+    s90 = min(Fraction(inner_w, bh), Fraction(inner_h, bw))
+    if s90 * 10 <= s0 * 11:
+        return 0
+    return 90 if bh > bw else 270           # Hochformat-Inhalt auf Querformat-Etikett → rechts herum
+
+
+def rotate_luminance(lum: bytes, width: int, height: int, turn: int) -> bytes:
+    """Dreht ein Luminanzbild (``width × height``, zeilenweise) um 90° (im Uhrzeigersinn:
+    (x, y) → (height − 1 − y, x)) oder 270° ((x, y) → (y, width − 1 − x)); Ergebnis height × width."""
+    if turn == 90:
+        rows = [lum[x::width][::-1] for x in range(width)]               # neue Zeile x: Spalte x von unten
+    elif turn == 270:
+        rows = [lum[x::width] for x in range(width - 1, -1, -1)]         # neue Zeile: Spalte w−1−… von oben
+    else:
+        raise ValueError("Drehung %r" % turn)
+    return b"".join(bytes(row) for row in rows)
 
 
 _CONTENT_TABLE = bytes(1 if v < FIT_CONTENT_LEVEL else 0 for v in range(256))
@@ -1029,23 +1087,12 @@ def content_bounds(lum: bytes, width: int, height: int) -> Optional[Tuple[int, i
     return left, top, right - left + 1, bottom - top + 1
 
 
-def fit_target_size(bw: int, bh: int, target_w: Optional[int], target_h: Optional[int]) -> Tuple[int, int]:
-    """Schritt F.3: nie vergrößern, Seitenverhältnis behalten (gerundet, mindestens 1)."""
-    def scaled_h() -> int:
-        return max(1, (2 * bh * target_w + bw) // (2 * bw))
-
-    def scaled_w() -> int:
-        return max(1, (2 * bw * target_h + bh) // (2 * bh))
-
-    if target_w is not None and target_h is not None:
-        if bw <= target_w and bh <= target_h:
-            return bw, bh
-        if target_w * bh <= target_h * bw:
-            return target_w, scaled_h()
-        return scaled_w(), target_h
-    if target_w is not None:
-        return (bw, bh) if bw <= target_w else (target_w, scaled_h())
-    return (bw, bh) if bh <= target_h else (scaled_w(), target_h)
+def fit_target_size(rw: int, rh: int, box_w: int, box_h: int) -> Tuple[int, int]:
+    """Schritt F.4: größte Größe mit dem Seitenverhältnis von ``rw × rh`` im Rahmen ``box_w × box_h``
+    (vergrößern und verkleinern; die abhängige Seite kaufmännisch gerundet, mindestens 1)."""
+    if box_w * rh <= box_h * rw:
+        return box_w, max(1, (2 * rh * box_w + rw) // (2 * rw))
+    return max(1, (2 * rw * box_h + rh) // (2 * rh)), box_h
 
 
 def _axis_spans(source: int, target: int) -> List[Tuple[int, int, List[Tuple[int, int]]]]:
@@ -1066,8 +1113,9 @@ def _axis_spans(source: int, target: int) -> List[Tuple[int, int, List[Tuple[int
 
 
 def area_average(lum: bytes, width: int, x0: int, y0: int, bw: int, bh: int, tw: int, th: int) -> bytes:
-    """Schritt F.4: Flächenmittel des Ausschnitts (x0, y0, bw, bh) auf tw × th – exakte Summe der
-    Teilflächen, einmal gerundet: (S + T/2) / T mit T = bw·bh."""
+    """Schritt F.5: Flächenmittel des Ausschnitts (x0, y0, bw, bh) auf tw × th – verkleinern **und**
+    vergrößern (je Achse unabhängig): exakte Summe der Teilflächen, einmal gerundet: (S + T/2) / T
+    mit T = bw·bh."""
     rows = [lum[(y0 + y) * width + x0:(y0 + y) * width + x0 + bw] for y in range(bh)]
     if tw == bw and th == bh:
         return b"".join(rows)
@@ -1087,11 +1135,10 @@ def area_average(lum: bytes, width: int, x0: int, y0: int, bw: int, bh: int, tw:
         acc = [0] * tw
         contributions = [(y, th) for y in range(a, b)] + edges
         for y, weight in contributions:
-            sums = horizontal(y)
-            for X in range(tw):
-                acc[X] += weight * sums[X]
+            acc = [value + weight * part for value, part in zip(acc, horizontal(y))]
         out += bytes((value + total // 2) // total for value in acc)
-        # Eine Quellzeile gehört zu höchstens zwei aufeinanderfolgenden Zielzeilen.
+        # Spätere Zielzeilen brauchen nur Quellzeilen ab der letzten hier benutzten (beim Vergrößern
+        # dieselbe Quellzeile für mehrere Zielzeilen, beim Verkleinern höchstens die Randzeile).
         last = max(y for y, _ in contributions)
         for key in [key for key in cache if key < last]:
             del cache[key]
@@ -1104,16 +1151,21 @@ def fit_page(lum: bytes, width: int, height: int, s: Settings, page_size: Option
     plan = fit_plan(s, width, height, page_size, xdpi, ydpi)
     if plan is None:
         return width, height, lum
-    target_w, target_h = plan
     bounds = content_bounds(lum, width, height)
     if bounds is None:                                                   # leere Seite → leeres Etikett
-        cw, ch = target_w or 1, target_h or 1
+        cw, ch = plan.width or 1, plan.height or 1
         return cw, ch, b"\xff" * (cw * ch)
     x0, y0, bw, bh = bounds
-    tw, th = fit_target_size(bw, bh, target_w, target_h)
-    scaled = area_average(lum, width, x0, y0, bw, bh, tw, th)
-    cw = target_w if target_w is not None else tw
-    ch = target_h if target_h is not None else th
+    turn = fit_rotation(bw, bh, plan)
+    if turn:                                                             # Ausschnitt drehen, dann skalieren
+        cut = b"".join(lum[(y0 + y) * width + x0:(y0 + y) * width + x0 + bw] for y in range(bh))
+        source, stride, sx, sy, rw, rh = rotate_luminance(cut, bw, bh, turn), bh, 0, 0, bh, bw
+    else:
+        source, stride, sx, sy, rw, rh = lum, width, x0, y0, bw, bh
+    tw, th = fit_target_size(rw, rh, *fit_box(plan, rw, rh))
+    scaled = area_average(source, stride, sx, sy, rw, rh, tw, th)
+    cw = plan.width if plan.width is not None else tw
+    ch = plan.height if plan.height is not None else th
     ox, oy = (cw - tw) // 2, (ch - th) // 2
     canvas = bytearray(b"\xff" * (cw * ch))
     for y in range(th):

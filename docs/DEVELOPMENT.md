@@ -169,7 +169,8 @@ Alle Release-Werte stehen an einer Stelle, in `Installer/config.env`, und lassen
 | `APP_NAME` | Name der App und des Pakets (`LabelWerk`) |
 | `BUNDLE_ID` | Bundle-Kennung (`com.labelwerk.app`); Paketkennungen: `<BUNDLE_ID>.pkg`, `.driver`, `.cli` |
 | `VERSION` | Marketing-Version (`CFBundleShortVersionString`, `VERSION`-Datei des Treibers, `*FileVersion` der PPDs, Paketversion) |
-| `BUILD` | fortlaufende Build-Nummer (`CFBundleVersion`) – bei jeder Veröffentlichung erhöhen |
+| `BUILD` | fortlaufende Build-Nummer (`CFBundleVersion`), ganze Zahl; die CI setzt sie auf die Laufnummer (`github.run_number`) |
+| `UPDATE_REPOSITORY` | GitHub-Repository `Besitzer/Name`, aus dessen Releases sich die App aktualisiert (`Info.plist`: `LWUpdateRepository`); leer = Update-Dienst abgeschaltet |
 | `COPYRIGHT_YEAR` | Jahr im Copyright-Hinweis (leer = aktuelles Jahr) |
 | `TEAM_ID` | Apple-Team-ID (nur für die Notarisierung mit Apple-ID und Passwort) |
 | `DEVELOPER_ID_APP` | Signaturidentität für App, `lwctl` und Filter; leer = ad hoc (`-`) |
@@ -179,9 +180,116 @@ Die Datei wird nicht mit `source` ausgeführt, sondern geparst und validiert
 (`Installer/lib/common.sh`). Platzhalter wie `@VERSION@` in `Installer/Info.plist`,
 `InfoPlist.strings`, `distribution.xml` und den Installer-Texten ersetzen die Skripte wörtlich.
 
-## Release
+## Release und Updates
 
-1. `VERSION` und `BUILD` in `Installer/config.env` erhöhen und committen.
+Jede Änderung, die die macOS-CI besteht, wird automatisch ein Update: Der macOS-Job veröffentlicht
+nach dem letzten erfolgreichen Schritt ein **GitHub-Release** im selben Repository, und die App
+findet, lädt und installiert es selbst (Einstellungen › Updates, „Nach Updates suchen …“). Niemand
+muss mehr Pakete von GitHub laden oder die App vorher löschen.
+
+### Ablauf in der CI
+
+1. Auslöser wie beim macOS-Job: manuell (Actions › CI › „Run workflow“, auf jedem Zweig), jeder
+   Push auf `main` und jeder Tag `v*`.
+2. `BUILD` ist die Laufnummer (`BUILD: ${{ github.run_number }}` im Job) – sie steigt mit jedem
+   Lauf, `VERSION` kommt aus `Installer/config.env`. Ein Release mit gleicher Version und höherer
+   Build-Nummer ist für die App ein Update.
+3. Alle Schritte bis `install-test`/`e2e-print`, `artifacts` und der Upload der Artefakte müssen
+   grün sein; dann läuft als letzter Schritt `Scripts/ci_macos.sh release` mit
+   `GH_TOKEN: ${{ github.token }}`. Der Job hat dafür `permissions: contents: write` (der
+   Workflow sonst nur `contents: read`) und checkt mit `fetch-depth: 0` aus (Historie und Tags für
+   die Notizen, ohne gespeicherte Zugangsdaten).
+4. `release` prüft die gebaute App (`CFBundleShortVersionString`, `CFBundleVersion`,
+   `LWUpdateRepository` passend zur Konfiguration), legt in `dist/release/` das Paket, das
+   Manifest, die Notizen und den Release-Text an und ruft `gh release create` auf:
+
+   | | Beispiel (Version 1.1.0, Lauf 58) |
+   |---|---|
+   | Tag (Ziel: der gebaute Commit) | `v1.1.0-b58` |
+   | Titel | `LabelWerk 1.1.0 (Build 58)` |
+   | Dateien | `LabelWerk-1.1.0-58.pkg`, `labelwerk-update.json` |
+   | Text | „## Änderungen“ mit den Betreffzeilen der Commits seit dem vorherigen `v*`-Tag (ohne Merges, höchstens 30, neueste zuerst; ohne vorherigen Tag die Nachricht des Commits ohne Trailer), dazu Installationshinweis, SHA-256 und Commit |
+   | „Neuestes Release“ | ja – außer es gibt schon ein neueres (ein später gestarteter Lauf war früher fertig) |
+
+   Weil jedes Release selbst einen `v…-b…`-Tag setzt, listen die Notizen genau die Änderungen seit
+   dem vorherigen Update. Ein Tag auf dem gebauten Commit selbst (Tag-Push, erneuter Lauf) zählt
+   nicht als „vorheriger“. Tags, die die CI mit dem `GITHUB_TOKEN` anlegt, lösen keinen neuen
+   Workflow-Lauf aus.
+5. Ein erneuter Lauf (gleiche Laufnummer) findet sein Release schon vor und ersetzt Dateien und
+   Text (`gh release upload --clobber`, `gh release edit`). Schlägt `gh` fehl, ist der Schritt rot.
+6. Gehört der Lauf zu einem anderen Repository als `UPDATE_REPOSITORY` (Fork), oder ist
+   `UPDATE_REPOSITORY` leer, wird mit einer Warnung kein Release angelegt – Forks tragen ihr
+   eigenes Repository in `Installer/config.env` ein.
+
+Das Manifest `labelwerk-update.json` (Schema 1) – die App liest es aus
+`https://github.com/<Repo>/releases/latest/download/labelwerk-update.json` bzw. bei einem privaten
+Repository über die GitHub-API mit dem Token aus Einstellungen › Updates:
+
+```json
+{
+  "schema": 1,
+  "version": "1.1.0",
+  "build": 58,
+  "tag": "v1.1.0-b58",
+  "pkg": {
+    "name": "LabelWerk-1.1.0-58.pkg",
+    "url": "https://github.com/Jecuro1/Zebra-MacOS-Treiber-Software/releases/download/v1.1.0-b58/LabelWerk-1.1.0-58.pkg",
+    "size": 48213504,
+    "sha256": "…64 Hexadezimalziffern…"
+  },
+  "minimumSystemVersion": "14.0",
+  "publishedAt": "2026-11-10T12:00:00Z",
+  "notes": "## Änderungen\n\n- …\n"
+}
+```
+
+Größe und SHA-256 berechnet die CI aus dem hochgeladenen Paket, die Mindestversion stammt aus
+`LSMinimumSystemVersion` der App, der Zeitpunkt aus `SOURCE_DATE_EPOCH` bzw. der aktuellen Zeit
+(UTC). Die Funktionen liegen in `Installer/lib/release.sh` und sind mit `Scripts/tests/test_release.py`
+getestet (gegen eine Attrappe von `gh`).
+
+Lokal vorbereiten und ansehen, ohne etwas zu veröffentlichen (nach `app` und `pkg`):
+
+```bash
+BUILD=58 Scripts/ci_macos.sh --release-dry-run release   # dist/release/: Paket, Manifest, Notizen; gh-Befehle nur angezeigt
+BUILD=58 Scripts/ci_macos.sh --allow-publish release     # wirklich veröffentlichen (gh-Anmeldung mit Schreibrecht)
+```
+
+Außerhalb von GitHub Actions verweigert `release` das Veröffentlichen ohne `--allow-publish`; in
+den Standardschritten von `Scripts/ci_macos.sh` ist es nicht enthalten.
+
+### Warum die App beim Update in /Applications landet
+
+Die App-Komponente des Pakets ist **nicht verschiebbar** (`BundleIsRelocatable = NO`): Sonst
+ersetzt der Installer eine beliebige andere Kopie der App mit derselben Bundle-ID (Downloads,
+Build-Ordner) statt `/Applications/LabelWerk.app`. `BundleOverwriteAction = upgrade` ersetzt das
+alte Bundle vollständig, die Versionsprüfung (`BundleIsVersionChecked = YES`) vergleicht
+`CFBundleShortVersionString` und dann `CFBundleVersion` – ein CI-Release mit gleicher Version und
+höherer Build-Nummer ersetzt die App, ein älteres Paket überschreibt keine neuere App. Treiber,
+Warteschlangen und Einstellungen bleiben erhalten (`postinstall` stellt vorhandene Warteschlangen
+mit ihren Standardoptionen auf die neuen PPDs um; die App-Daten liegen außerhalb des Bundles).
+
+Belegt wird das in jedem macOS-Lauf: `verify-pkg` prüft die `PackageInfo` der App-Komponente
+(Ziel `/Applications`, kein Eintrag unter `<relocate>`, Eintrag unter `<upgrade-bundle>` und
+`<bundle-version>`, Versionen = `VERSION`/`BUILD`) und `LWUpdateRepository` in der Info.plist;
+`install-test` setzt die installierte App auf Build 0 und installiert das Paket erneut – danach
+muss `/Applications/LabelWerk.app` wieder die Build-Nummer des Laufs tragen.
+
+### Private Repositorys
+
+Ist das Repository privat, liefert `releases/latest/download/…` ohne Anmeldung „404“. Entweder das
+Repository öffentlich machen oder in der App unter Einstellungen › Updates ein **fine-grained
+Token** mit Lesezugriff auf die Inhalte („Contents: Read-only“) genau dieses Repositorys
+eintragen (Schlüsselbund, siehe [INSTALLATION.md](INSTALLATION.md)). Die CI braucht kein eigenes
+Token – sie nutzt das `GITHUB_TOKEN` des Laufs.
+
+### Manuelles Release (signiert und notarisiert)
+
+Für eine Weitergabe außerhalb des Update-Dienstes (Gatekeeper ohne Warnung) bleibt der klassische
+Weg:
+
+1. `VERSION` in `Installer/config.env` erhöhen und committen (`BUILD` höher als die letzte
+   CI-Laufnummer wählen, sonst ersetzt das Paket keine neuere CI-Version).
 2. `make test` (bzw. `make ci`) – alles grün.
 3. Signierte Bausteine bauen:
 
@@ -201,8 +309,11 @@ Die Datei wird nicht mit `source` ausgeführt, sondern geparst und validiert
    sudo installer -pkg dist/LabelWerk-1.0.0.pkg -target /     # auf einem Testrechner
    ```
 
-6. Tag setzen (`git tag v1.0.0 && git push --tags`) und `dist/LabelWerk-<Version>.pkg` samt
-   `.sha256` veröffentlichen. Das dSYM-Bündel `build/LabelWerk.app.dSYM` für die Auswertung von
+6. Tag setzen (`git tag v1.0.0 && git push --tags`) – der Tag-Push startet den macOS-Job, der
+   wie oben ein Release `v<Version>-b<Laufnummer>` für den Update-Dienst veröffentlicht. Ein
+   signiertes Paket lässt sich zusätzlich an dieses Release hängen
+   (`gh release upload v1.0.0-b<Lauf> dist/LabelWerk-<Version>.pkg`); das Update-Manifest verweist
+   auf das Paket der CI. Das dSYM-Bündel `build/LabelWerk.app.dSYM` für die Auswertung von
    Absturzberichten aufbewahren.
 
 ### Was die Skripte tun
@@ -211,7 +322,7 @@ Die Datei wird nicht mit `source` ausgeführt, sondern geparst und validiert
 |---|---|---|
 | `Scripts/build_driver.sh` | Universal-Filter (`make -C Driver/filter universal`), PPDs (`generate_ppds.py --gzip`), Symbol, `VERSION`, `uninstall.sh` in den Aufbau von ARCHITECTURE.md §10; Rechte setzen; Filter signieren | `--output` (wird vorher gelöscht und muss deshalb neu, leer oder ein früherer Treiberbaum sein; System-, Benutzer- und Repository-Ordner werden abgelehnt), `--host` (Testaufbau für das eigene System, auch Linux), `--no-sign`, `--dry-run` |
 | `Scripts/build_app.sh` | `swift build -c release --arch arm64 --arch x86_64` für `LabelWerk` und `lwctl`; Bundle mit `Info.plist`, `AppIcon.icns`, `*.lproj`, `Helpers/lwctl`, `Resources/Driver`; dSYM sichern, Symbole entfernen; von innen nach außen signieren | `--debug`, `--skip-driver`, `--skip-build`, `--output`, `--dry-run` |
-| `Scripts/make_pkg.sh` | Komponenten App (`/Applications`, nicht verschiebbar), Treiber (`/`, mit pre-/postinstall), lwctl (ohne Nutzlast); `productbuild` mit `Installer/pkg/distribution.xml` und deutsch/englischer Oberfläche; Inhalt prüfen; SHA-256 | `--skip-build`, `--unsigned`, `--output`, `--dry-run` |
+| `Scripts/make_pkg.sh` | Komponenten App (`/Applications`, nicht verschiebbar, `upgrade`, Versionsprüfung), Treiber (`/`, mit pre-/postinstall), lwctl (ohne Nutzlast); `productbuild` mit `Installer/pkg/distribution.xml` und deutsch/englischer Oberfläche; Inhalt prüfen; SHA-256 | `--skip-build`, `--unsigned`, `--output`, `--dry-run` |
 | `Scripts/notarize.sh` | `xcrun notarytool submit --wait`, bei Ablehnung Prüfprotokoll, `stapler staple`, Gatekeeper-Prüfung (`spctl --type install`/`execute`, bei `.dmg` `--type open --context context:primary-signature` – Disk-Images müssen dafür selbst signiert sein) | `--no-staple`, `--timeout`, `--dry-run`; Dateien `.pkg`, `.dmg`, `.zip`, `.app` |
 | `Scripts/uninstall.sh` | Deinstallation (wird als `/Library/Printers/LabelWerk/uninstall.sh` mitinstalliert) | `--remove-queues`, `--keep-app`, `--purge-user-data`, `--yes`, `--dry-run`, `--root` |
 
@@ -223,7 +334,8 @@ jeden Befehl nur anzeigt. Gemeinsame Funktionen liegen in `Installer/lib/common.
 
 ```
 LabelWerk-<Version>.pkg            productbuild-Archiv (Installer/pkg/distribution.xml)
-├── LabelWerkApp.pkg               LabelWerk.app → /Applications (BundleIsRelocatable = NO)
+├── LabelWerkApp.pkg               LabelWerk.app → /Applications (BundleIsRelocatable = NO,
+│                                  BundleOverwriteAction = upgrade, BundleIsVersionChecked = YES)
 ├── LabelWerkDriver.pkg            build/driver-root → /   (Besitzer root:wheel)
 │   ├── preinstall                 alte Treiberversion und LabelWerk-PPDs entfernen
 │   └── postinstall                Rechte festziehen, Quarantäne entfernen, cupsd neu starten,
@@ -295,7 +407,7 @@ auf; jeder Workflow-Schritt entspricht einem Skriptschritt und lässt sich lokal
 | Job | Auslöser | Inhalt |
 |---|---|---|
 | `linux` (ubuntu-24.04) | jeder Push (alle Zweige und Tags `v*`), jeder Pull Request, manuell | Swift 6.4.2 von swift.org (zwischengespeichert), Lint, Katalog, `swift build --build-tests`, Swift-Tests je Testziel, Filtertests, PPDs + `cupstestppd`, Werkzeug-Tests, Treiberbaum und Probeläufe der macOS-Skripte; Lokalisierung als Warnschritt (`--strict-strings`, `continue-on-error`) |
-| `macos` (macos-15, neuestes stabiles Xcode) | nur manuell (`workflow_dispatch`), bei Pushes auf `main` und für Versions-Tags `v*` – macOS-Minuten sind knapp | Build inkl. App-Ziel, Swift-Tests je Testziel, Universal-Filter + Tests, App-Bundle (ad hoc signiert), unsigniertes Paket, Paketprüfung, Probeinstallation mit Testdruck über CUPS und Deinstallation; Artefakte: App (ZIP, dSYM) und Paket |
+| `macos` (macos-15, neuestes stabiles Xcode) | nur manuell (`workflow_dispatch`), bei Pushes auf `main` und für Versions-Tags `v*` – macOS-Minuten sind knapp | Build inkl. App-Ziel, Swift-Tests je Testziel, Universal-Filter + Tests, App-Bundle (ad hoc signiert), unsigniertes Paket, Paketprüfung (inkl. Update-Fähigkeit), Probeinstallation mit Update-Probe und Testdruck über CUPS, Deinstallation; Artefakte: App (ZIP, dSYM) und Paket; zuletzt das GitHub-Release für den Update-Dienst (`release`, siehe „Release und Updates“) |
 
 ```bash
 Scripts/ci_linux.sh                         # alle Schritte
@@ -303,6 +415,7 @@ Scripts/ci_linux.sh build test-swift        # einzelne Schritte
 Scripts/ci_linux.sh --keep-going            # weitermachen und am Ende zusammenfassen
 Scripts/ci_macos.sh test-driver app pkg verify-pkg
 Scripts/ci_macos.sh --allow-system-changes install-test e2e-print   # installiert systemweit!
+Scripts/ci_macos.sh --release-dry-run release                       # Release vorbereiten, nichts veröffentlichen
 ```
 
 Der Schritt `test-swift` baut zuerst alles (`swift build --build-tests`, auf macOS inklusive
