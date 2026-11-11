@@ -192,7 +192,7 @@ final class PrinterSetupWizardModel {
         }
     }
 
-    /// Übernimmt einen schon gefundenen Drucker (Seitenleiste „Im Netzwerk“) als Suchtreffer und wählt
+    /// Übernimmt einen schon gefundenen Drucker („Drucker suchen“ › „Drucker installieren …“) als Suchtreffer und wählt
     /// ihn aus – die Erkennung beginnt dann mit dem, was die Suche schon weiß (eine Antwort auf die
     /// Zebra-Suche bestätigt den Zebra-Drucker auch ohne SNMP, etwa hinter einem VPN). Ohne Fund bzw.
     /// für andere Verbindungen bleibt nur die Adresse als manuelle Eingabe.
@@ -255,21 +255,27 @@ final class PrinterSetupWizardModel {
 
     // MARK: Schritt 1
 
-    /// Gefundene Drucker wie in „Drucker suchen“ (`DiscoveryFilter`): nur als Zebra erkannte, die noch
-    /// nicht in LabelWerk eingerichtet sind – Netzwerk zuerst, dann USB. Der gewählte Drucker bleibt
-    /// sichtbar, auch wenn er inzwischen eingerichtet ist (etwa nach der Installation).
+    /// Gefundene Drucker wie in „Drucker suchen“ (`DiscoveryFilter.overview`): je physischem Gerät ein
+    /// Eintrag (Zebra-Suche, Bonjour, Netzwerk-Scan und USB desselben Druckers zusammengeführt) über
+    /// seine beste Verbindung – nur als Zebra erkannte, die noch nicht in LabelWerk eingerichtet sind,
+    /// Netzwerk zuerst (nach Adresse), dann USB. Der gewählte Drucker bleibt sichtbar, auch wenn er
+    /// inzwischen eingerichtet ist (etwa nach der Installation) bzw. nicht die beste Verbindung ist.
     var candidates: [DiscoveredPrinter] {
-        let partition = candidatePartition
-        var printers = partition.new
-        if case .discovered(let id) = candidate, let selected = partition.alreadyAdded.first(where: { $0.id == id }) {
-            printers.append(selected)
+        let overview = candidateOverview
+        var selectedID: String?
+        if case .discovered(let id) = candidate { selectedID = id }
+        var printers = overview.devices.map { device -> DiscoveredPrinter in
+            guard let selectedID, device.preferred.id != selectedID,
+                  let member = device.members.first(where: { $0.id == selectedID }) else { return device.preferred }
+            return member
         }
-        return printers.sorted { lhs, rhs in
-            let left = rank(lhs)
-            let right = rank(rhs)
-            if left != right { return left < right }
-            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        if let selectedID, !printers.contains(where: { $0.id == selectedID }),
+           let device = overview.added.first(where: { $0.members.contains { $0.id == selectedID } }) {
+            printers.append(device.preferred.id == selectedID
+                            ? device.preferred
+                            : device.members.first { $0.id == selectedID } ?? device.preferred)
         }
+        return printers
     }
 
     /// Schon eingerichtete Zebra-Drucker (Drucker, nicht Treffer), die deshalb nicht angezeigt werden –
@@ -277,25 +283,20 @@ final class PrinterSetupWizardModel {
     var hiddenAddedCount: Int {
         var selectedID: String?
         if case .discovered(let id) = candidate { selectedID = id }
-        return candidatePartition.hiddenAddedPrinterCount(excluding: selectedID)
+        return candidateOverview.hiddenAddedPrinterCount(excluding: selectedID)
     }
 
-    private var candidatePartition: DiscoveryFilter.Partition {
+    /// Unterstützte Funde (Netzwerk, USB), zu Geräten zusammengeführt und aufgeteilt.
+    private var candidateOverview: DiscoveryOverview {
         let supported = discovery.found.filter { PrinterInstallRequest.supports($0.descriptor) }
-        return app?.networkDiscovery.partition(supported) ?? DiscoveryFilter.partition(supported, identities: [])
+        return app?.networkDiscovery.overview(supported) ?? DiscoveryFilter.overview(supported, identities: [])
     }
 
-    private func rank(_ printer: DiscoveredPrinter) -> Int {
-        switch printer.descriptor.kind {
-        case .tcp: return 0
-        case .usb: return 1
-        default: return 2
-        }
-    }
-
+    /// Der gewählte Fund – als Eintrag der Liste mit allem, was die anderen Funde desselben Geräts wissen
+    /// (Name, Modell, Seriennummer), sonst so, wie die Suche ihn meldete.
     var selectedPrinter: DiscoveredPrinter? {
         guard case .discovered(let id) = candidate else { return nil }
-        return discovery.found.first { $0.id == id }
+        return candidates.first { $0.id == id } ?? discovery.found.first { $0.id == id }
     }
 
     /// Host und Port der manuellen Eingabe (nil = ungültig).

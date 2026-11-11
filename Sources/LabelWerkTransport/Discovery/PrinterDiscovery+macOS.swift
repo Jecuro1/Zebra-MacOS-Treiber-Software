@@ -255,7 +255,8 @@ extension PrinterDiscovery {
                 if let name { details["name"] = name }
                 result.append(DiscoveredPrinter(
                     name: name ?? address,
-                    modelHint: name,
+                    // Ab Werk ist der Name die Seriennummer – kein Modellhinweis.
+                    modelHint: name.flatMap { ZebraIdentifiers.looksLikeZebraSerialNumber($0) ? nil : $0 },
                     descriptor: .bluetooth(address: address, name: name),
                     source: .bluetooth,
                     details: details
@@ -349,7 +350,8 @@ final class BLEScanner: NSObject, CBCentralManagerDelegate, @unchecked Sendable 
         if let name { details["name"] = name }
         onFound(DiscoveredPrinter(
             name: name ?? "Zebra-Drucker (BLE)",
-            modelHint: name,
+            // Link-OS-Drucker werben ab Werk mit ihrer Seriennummer als Namen – kein Modellhinweis.
+            modelHint: name.flatMap { ZebraIdentifiers.looksLikeZebraSerialNumber($0) ? nil : $0 },
             descriptor: .ble(identifier: identifier, name: name),
             source: .ble,
             details: details

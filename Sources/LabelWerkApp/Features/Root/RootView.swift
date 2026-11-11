@@ -47,7 +47,7 @@ struct RootView: View {
                 .environment(model)
         }
         .sheet(isPresented: $model.isInstallWizardPresented, onDismiss: {
-            // Die Vorbelegung („Im Netzwerk“ › Hinzufügen) gilt nur für dieses eine Öffnen.
+            // Die Vorbelegung („Drucker suchen“ › „Drucker installieren …“) gilt nur für dieses eine Öffnen.
             model.installWizardPrefill = nil
         }) {
             NetworkPrinterInstallWizard(prefill: model.installWizardPrefill)

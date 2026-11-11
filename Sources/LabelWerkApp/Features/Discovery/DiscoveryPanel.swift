@@ -36,24 +36,21 @@ enum DiscoveryPanelTab: String, CaseIterable, Hashable, Identifiable {
 
 // MARK: - Suchbereich
 
-/// Gemeinsamer Suchbereich von `DiscoveryView`, `AddPrinterView` und Onboarding: Radar mit
-/// Suchstrahl, Quellenschalter, live einfliegende Treffer, manuelles Hinzufügen und Demo-Drucker.
+/// Gemeinsamer Suchbereich von `DiscoveryView`, `AddPrinterView` und Onboarding: ruhige Liste mit
+/// einer Zeile je gefundenem Drucker (alle Quellen zusammengeführt, `DiscoveryFilter.overview`),
+/// kleines Suchsymbol im Kopf – das Radar erscheint groß nur, solange gesucht und noch nichts gefunden
+/// wurde –, eine leise Zeile mit Quellen und Netzen, manuelles Hinzufügen und Demo-Drucker.
 struct DiscoveryPanel: View {
     let style: DiscoveryPanelStyle
     /// Nach manuellem Hinzufügen, Öffnen eines vorhandenen Druckers oder Demo (z. B. Sheet schließen).
     var onFinished: ((PrinterSession) -> Void)?
     /// Nur kompakt: Wunsch nach manuellem Hinzufügen (öffnet ein eigenes Fenster).
     var onRequestManual: (() -> Void)?
-    /// Seite & Sheet: Steuerung des umgebenden `ScrollView` (die Trefferkarten liegen darin), damit ein
-    /// Klick auf einen Radarpunkt zur Karte scrollt. Kompakt nutzt einen eigenen `ScrollViewReader`.
-    var scrollProxy: ScrollViewProxy?
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var tab: DiscoveryPanelTab
     @State private var controller = DiscoveryController()
-    @State private var highlightedID: String?
-    @State private var highlightToken = 0
     /// Editor „Durchsuchte Netze“.
     @State private var showNetworks = false
     /// Suche, die noch auf ihre Optionen wartet (macOS-Warteschlangen, Hostnamen) – abbrechbar.
@@ -63,13 +60,11 @@ struct DiscoveryPanel: View {
 
     init(style: DiscoveryPanelStyle,
          initialTab: DiscoveryPanelTab = .search,
-         scrollProxy: ScrollViewProxy? = nil,
          onFinished: ((PrinterSession) -> Void)? = nil,
          onRequestManual: (() -> Void)? = nil) {
         self.style = style
         self.onFinished = onFinished
         self.onRequestManual = onRequestManual
-        self.scrollProxy = scrollProxy
         _tab = State(initialValue: style == .compact ? .search : initialTab)
     }
 
@@ -78,12 +73,9 @@ struct DiscoveryPanel: View {
     var body: some View {
         Group {
             if style == .compact {
-                // Die kompakte Trefferliste hat ein eigenes ScrollView – dafür ein eigener Reader.
-                ScrollViewReader { proxy in
-                    compactContent(proxy)
-                }
+                compactContent
             } else {
-                VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
+                VStack(alignment: .leading, spacing: 20) {
                     AnimatedTabBar(
                         items: DiscoveryPanelTab.allCases,
                         selection: $tab,
@@ -114,7 +106,7 @@ struct DiscoveryPanel: View {
             }
         }
         .onChange(of: controller.scanCount) { _, _ in
-            // Funde der Suche auch für die Seitenleiste „Im Netzwerk“ übernehmen.
+            // Funde der Suche auch für die Seitenleiste („Neue Zebra-Drucker“) übernehmen.
             let sources = controller.lastSources
             model.networkDiscovery.absorb(controller.found, full: sources.contains(.zebra) && sources.contains(.network))
         }
@@ -134,7 +126,7 @@ struct DiscoveryPanel: View {
         case .search:
             searchContent
         case .manual:
-            DiscoveryManualForm(discovered: discoveryResults.new) { session in
+            DiscoveryManualForm(discovered: overview.partition.new) { session in
                 onFinished?(session)
             }
         case .demo:
@@ -147,198 +139,166 @@ struct DiscoveryPanel: View {
     // MARK: Suche (Seite & Sheet)
 
     private var searchContent: some View {
-        VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
-            GlassCard(padding: 20, cornerRadius: Theme.Metrics.cornerLarge,
-                      tint: controller.isScanning ? Theme.teal : nil) {
-                HStack(alignment: .center, spacing: 26) {
-                    radar(scrollProxy)
-                        .frame(width: style == .page ? 290 : 240, height: style == .page ? 290 : 240)
-                    VStack(alignment: .leading, spacing: 16) {
-                        statusText(large: true)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(tr("Suchen über"))
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            sourceToggles(compact: false)
-                        }
-                        HStack(spacing: 10) {
-                            scanButton
-                            if controller.isScanning {
-                                remainingTime
-                                    .transition(.opacity.combined(with: .move(edge: .leading)))
-                            }
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
+        let overview = self.overview
+        let showsRadar = controller.isScanning && overview.devices.isEmpty && overview.macQueues.isEmpty
+        return VStack(alignment: .leading, spacing: 18) {
+            header(overview, showsIndicator: !showsRadar)
+            sourcesLine(compact: false)
 
-            results
+            if showsRadar {
+                radarStage
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            } else if !overview.devices.isEmpty || !overview.macQueues.isEmpty {
+                VStack(alignment: .leading, spacing: 22) {
+                    if !overview.devices.isEmpty {
+                        DiscoveryDeviceList(devices: overview.devices, reduceMotion: reduceMotion,
+                                            onInstall: installAction) { add($0) }
+                    }
+                    if !overview.macQueues.isEmpty {
+                        macQueuesGroup(overview.macQueues)
+                    }
+                    footer(overview)
+                }
+                .transition(.opacity)
+            } else if controller.scanCount > 0 {
+                emptyResults
+                    .transition(.opacity)
+            }
+        }
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: showsRadar)
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: overview.devices.isEmpty)
+    }
+
+    /// Kopf: kleines Suchsymbol, „4 neue Zebra-Drucker“, leise „1 bereits hinzugefügt“, Suchknopf.
+    private func header(_ overview: DiscoveryOverview, showsIndicator: Bool) -> some View {
+        HStack(alignment: .center, spacing: 14) {
+            if showsIndicator {
+                DiscoverySearchIndicator(isScanning: controller.isScanning, size: 36, reduceMotion: reduceMotion)
+                    .transition(.opacity.combined(with: .scale(scale: 0.6)))
+            }
+            statusText(overview, large: true)
+            Spacer(minLength: 12)
+            if controller.isScanning {
+                remainingTime
+                    .transition(.opacity)
+            }
+            scanButton
         }
     }
 
+    /// Großes Radar – nur solange gesucht und noch nichts gefunden wurde.
+    private var radarStage: some View {
+        VStack(spacing: 14) {
+            DiscoveryRadar(
+                printers: [],
+                isScanning: controller.isScanning,
+                startedAt: controller.startedAt,
+                duration: controller.duration,
+                highlightedID: nil,
+                reduceMotion: reduceMotion
+            )
+            .frame(width: style == .page ? 220 : 190, height: style == .page ? 220 : 190)
+            Text(tr("Neue Zebra-Drucker erscheinen hier, sobald sie antworten."))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+    }
+
+    /// Kleine Gruppe „Vorhandene macOS-Drucker“: Zebra-/LabelWerk-Warteschlangen ohne gefundenes Gerät.
+    private func macQueuesGroup(_ devices: [DiscoveredDevice]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(tr("Vorhandene macOS-Drucker"))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .help(tr("Zebra-Drucker, die in macOS eingerichtet sind, aber bei dieser Suche nicht geantwortet haben."))
+            DiscoveryDeviceList(devices: devices, compact: true, reduceMotion: reduceMotion) { add($0) }
+        }
+    }
+
+    /// Fußzeile: „Auch als macOS-Drucker installieren“ als kleines Kästchen.
     @ViewBuilder
-    private var results: some View {
-        let printers = discoveryResults.new
-        if !printers.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(tr("Neue Zebra-Drucker"),
-                              subtitle: tr("Modelle werden automatisch aus dem Katalog zugeordnet."),
-                              systemImage: "printer.fill")
-                if printers.contains(where: { PrinterInstallRequest.supports($0.descriptor) }) {
-                    MacPrinterInstallToggle(isOn: $installMacPrinter)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.subtleFill))
-                        .transition(.opacity)
-                }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: style == .page ? 330 : 300), spacing: 14)],
-                          alignment: .leading, spacing: 14) {
-                    ForEach(printers) { printer in
-                        DiscoveryPrinterCard(
-                            printer: printer,
-                            isHighlighted: highlightedID == printer.id,
-                            appearDelay: controller.appearanceDelays[printer.id] ?? 0,
-                            reduceMotion: reduceMotion,
-                            onAdd: { add(printer) }
-                        )
-                        .id(printer.id)
-                        // Nach „Hinzufügen“ ist der Drucker eingerichtet und verlässt die Liste.
-                        .transition(reduceMotion ? .opacity : .asymmetric(
-                            insertion: .opacity,
-                            removal: .opacity.combined(with: .scale(scale: 0.92))
-                        ))
-                    }
-                }
-                .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: printers.map(\.id))
+    private func footer(_ overview: DiscoveryOverview) -> some View {
+        if overview.devices.contains(where: { PrinterInstallRequest.supports($0.preferred.descriptor) }) {
+            HStack(spacing: 8) {
+                MacPrinterInstallToggle(isOn: $installMacPrinter, compact: true)
+                Spacer(minLength: 0)
             }
             .transition(.opacity)
-        } else if controller.isScanning {
-            skeletons
-                .transition(.opacity)
-        } else if controller.scanCount > 0 {
-            emptyResults
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
         }
-    }
-
-    private var skeletons: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: style == .page ? 330 : 300), spacing: 14)], spacing: 14) {
-            ForEach(0..<3, id: \.self) { index in
-                GlassCard(padding: 14) {
-                    HStack(spacing: 12) {
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(Theme.subtleFill)
-                            .frame(width: 42, height: 42)
-                        VStack(alignment: .leading, spacing: 7) {
-                            Capsule().fill(Theme.subtleFill).frame(width: 150, height: 10)
-                            Capsule().fill(Theme.subtleFill).frame(width: 110, height: 8)
-                            Capsule().fill(Theme.subtleFill).frame(width: 170, height: 8)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                }
-                .shimmering(active: !reduceMotion)
-                .opacity(1 - Double(index) * 0.25)
-            }
-        }
-        .accessibilityHidden(true)
     }
 
     private var emptyResults: some View {
-        GlassCard(padding: 20, tint: Theme.warning) {
-            HStack(alignment: .top, spacing: 18) {
-                IconBadge(systemImage: "magnifyingglass", tint: Theme.warning, size: 44)
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(tr("Keine neuen Zebra-Drucker gefunden"))
-                        .font(Theme.Typography.headline)
-                    VStack(alignment: .leading, spacing: 5) {
-                        tip("power", tr("Ist der Drucker eingeschaltet und zeigt „Bereit“?"))
-                        tip("wifi", tr("Sind Mac und Drucker im selben Netzwerk bzw. WLAN?"))
-                        tip("point.3.connected.trianglepath.dotted", tr("Drucker in einem anderen Netz, z. B. über VPN? Unter „Netze …“ das Netz eintragen, etwa 10.62.13.0/24."))
-                        tip("cable.connector", tr("USB-Kabel direkt anschließen (ohne Hub) und kurz warten."))
-                        tip("antenna.radiowaves.left.and.right", tr("Für Bluetooth die Quellen „Bluetooth“ bzw. „Bluetooth LE“ aktivieren."))
-                    }
-                    HStack(spacing: 8) {
-                        Button {
-                            startSearch()
-                        } label: {
-                            Label(tr("Erneut suchen"), systemImage: "arrow.clockwise")
-                        }
-                        .buttonStyle(.labelWerkPrimary)
-                        .disabled(controller.sources.isEmpty)
-                        .help(controller.sources.isEmpty ? tr("Mindestens eine Quelle auswählen") : "")
-                        Button {
-                            tab = .manual
-                        } label: {
-                            Label(tr("Manuell hinzufügen"), systemImage: "square.and.pencil")
-                        }
-                        .buttonStyle(.labelWerkSecondary)
-                        Button {
-                            tab = .demo
-                        } label: {
-                            Label(tr("Demo-Drucker"), systemImage: "sparkles")
-                        }
-                        .buttonStyle(.labelWerkSecondary)
-                    }
-                    .padding(.top, 2)
-                }
-                Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 7) {
+                tip("power", tr("Ist der Drucker eingeschaltet und zeigt „Bereit“?"))
+                tip("wifi", tr("Sind Mac und Drucker im selben Netzwerk bzw. WLAN?"))
+                tip("point.3.connected.trianglepath.dotted", tr("Drucker in einem anderen Netz, z. B. über VPN? Unter „Netze …“ das Netz eintragen, etwa 10.62.13.0/24."))
+                tip("cable.connector", tr("USB-Kabel direkt anschließen (ohne Hub) und kurz warten."))
+                tip("antenna.radiowaves.left.and.right", tr("Für Bluetooth die Quellen „Bluetooth“ bzw. „Bluetooth LE“ aktivieren."))
             }
+            HStack(spacing: 8) {
+                Button {
+                    tab = .manual
+                } label: {
+                    Label(tr("Manuell hinzufügen"), systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.labelWerkSecondary)
+                Button {
+                    tab = .demo
+                } label: {
+                    Label(tr("Demo-Drucker"), systemImage: "sparkles")
+                }
+                .buttonStyle(.labelWerkSecondary)
+            }
+            .controlSize(.small)
+            .padding(.top, 2)
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Theme.Metrics.corner, style: .continuous).fill(Theme.subtleFill))
     }
 
     private func tip(_ symbol: String, _ text: String) -> some View {
-        Label(text, systemImage: symbol)
-            .font(.system(size: 12))
-            .foregroundStyle(.secondary)
+        Label {
+            Text(text).fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: symbol).frame(width: 16)
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(.secondary)
     }
 
     // MARK: Kompakt (Onboarding)
 
-    private func compactContent(_ proxy: ScrollViewProxy) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 18) {
-                radar(proxy)
-                    .frame(width: 180, height: 180)
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top, spacing: 8) {
-                        statusText(large: false)
-                        Spacer(minLength: 4)
-                        scanButton
-                            .controlSize(.small)
-                    }
-                    sourceToggles(compact: true)
-                    if discoveryResults.new.isEmpty {
-                        Text(controller.isScanning
-                             ? tr("Neue Zebra-Drucker erscheinen hier, sobald sie antworten.")
-                             : tr("Noch keine neuen Zebra-Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden."))
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .transition(.opacity)
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 6) {
-                                ForEach(discoveryResults.new) { printer in
-                                    DiscoveryPrinterCard(
-                                        printer: printer,
-                                        isHighlighted: highlightedID == printer.id,
-                                        appearDelay: controller.appearanceDelays[printer.id] ?? 0,
-                                        reduceMotion: reduceMotion,
-                                        compact: true,
-                                        onAdd: { add(printer) }
-                                    )
-                                    .id(printer.id)
-                                    .transition(.opacity)
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-                        .frame(maxHeight: 150)
-                        .transition(.opacity)
-                    }
+    private var compactContent: some View {
+        let overview = self.overview
+        let entries = overview.devices + overview.macQueues
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                DiscoverySearchIndicator(isScanning: controller.isScanning, size: 30, reduceMotion: reduceMotion)
+                statusText(overview, large: false)
+                Spacer(minLength: 4)
+                scanButton
+                    .controlSize(.small)
+            }
+            sourcesLine(compact: true)
+            if entries.isEmpty {
+                Text(controller.isScanning
+                     ? tr("Neue Zebra-Drucker erscheinen hier, sobald sie antworten.")
+                     : tr("Noch keine neuen Zebra-Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden."))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            } else {
+                ScrollView {
+                    DiscoveryDeviceList(devices: entries, compact: true, reduceMotion: reduceMotion) { add($0) }
+                        .padding(.vertical, 1)
                 }
+                .frame(maxHeight: 180)
+                .transition(.opacity)
             }
             HStack(spacing: 8) {
                 let demoSession = model.sessions.first { $0.isVirtual }
@@ -373,65 +333,74 @@ struct DiscoveryPanel: View {
                 }
             }
         }
-        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: discoveryResults.new.map(\.id))
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: entries.map(\.id))
         .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: model.sessions.count)
     }
 
     // MARK: Bausteine
 
-    private func radar(_ proxy: ScrollViewProxy?) -> some View {
-        DiscoveryRadar(
-            printers: discoveryResults.new,
-            isScanning: controller.isScanning,
-            startedAt: controller.startedAt,
-            duration: controller.duration,
-            highlightedID: highlightedID,
-            reduceMotion: reduceMotion
-        ) { printer in
-            highlight(printer.id, proxy: proxy)
-        }
-    }
-
-    private func statusText(large: Bool) -> some View {
-        let results = discoveryResults
+    private func statusText(_ overview: DiscoveryOverview, large: Bool) -> some View {
         // Drucker zählen, nicht Treffer: Ein eingerichteter Drucker taucht oft mehrfach auf
-        // (LabelWerk-Warteschlange, Etikettentypen, übernommene Warteschlange, Netzwerk-Fund).
-        let hiddenCount = results.hiddenAddedPrinterCount()
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(headline(newCount: results.new.count))
-                .font(large ? Theme.Typography.title : Theme.Typography.headline)
-                .contentTransition(.opacity)
-            Text(subline(isEmpty: results.new.isEmpty))
-                .font(.system(size: large ? 13 : 11.5))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .contentTransition(.opacity)
+        // (LabelWerk-Warteschlange, Etikettentypen, übernommene Warteschlange, Netzwerk, Bluetooth).
+        let hiddenCount = overview.hiddenAddedPrinterCount()
+        let title = headline(newCount: overview.devices.count)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(large ? Theme.Typography.headline : .system(size: 13, weight: .semibold, design: .rounded))
+                .contentTransition(.numericText(value: Double(overview.devices.count)))
             // Leiser Hinweis: Schon eingerichtete Drucker werden nicht angezeigt (Dubletten).
             if hiddenCount > 0 {
-                Label(tr("%d bereits hinzugefügt", hiddenCount), systemImage: "checkmark.circle")
-                    .font(.system(size: large ? 11.5 : 10.5, weight: .medium))
+                Text(tr("%d bereits hinzugefügt", hiddenCount))
+                    .font(.system(size: large ? 11.5 : 10.5))
                     .foregroundStyle(.tertiary)
                     .contentTransition(.numericText(value: Double(hiddenCount)))
                     .help(tr("Drucker, die schon in LabelWerk eingerichtet sind, werden in der Suche nicht angezeigt."))
                     .transition(.opacity)
             }
         }
-        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: headline(newCount: results.new.count))
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: title)
         .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: hiddenCount)
     }
 
-    private func sourceToggles(compact: Bool) -> some View {
-        let printers = discoveryResults.new
-        return DiscoveryFlowLayout(spacing: compact ? 6 : 8) {
-            ForEach(DiscoverySourceStyle.ordered, id: \.self) { source in
-                DiscoverySourceToggle(source: source, isOn: sourceBinding(source),
-                                      count: printers.filter { $0.source == source }.count, compact: compact,
-                                      reduceMotion: reduceMotion)
+    /// Eine leise Zeile statt der Quellenschalter: „Gesucht über Zebra-Suche, Netzwerk, … · Netze …“;
+    /// die Quellen lassen sich im Menü „Quellen“ ein- und ausschalten.
+    private func sourcesLine(compact: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(tr("Gesucht über %@", DiscoverySourceStyle.summary(controller.sources)))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(DiscoverySourceStyle.summary(controller.sources))
+            Text(verbatim: "·").foregroundStyle(.tertiary)
+            Menu {
+                ForEach(DiscoverySourceStyle.ordered, id: \.self) { source in
+                    Toggle(isOn: sourceBinding(source)) {
+                        Label(DiscoverySourceStyle.title(source), systemImage: DiscoverySourceStyle.systemImage(source))
+                    }
+                    .help(DiscoverySourceStyle.detail(source))
+                }
+            } label: {
+                Text(tr("Quellen …"))
             }
-            DiscoveryNetworksChip(plan: networkPlan, compact: compact, reduceMotion: reduceMotion) {
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(tr("Suchquellen wählen"))
+            Text(verbatim: "·").foregroundStyle(.tertiary)
+            Button {
                 showNetworks = true
+            } label: {
+                Text(networkPlan.networks.isEmpty ? tr("Netze …") : tr("Netze (%d) …", networkPlan.networks.count))
             }
+            .buttonStyle(.link)
+            .help(networkPlan.networks.isEmpty
+                  ? tr("Durchsuchte Netze anzeigen und eigene Netze eintragen (z. B. hinter einem VPN)")
+                  : tr("Durchsuchte Netze: %@", DiscoveryNetworkText.summary(networkPlan)))
+            Spacer(minLength: 0)
         }
+        .font(.system(size: compact ? 11 : 11.5))
+        .foregroundStyle(.secondary)
+        .tint(Theme.accent)
     }
 
     private var scanButton: some View {
@@ -443,10 +412,10 @@ struct DiscoveryPanel: View {
                 startSearch()
             }
         } label: {
-            Label(scanButtonTitle, systemImage: controller.isScanning ? "stop.fill" : "dot.radiowaves.left.and.right")
+            Label(scanButtonTitle, systemImage: controller.isScanning ? "stop.fill" : "arrow.clockwise")
                 .contentTransition(.symbolEffect(.replace))
         }
-        .buttonStyle(controller.isScanning ? LabelWerkButtonStyle.labelWerkSecondary : LabelWerkButtonStyle.labelWerkPrimary)
+        .buttonStyle(.labelWerkSecondary)
         .disabled(!controller.isScanning && controller.sources.isEmpty)
         .help(controller.sources.isEmpty ? tr("Mindestens eine Quelle auswählen") : "")
         .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: controller.isScanning)
@@ -461,61 +430,38 @@ struct DiscoveryPanel: View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
             let remaining = max(0, Int(ceil(controller.duration * (1 - controller.progress(at: timeline.date)))))
             Label(tr("noch %d s", remaining), systemImage: "timer")
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .font(.system(size: 11.5, weight: .medium).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .contentTransition(.numericText(countsDown: true))
         }
     }
 
-    /// Überschrift: zählt nur neue Zebra-Drucker (schon eingerichtete sind ausgeblendet).
+    /// Überschrift: zählt Drucker (Geräte), nicht Treffer; schon eingerichtete sind ausgeblendet.
     private func headline(newCount count: Int) -> String {
-        if controller.isScanning {
-            switch count {
-            case 0: return tr("Suche läuft …")
-            case 1: return tr("Suche läuft … 1 neuer Zebra-Drucker")
-            default: return tr("Suche läuft … %d neue Zebra-Drucker", count)
-            }
-        }
-        if controller.scanCount == 0 && count == 0 { return tr("Drucker in der Nähe finden") }
-        switch count {
-        case 0: return tr("Keine neuen Zebra-Drucker gefunden")
-        case 1: return tr("1 neuer Zebra-Drucker gefunden")
-        default: return tr("%d neue Zebra-Drucker gefunden", count)
-        }
-    }
-
-    private func subline(isEmpty: Bool) -> String {
-        if controller.isScanning {
-            let names = DiscoverySourceStyle.ordered
-                .filter { controller.sources.contains($0) }
-                .map { DiscoverySourceStyle.title($0) }
-                .joined(separator: ", ")
-            if let plan = controller.plan, !plan.networks.isEmpty {
-                return tr("Durchsucht: %@ – Netze: %@", names, DiscoveryNetworkText.summary(plan))
-            }
-            return tr("Durchsucht: %@", names)
-        }
-        if controller.scanCount == 0 {
-            return tr("Bonjour, Zebra-Suche, USB, Netzwerk, macOS-Warteschlangen und Bluetooth werden gleichzeitig durchsucht.")
-        }
-        if isEmpty {
-            return tr("Strom, Kabel und Netzwerk prüfen – oder den Drucker manuell hinzufügen.")
-        }
-        return tr("„Hinzufügen“ richtet den Drucker in LabelWerk ein. Ein Klick auf einen Punkt im Radar zeigt ihn an.")
+        if count > 0 { return DiscoveryDeviceText.headline(newCount: count) }
+        if controller.isScanning { return tr("Suche läuft …") }
+        if controller.scanCount == 0 { return tr("Drucker in der Nähe finden") }
+        return tr("Keine neuen Zebra-Drucker gefunden")
     }
 
     // MARK: Daten & Aktionen
 
-    /// Treffer dieser Suche, ergänzt um die Netzwerkdrucker der automatischen Suche
-    /// (`NetworkDiscoveryService`, zuletzt gesehen in den letzten 35 Minuten) – zusammengeführt, damit
-    /// jeder Drucker nur einmal erscheint – und aufgeteilt (`DiscoveryFilter`): angezeigt werden nur
-    /// `new`, also als Zebra erkannte Drucker, die noch nicht in LabelWerk eingerichtet sind.
-    private var discoveryResults: DiscoveryFilter.Partition {
-        var registry = DiscoveryRegistry(controller.found)
-        for printer in model.networkDiscovery.recentPrinters {
-            registry.insert(printer)
+    /// Treffer dieser Suche, ergänzt um die Funde der automatischen Suche (`NetworkDiscoveryService`,
+    /// zuletzt gesehen in den letzten 35 Minuten), zu Geräten zusammengeführt und aufgeteilt
+    /// (`DiscoveryFilter.overview`): je physischem Drucker ein Eintrag, nur als Zebra erkannte, noch
+    /// nicht eingerichtete Drucker; macOS-Warteschlangen ohne gefundenes Gerät getrennt.
+    ///
+    /// Nur nach Kennung (`id`) entdoppelt, nicht über `DiscoveryRegistry`: Die Registry verwirft z. B.
+    /// den Bonjour-Fund eines Druckers, der schon auf die Zebra-Suche geantwortet hat, samt seinem
+    /// Dienstnamen – dann fände `DiscoveryFilter.groupDevices` die `dnssd://`-Warteschlange dieses
+    /// Druckers nicht mehr. Das Zusammenführen übernimmt die Gruppierung.
+    private var overview: DiscoveryOverview {
+        var printers = controller.found
+        var ids = Set(printers.map(\.id))
+        for printer in model.networkDiscovery.recentPrinters where ids.insert(printer.id).inserted {
+            printers.append(printer)
         }
-        return model.networkDiscovery.partition(registry.printers)
+        return model.networkDiscovery.overview(printers)
     }
 
     /// Netze der laufenden bzw. letzten Suche, sonst der automatischen Suche.
@@ -545,13 +491,6 @@ struct DiscoveryPanel: View {
         pendingStart = nil
     }
 
-    /// Bereits eingerichteter Drucker desselben Geräts (gleiche Verbindung, Warteschlange, Adresse,
-    /// Seriennummer … – `NetworkDiscoveryService.addedSession(for:)`).
-    private func existingSession(for printer: DiscoveredPrinter) -> PrinterSession? {
-        model.networkDiscovery.addedSession(for: printer)
-            ?? model.sessions.first { $0.saved.descriptor.refersToSameDevice(as: printer.descriptor) }
-    }
-
     private func sourceBinding(_ source: DiscoverySource) -> Binding<Bool> {
         Binding(
             get: { controller.sources.contains(source) },
@@ -565,10 +504,21 @@ struct DiscoveryPanel: View {
         )
     }
 
-    private func add(_ printer: DiscoveredPrinter) {
+    /// Kontextmenü „Drucker installieren …“: Installationsassistent mit diesem Drucker (nur auf der
+    /// Seite – im Sheet „Drucker hinzufügen“ führt dessen eigener Knopf zum Assistenten).
+    private var installAction: ((DiscoveredDevice) -> Void)? {
+        guard style == .page else { return nil }
+        let model = self.model
+        return { device in model.openInstallWizard(for: device.preferred) }
+    }
+
+    /// „Hinzufügen“ eines Geräts über seine beste Verbindung (Netzwerk vor USB vor Bluetooth).
+    private func add(_ device: DiscoveredDevice) {
+        let printer = device.preferred
         // `AppModel.addPrinter(from:)` vergleicht exakt; hier zählt dasselbe Gerät (keine Dubletten).
         // Die Liste zeigt nur neue Zebra-Drucker – das greift nur, wenn sich der Stand gerade ändert.
-        if let existing = existingSession(for: printer) {
+        if let existing = device.members.lazy.compactMap({ model.networkDiscovery.addedSession(for: $0) }).first
+            ?? model.sessions.first(where: { $0.saved.descriptor.refersToSameDevice(as: printer.descriptor) }) {
             if style == .page {
                 model.toast(tr("Bereits eingerichtet"), message: existing.displayName, style: .info)
             }
@@ -584,27 +534,6 @@ struct DiscoveryPanel: View {
             // Auf der Suchseite bleiben, damit weitere Drucker hinzugefügt werden können.
             model.selection = previousSelection
             model.toast(tr("Drucker hinzugefügt"), message: session.displayName, style: .success)
-        }
-    }
-
-    /// Hebt einen Treffer kurz hervor (Radar & Karte) und scrollt zu seiner Karte.
-    private func highlight(_ id: String, proxy: ScrollViewProxy?) {
-        highlightToken += 1
-        let token = highlightToken
-        withAnimation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion)) {
-            highlightedID = id
-        }
-        if let proxy {
-            withAnimation(Motion.animation(Motion.spring, reduceMotion: reduceMotion)) {
-                proxy.scrollTo(id, anchor: .center)
-            }
-        }
-        Task {
-            try? await Task.sleep(for: .seconds(2.6))
-            guard token == highlightToken else { return }
-            withAnimation(Motion.animation(Motion.gentle, reduceMotion: reduceMotion)) {
-                highlightedID = nil
-            }
         }
     }
 }
@@ -719,33 +648,34 @@ struct DiscoveryDemoPane: View {
 
 // MARK: - Seite „Drucker suchen“
 
-/// Seite „Drucker suchen“ in der Seitenleiste.
+/// Seite „Drucker suchen“ in der Seitenleiste – ruhig und schmal (höchstens 760 pt breit).
 struct DiscoveryView: View {
+    /// Größte Breite des Inhalts (wie die Systemeinstellungen).
+    static let contentMaxWidth: CGFloat = 760
+
     @Environment(AppModel.self) private var model
 
     init() {}
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Metrics.cardSpacing) {
-                    SectionHeader(tr("Drucker suchen"),
-                                  subtitle: tr("Zebra-Drucker per Bonjour, Zebra-Suche, USB, Netzwerk-Scan, macOS-Warteschlange oder Bluetooth finden und einrichten – auch in anderen Netzen und über VPN."),
-                                  systemImage: "dot.radiowaves.left.and.right") {
-                        if !model.sessions.isEmpty {
-                            Label(tr("%d Drucker eingerichtet", model.sessions.count), systemImage: "printer.fill")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .contentTransition(.numericText(value: Double(model.sessions.count)))
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                SectionHeader(tr("Drucker suchen"),
+                              subtitle: tr("Zebra-Drucker im Netzwerk, per USB und Bluetooth finden und einrichten – auch in anderen Netzen und über VPN."),
+                              systemImage: "dot.radiowaves.left.and.right") {
+                    if !model.sessions.isEmpty {
+                        Label(tr("%d Drucker eingerichtet", model.sessions.count), systemImage: "printer.fill")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText(value: Double(model.sessions.count)))
                     }
-                    // Der Reader umschließt das ScrollView der Seite: Radarpunkte scrollen zu ihrer Karte.
-                    DiscoveryPanel(style: .page, scrollProxy: proxy)
                 }
-                .padding(Theme.Metrics.paddingLarge)
-                .frame(maxWidth: Theme.Metrics.contentMaxWidth)
-                .frame(maxWidth: .infinity)
+                DiscoveryPanel(style: .page)
             }
+            .padding(.horizontal, Theme.Metrics.paddingLarge)
+            .padding(.vertical, 28)
+            .frame(maxWidth: Self.contentMaxWidth)
+            .frame(maxWidth: .infinity)
         }
         .background { AnimatedBackground(style: .subtle).ignoresSafeArea() }
         .navigationTitle(tr("Drucker suchen"))
@@ -797,13 +727,12 @@ struct AddPrinterView: View {
             .padding(.top, 20)
             .padding(.bottom, 12)
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    DiscoveryPanel(style: .sheet, initialTab: initialTab, scrollProxy: proxy,
-                                   onFinished: { _ in close() })
-                        .padding(.horizontal, Theme.Metrics.paddingLarge)
-                        .padding(.bottom, Theme.Metrics.padding)
-                }
+            ScrollView {
+                DiscoveryPanel(style: .sheet, initialTab: initialTab, onFinished: { _ in close() })
+                    .padding(.horizontal, Theme.Metrics.paddingLarge)
+                    .padding(.bottom, Theme.Metrics.padding)
+                    .frame(maxWidth: DiscoveryView.contentMaxWidth)
+                    .frame(maxWidth: .infinity)
             }
 
             Divider().opacity(0.5)

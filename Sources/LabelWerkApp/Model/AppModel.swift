@@ -66,7 +66,7 @@ final class AppModel {
     /// Update-Dienst: sucht, lädt und installiert neue LabelWerk-Versionen aus den GitHub-Releases
     /// (eigenes `@Observable`-Modell – Ansichten beobachten dessen Zustand direkt).
     @ObservationIgnored private(set) var updates: UpdateController!
-    /// Automatische Druckersuche im Netzwerk (Zebra-Suche, Netzwerk-Scan; Seitenleiste „Im Netzwerk“) –
+    /// Automatische Druckersuche im Netzwerk (Zebra-Suche, Netzwerk-Scan; Seitenleiste „Neue Zebra-Drucker“) –
     /// eigenes `@Observable`-Modell.
     @ObservationIgnored private(set) var networkDiscovery: NetworkDiscoveryService!
 
@@ -217,7 +217,8 @@ final class AppModel {
     }
 
     /// Öffnet den Installationsassistenten mit der Adresse eines gefundenen Netzwerkdruckers
-    /// (Seitenleiste „Im Netzwerk“). Andere Verbindungen werden direkt hinzugefügt.
+    /// („Drucker suchen“ › Kontextmenü „Drucker installieren …“). Andere Verbindungen werden direkt
+    /// hinzugefügt.
     func openInstallWizard(for printer: DiscoveredPrinter) {
         guard case .tcp(let host, let port) = printer.descriptor else {
             addPrinter(from: printer)

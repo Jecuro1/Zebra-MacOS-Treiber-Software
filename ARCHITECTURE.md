@@ -829,7 +829,7 @@ Eintrag (Kennung und Verbindung bleiben; allgemeine Namen wie „Zebra ZD421“ 
 `PrinterDiscovery.discover` liefert ihn mit derselben `id` erneut, Verbraucher ersetzen ihn.
 
 **Anzeigen (`DiscoveryFilter`, `Sources/LabelWerkTransport/Discovery/DiscoveryFilter.swift`).** Eine
-gemeinsame Regel für „Drucker suchen“ (Liste, Radar, Zähler), die Seitenleiste „Im Netzwerk“, die
+gemeinsame Regel für „Drucker suchen“ (Liste, Zähler), die Seitenleiste „Neue Zebra-Drucker [N]“, die
 macOS-Warteschlangen und USB-/Bluetooth-Geräte unter „Manuell“, den Installationsassistenten und
 `lwctl discover`: `DiscoveryFilter.partition` teilt Treffer in `new` (angezeigt), `alreadyAdded` und
 `unidentified` (beide ausgeblendet; die App nennt nur die Zahl „N bereits hinzugefügt“ – gezählt
@@ -857,6 +857,29 @@ und Netzwerk-Fund).
   einer Druckserver-Warteschlange ist bzw. der Drucker nur über eine benannte LPD-Warteschlange
   erreicht wird. USB ohne gemeinsame Seriennummer: gleiches Produkt am
   gleichen Anschluss.
+* **Ein Eintrag je Gerät** (`DiscoveryFilter.groupDevices`/`overview`,
+  `Sources/LabelWerkTransport/Discovery/DiscoveryGrouping.swift` → `DiscoveryOverview` mit `devices`,
+  `macQueues`, `added`; je Gerät `DiscoveredDevice`: Modell „Zebra ZD421t“, Titel, Adresse,
+  Seriennummer, MAC, Wege Netzwerk/USB/Bluetooth/macOS-Drucker, Warteschlangennamen, `preferred` =
+  beste Verbindung zum Hinzufügen). Funde aller Quellen werden per Union-Find zusammengefasst:
+  1. immer bei gleicher Seriennummer des Druckers – auch wenn sie nur als Name auftritt
+     (`nameSerialNumbers`: BLE-/Bluetooth-Name, Systemname der Zebra-Suche, `sysName`, Bonjour-Name,
+     `dnssd://`-Warteschlange im Zebra-Format, `ZebraIdentifiers.looksLikeZebraSerialNumber`:
+     „XX“ + 3 Buchstaben + ≥ 6 Ziffern bzw. 2 Zeichen + Buchstabe + Jahr + Woche 01–53 + 5 Ziffern,
+     z. B. „D6J250301793“) –, gleicher Druckserver-Seriennummer (eigener Namensraum), MAC-Adresse,
+     gleichem USB-Gerät bzw. gleicher Nicht-Netzwerk-Verbindung;
+  2. bei gleicher Netzwerkadresse (wie oben, Ports passend, Hostnamen über `resolved`), außer die
+     Gruppen nennen verschiedene Seriennummern bzw. MAC-Adressen (neu vergebene Adresse);
+  3. bei gleichem eigenem Namen (Systemname, `sysName`, Bonjour-, Bluetooth-Name; nie allgemeine
+     Namen wie „Zebra ZD421“, Adressen oder Seriennummern – `isGenericPrinterName`), außer die Gruppen
+     widersprechen sich in Seriennummer, MAC oder (beide mit IP-Adresse) in der Adresse.
+  Beste Verbindung: Netzwerk (Port 9100, IP-Adresse, Zebra-Suche) vor USB vor Bluetooth vor
+  Bluetooth LE vor Warteschlange; sie erhält Titel, besten Modellhinweis (eindeutige Katalogzuordnung
+  gewinnt, sonst Baureihe „ZD421“) und Seriennummer der übrigen Funde. Titel = eigener Name des
+  Druckers, sonst das Modell – nie Seriennummer oder Adresse. Ein Gerät gilt als eingerichtet, sobald
+  einer seiner Funde zu einem eingerichteten Drucker gehört (dann verschwindet auch sein BLE-Eintrag).
+  Gruppen nur aus Zebra-Warteschlangen stehen unter „Vorhandene macOS-Drucker“. `lwctl discover`
+  zeigt ebenfalls eine Zeile je Gerät (`--all` und `--json` die einzelnen Funde).
 
 **Automatische Suche (App, `Services/NetworkDiscoveryService.swift`, `model.networkDiscovery`).**
 5 s nach dem Start vollständig (Zebra-Suche, Bonjour, Netzwerk-Scan), danach alle 10 Minuten im
@@ -866,9 +889,10 @@ nur per Netzwerk-Scan gefundene Drucker nach 35 Minuten aus der Liste); beim Akt
 vollständige Suche älter als 10 Minuten ist; „Erneut suchen“ jederzeit. Abschaltbar:
 `AppPreferences.automaticNetworkDiscovery` (Einstellungen › Allgemein › Druckersuche, Editor
 „Netze …“). Ergebnisse fließen in „Drucker suchen“ (zusätzlich zu den Treffern der Seite) und – noch
-nicht eingerichtete, als Zebra erkannte Netzwerkdrucker, die in den letzten 35 Minuten geantwortet
-haben – in die Seitenleiste **„Im Netzwerk“**. „Schon eingerichtet“ entscheidet `DiscoveryFilter`
-(siehe „Anzeigen“). „Hinzufügen“ öffnet den Installationsassistenten
+nicht eingerichtete, als Zebra erkannte Drucker, die in den letzten 35 Minuten geantwortet haben –
+als Zahl in die Seitenleiste (**„Neue Zebra-Drucker [N]“**, `newDevices`, eine Zeile, öffnet „Drucker
+suchen“). „Schon eingerichtet“ entscheidet `DiscoveryFilter` (siehe „Anzeigen“). Das Kontextmenü
+„Drucker installieren …“ einer Zeile in „Drucker suchen“ öffnet den Installationsassistenten
 mit dem Fund selbst (`AppModel.openInstallWizard(for:)`, `InstallWizardPrefill.printer`): Der
 Assistent übernimmt ihn als Suchtreffer (`DiscoveryController.inject(_:)`, übersteht neue Suchläufe,
 ein schwächerer Fund desselben Geräts verdrängt ihn nicht) und wählt ihn aus – die Erkennung beginnt

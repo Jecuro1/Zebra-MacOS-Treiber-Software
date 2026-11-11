@@ -3,7 +3,7 @@ import Foundation
 import Observation
 import LabelWerkKit
 
-/// Vorbelegung des Installationsassistenten (z. B. „Hinzufügen“ in der Seitenleiste „Im Netzwerk“).
+/// Vorbelegung des Installationsassistenten (z. B. „Hinzufügen“ eines gefundenen Netzwerkdruckers).
 struct InstallWizardPrefill: Equatable {
     var host: String
     var port: Int
@@ -27,7 +27,7 @@ struct InstallWizardPrefill: Equatable {
 /// Zeitplan (`AppPreferences.automaticNetworkDiscovery`): vollständige Suche 5 s nach dem Start,
 /// danach alle 10 Minuten die Zebra-Suche; beim Aktivieren der App erneut vollständig, wenn die letzte
 /// vollständige Suche älter als 10 Minuten ist; „Erneut suchen“ jederzeit. Ergebnisse erscheinen in
-/// „Drucker suchen“ und – noch nicht eingerichtete Zebra-Drucker – in der Seitenleiste „Im Netzwerk“.
+/// „Drucker suchen“; die Seitenleiste zeigt die Zahl der neuen Zebra-Drucker („Neue Zebra-Drucker [N]“).
 @Observable
 @MainActor
 final class NetworkDiscoveryService {
@@ -95,14 +95,11 @@ final class NetworkDiscoveryService {
         return found.filter { (lastSeen[$0.id] ?? .distantPast) >= limit }
     }
 
-    /// Seitenleiste „Im Netzwerk“: als Zebra erkannte Netzwerkdrucker, die noch nicht eingerichtet sind.
-    var newPrinters: [DiscoveredPrinter] {
-        let network = recentPrinters.filter { printer in
-            guard case .tcp = printer.descriptor else { return false }
-            return printer.source != .cups
-        }
-        return partition(network).new
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    /// Seitenleiste „Neue Zebra-Drucker [N]“: noch nicht eingerichtete Zebra-Drucker der letzten
+    /// 35 Minuten – je physischem Gerät einer (Zebra-Suche, Netzwerk-Scan, Bonjour, Bluetooth und USB
+    /// desselben Druckers zusammengeführt, `DiscoveryFilter.overview`).
+    var newDevices: [DiscoveredDevice] {
+        overview(recentPrinters).devices
     }
 
     /// Identitäten der eingerichteten Drucker für den Abgleich „schon hinzugefügt“
@@ -126,9 +123,16 @@ final class NetworkDiscoveryService {
     }
 
     /// Teilt Suchtreffer auf: neue Zebra-Drucker, schon eingerichtete, nicht als Zebra erkannte.
-    /// Gemeinsame Regel für „Drucker suchen“, Radar, „Im Netzwerk“ und den Installationsassistenten.
+    /// Gemeinsame Regel für „Drucker suchen“, Radar, „Neue Zebra-Drucker“ und den Installationsassistenten.
     func partition(_ printers: [DiscoveredPrinter]) -> DiscoveryFilter.Partition {
         DiscoveryFilter.partition(printers, identities: addedIdentities, resolved: resolvedHosts)
+    }
+
+    /// Fasst Suchtreffer zu Geräten zusammen und teilt sie auf: neue Zebra-Drucker (ein Eintrag je
+    /// Gerät), vorhandene macOS-Drucker ohne gefundenes Gerät, schon eingerichtete. Gemeinsame Regel für
+    /// „Drucker suchen“, die Seitenleiste und den Installationsassistenten.
+    func overview(_ printers: [DiscoveredPrinter]) -> DiscoveryOverview {
+        DiscoveryFilter.overview(printers, identities: addedIdentities, resolved: resolvedHosts)
     }
 
     /// `true`, wenn der Drucker schon in LabelWerk eingerichtet ist – über dieselbe Verbindung, eine
@@ -237,7 +241,7 @@ final class NetworkDiscoveryService {
         // Im Hintergrund zusätzlich die Drucker einzeln prüfen (Port 9100, SNMP/`~HI`), die bisher
         // gefunden wurden, aber diesmal nicht auf die Zebra-Suche geantwortet haben – etwa weil VPN oder
         // Firewall UDP 4201 sperren. Nur eine Handvoll Verbindungen, kein Scan; so verschwinden sie nicht
-        // nach 35 Minuten aus „Im Netzwerk“, solange sie erreichbar sind.
+        // nach 35 Minuten aus „Neue Zebra-Drucker“, solange sie erreichbar sind.
         if kind == .quick {
             let hosts = recheckHosts(notSeenSince: runStart)
             if !hosts.isEmpty {

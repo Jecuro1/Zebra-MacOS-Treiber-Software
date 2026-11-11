@@ -63,56 +63,6 @@ enum DiscoveryNetworkText {
     }
 }
 
-// MARK: - Schalter „Netze …“
-
-/// Kapsel neben den Quellenschaltern: zeigt, wie viele Netze durchsucht werden, und öffnet den Editor.
-struct DiscoveryNetworksChip: View {
-    let plan: DiscoveryPlan
-    var compact: Bool = false
-    var reduceMotion: Bool = false
-    let action: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        let tint = DiscoveryNetworkText.tint(plan.networks.contains { $0.origin != .local } ? .knownPrinter : .local)
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(.system(size: compact ? 10.5 : 11.5, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: compact ? 13 : 15)
-                Text(tr("Netze …"))
-                    .font(.system(size: compact ? 11 : 12, weight: .semibold))
-                    .lineLimit(1)
-                if !plan.networks.isEmpty {
-                    Text(plan.networks.count.formatted())
-                        .font(.system(size: 10, weight: .bold, design: .rounded).monospacedDigit())
-                        .contentTransition(.numericText(value: Double(plan.networks.count)))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(tint.opacity(0.18)))
-                }
-            }
-            .foregroundStyle(Color.primary.opacity(0.8))
-            .padding(.horizontal, compact ? 9 : 11)
-            .padding(.vertical, compact ? 5 : 6)
-            .background(Capsule().fill(Theme.subtleFill.opacity(hovering ? 2 : 1)))
-            .overlay(Capsule().strokeBorder(tint.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
-            .contentShape(Capsule())
-            .scaleEffect(hovering && !reduceMotion ? 1.03 : 1)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: hovering)
-        .animation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion), value: plan.networks.count)
-        .help(plan.networks.isEmpty
-              ? tr("Durchsuchte Netze anzeigen und eigene Netze eintragen (z. B. hinter einem VPN)")
-              : tr("Durchsuchte Netze: %@", DiscoveryNetworkText.summary(plan)))
-        .accessibilityLabel(tr("Netze bearbeiten"))
-    }
-}
-
 // MARK: - Editor „Durchsuchte Netze“
 
 /// Sheet „Durchsuchte Netze“: was die Suche durchsucht (lokal, VPN, Netze bekannter Drucker) und
@@ -145,7 +95,7 @@ struct DiscoveryNetworksSheet: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Toggle(tr("Automatisch suchen – 5 Sekunden nach dem Start und danach alle 10 Minuten"),
                                    isOn: $model.preferences.automaticNetworkDiscovery)
-                            Text(tr("Gefundene Zebra-Drucker, die noch nicht eingerichtet sind, erscheinen in der Seitenleiste unter „Im Netzwerk“."))
+                            Text(tr("Gefundene Zebra-Drucker, die noch nicht eingerichtet sind, zeigt die Seitenleiste unter „Neue Zebra-Drucker“."))
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)

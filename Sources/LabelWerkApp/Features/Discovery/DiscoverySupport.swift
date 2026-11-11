@@ -10,8 +10,8 @@ import LabelWerkKit
 /// Bewusst als eigener Namensraum statt einer Erweiterung von `DiscoverySource`, damit es keine
 /// Mehrdeutigkeit mit eventuellen Erweiterungen des Transport-Moduls gibt.
 enum DiscoverySourceStyle {
-    /// Reihenfolge der Schalter in der Oberfläche.
-    static let ordered: [DiscoverySource] = [.bonjour, .zebra, .usb, .network, .cups, .bluetooth, .ble]
+    /// Reihenfolge in der Oberfläche (Zeile „Gesucht über …“, Menü „Quellen …“).
+    static let ordered: [DiscoverySource] = [.zebra, .network, .bonjour, .usb, .bluetooth, .ble, .cups]
 
     /// Standardauswahl: schnelle Quellen ohne Systemabfrage (Bluetooth fragt nach Erlaubnis).
     static let defaultSources: Set<DiscoverySource> = [.bonjour, .zebra, .usb, .network, .cups]
@@ -21,11 +21,22 @@ enum DiscoverySourceStyle {
         case .bonjour: return tr("Bonjour")
         case .zebra: return tr("Zebra-Suche")
         case .usb: return tr("USB")
-        case .network: return tr("Netzwerk-Scan")
-        case .cups: return tr("macOS-Warteschlangen")
+        case .network: return tr("Netzwerk")
+        case .cups: return tr("macOS-Drucker")
         case .bluetooth: return tr("Bluetooth")
         case .ble: return tr("Bluetooth LE")
         }
+    }
+
+    /// „Zebra-Suche, Netzwerk, Bonjour, Bluetooth, macOS-Drucker“ – gewählte Quellen in fester
+    /// Reihenfolge; Bluetooth und Bluetooth LE erscheinen zusammen als „Bluetooth“.
+    static func summary(_ sources: Set<DiscoverySource>) -> String {
+        var names: [String] = []
+        for source in ordered where sources.contains(source) {
+            let name = source == .ble ? title(.bluetooth) : title(source)
+            if !names.contains(name) { names.append(name) }
+        }
+        return names.isEmpty ? tr("keine Quelle") : names.joined(separator: ", ")
     }
 
     static func detail(_ source: DiscoverySource) -> String {

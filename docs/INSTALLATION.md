@@ -439,13 +439,23 @@ Zebra-Drucker im Netzwerk von selbst an – ohne IP-Adressen eintippen zu müsse
 
 **Automatisch.** 5 Sekunden nach dem Start sucht LabelWerk vollständig (Zebra-Suche, Bonjour,
 Netzwerk-Scan), danach alle 10 Minuten im Hintergrund mit der Zebra-Suche, und erneut vollständig,
-wenn man nach mehr als 10 Minuten zur App zurückkehrt. Gefundene Zebra-Drucker, die noch nicht
-eingerichtet sind, erscheinen in der Seitenleiste unter **„Im Netzwerk“** mit Name, Modell und
-IP-Adresse. **„Hinzufügen“** öffnet den Installationsassistenten mit diesem Drucker (Modell und Name
-aus der Suche – auch hinter einem VPN, das SNMP sperrt, gilt er damit als Zebra-Drucker); das Kontextmenü
-bietet außerdem **„Nur in LabelWerk hinzufügen“**, **„In „Drucker suchen“ anzeigen“** und
-**„Adresse kopieren“**. Ein Drucker, der schon eingerichtet ist – auch nur über seine
-macOS-Warteschlange (z. B. „10.62.13.19“ aus „Drucker & Scanner“) –, erscheint dort nicht.
+wenn man nach mehr als 10 Minuten zur App zurückkehrt. Sind Zebra-Drucker gefunden, die noch nicht
+eingerichtet sind, zeigt die Seitenleiste eine Zeile **„Neue Zebra-Drucker“** mit ihrer Zahl; ein
+Klick öffnet **„Drucker suchen“** mit der Liste. Ein Drucker, der schon eingerichtet ist – auch nur
+über seine macOS-Warteschlange (z. B. „10.62.13.19“ aus „Drucker & Scanner“) –, zählt nicht mit.
+
+**Ein Eintrag je Drucker.** Ein Zebra-Drucker meldet sich oft mehrfach: auf die Zebra-Suche, beim
+Netzwerk-Scan, per Bonjour, über Bluetooth LE (Name = Seriennummer, z. B. „D6J250301793“), per USB
+und als eine oder mehrere macOS-Warteschlangen. „Drucker suchen“ führt diese Funde zu **einer Zeile**
+zusammen – „Zebra ZD421t“, darunter „10.62.13.19 · Seriennr. D6J250301793“ –, erkannt an der
+Seriennummer (auch als Bluetooth-, Bonjour- oder Systemname), der MAC-Adresse, der Netzwerkadresse
+(Absender der Zebra-Suche, Ziel einer Warteschlange, aufgelöster Hostname) und dem eigenen Namen des
+Druckers. Kleine Symbole zeigen, worüber er erreichbar ist (Netzwerk, USB, Bluetooth,
+macOS-Drucker); **„Hinzufügen“** verwendet die beste Verbindung (Netzwerk vor USB vor Bluetooth).
+Details zeigt der Info-Knopf, das Kontextmenü bietet **„Drucker installieren …“**
+(Installationsassistent) und **„Adresse kopieren“**. Zebra-Warteschlangen in macOS, zu denen die Suche
+kein Gerät gefunden hat, stehen getrennt unter **„Vorhandene macOS-Drucker“**. Die Quellen der Suche
+wählt das Menü **„Quellen …“** in der Zeile „Gesucht über …“.
 Drucker, die nur der Netzwerk-Scan (Port 9100) gefunden hat – etwa weil VPN oder Firewall die
 Zebra-Suche sperren –, prüft die Suche im Hintergrund einzeln nach, damit sie nicht aus der Liste
 verschwinden.

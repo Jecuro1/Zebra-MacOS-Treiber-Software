@@ -433,16 +433,25 @@
 "Die Mengen (^PQ bzw. Kopien) ergeben %d einzeln gerasterte Etiketten (höchstens %d)." = "The quantities (^PQ or copies) add up to %d individually rasterized labels (at most %d).";
 "Etikett als PNG exportieren" = "Export Label as PNG";
 
-/* MARK: Features/Discovery/DiscoveryCards.swift */
-"Aus" = "Off";
-"Ein" = "On";
-"Details" = "Details";
-"Nur Senden" = "Send Only";
-"Über diese Verbindung kann LabelWerk drucken, aber keinen Live-Status abfragen." = "Over this connection LabelWerk can print but cannot query live status.";
-"Unbekanntes Modell: %@" = "Unknown model: %@";
-"Modell wird beim Verbinden erkannt" = "Model is detected when connecting";
-"Modell unbekannt" = "Model unknown";
+/* MARK: Features/Discovery/DiscoveryDeviceList.swift */
+"Netzwerk" = "Network";
+"USB" = "USB";
+"Bluetooth" = "Bluetooth";
+"macOS-Drucker" = "macOS printer";
+"Erreichbar über %@: %@" = "Reachable via %@: %@";
 "Hinzufügen" = "Add";
+"Details" = "Details";
+"Adresse kopieren" = "Copy Address";
+"In LabelWerk einrichten über %@" = "Set up in LabelWerk via %@";
+"Über diese Verbindung kann LabelWerk drucken, aber keinen Live-Status abfragen." = "Over this connection LabelWerk can print but cannot query live status.";
+"Seriennr. %@" = "Serial no. %@";
+"%d neue Zebra-Drucker" = "%d new Zebra printers";
+"1 neuer Zebra-Drucker" = "1 new Zebra printer";
+"Modell wird beim Verbinden erkannt" = "Model is detected when connecting";
+"Adresse" = "Address";
+"Gefunden über" = "Found via";
+"Suche läuft" = "Searching";
+"Suchradar" = "Search radar";
 
 /* MARK: Features/Discovery/DiscoveryManualForm.swift */
 "Wie ist der Drucker mit diesem Mac verbunden?" = "How is the printer connected to this Mac?";
@@ -511,12 +520,8 @@
 "Das Ende des Bereichs liegt vor dem Anfang." = "The end of the range is before its start.";
 "Loopback-, Multicast- und reservierte Adressen werden nicht durchsucht." = "Loopback, multicast and reserved addresses are not scanned.";
 "Großes Netz: Nur die ersten %d Adressen werden durchsucht." = "Large network: only the first %d addresses are scanned.";
-"Netze …" = "Networks…";
-"Durchsuchte Netze anzeigen und eigene Netze eintragen (z. B. hinter einem VPN)" = "Show scanned networks and add your own networks (e.g. behind a VPN)";
-"Durchsuchte Netze: %@" = "Scanned networks: %@";
-"Netze bearbeiten" = "Edit Networks";
 "Automatisch suchen – 5 Sekunden nach dem Start und danach alle 10 Minuten" = "Search automatically – 5 seconds after launch and every 10 minutes thereafter";
-"Gefundene Zebra-Drucker, die noch nicht eingerichtet sind, erscheinen in der Seitenleiste unter „Im Netzwerk“." = "Zebra printers found that are not yet set up appear in the sidebar under “On the Network”.";
+"Gefundene Zebra-Drucker, die noch nicht eingerichtet sind, zeigt die Seitenleiste unter „Neue Zebra-Drucker“." = "Zebra printers found but not yet set up appear in the sidebar under “New Zebra Printers”.";
 "Durchsuchte Netze" = "Scanned Networks";
 "Wie die Zebra-Programme unter Windows sucht LabelWerk alle Zebra-Drucker in diesen Netzen – auch hinter Routern und VPN." = "Like Zebra’s Windows software, LabelWerk searches these networks for all Zebra printers – even behind routers and VPNs.";
 "Zuletzt gesucht: %@" = "Last checked: %@";
@@ -538,18 +543,15 @@
 "Suchen" = "Search";
 "Manuell" = "Manual";
 "Demo-Drucker" = "Demo Printer";
-"Suchen über" = "Search via";
-"Neue Zebra-Drucker" = "New Zebra Printers";
-"Modelle werden automatisch aus dem Katalog zugeordnet." = "Models are matched automatically from the catalog.";
-"Keine neuen Zebra-Drucker gefunden" = "No new Zebra printers found";
+"Neue Zebra-Drucker erscheinen hier, sobald sie antworten." = "New Zebra printers appear here as soon as they respond.";
+"Vorhandene macOS-Drucker" = "Existing macOS Printers";
+"Zebra-Drucker, die in macOS eingerichtet sind, aber bei dieser Suche nicht geantwortet haben." = "Zebra printers set up in macOS that did not respond to this search.";
 "Ist der Drucker eingeschaltet und zeigt „Bereit“?" = "Is the printer switched on and showing “Ready”?";
 "Sind Mac und Drucker im selben Netzwerk bzw. WLAN?" = "Are the Mac and the printer on the same network or Wi-Fi?";
 "Drucker in einem anderen Netz, z. B. über VPN? Unter „Netze …“ das Netz eintragen, etwa 10.62.13.0/24." = "Printer on another network, e.g. via VPN? Add the network under “Networks…”, such as 10.62.13.0/24.";
 "USB-Kabel direkt anschließen (ohne Hub) und kurz warten." = "Connect the USB cable directly (without a hub) and wait a moment.";
 "Für Bluetooth die Quellen „Bluetooth“ bzw. „Bluetooth LE“ aktivieren." = "For Bluetooth, enable the “Bluetooth” or “Bluetooth LE” sources.";
-"Mindestens eine Quelle auswählen" = "Select at least one source";
 "Manuell hinzufügen" = "Add Manually";
-"Neue Zebra-Drucker erscheinen hier, sobald sie antworten." = "New Zebra printers appear here as soon as they respond.";
 "Noch keine neuen Zebra-Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden." = "No new Zebra printers found yet. You can search again, add the printer manually or use the demo printer.";
 "Demo-Drucker ist eingerichtet" = "Demo printer is set up";
 "Demo-Drucker verwenden" = "Use Demo Printer";
@@ -557,19 +559,19 @@
 "%d eingerichtet" = "%d set up";
 "%d bereits hinzugefügt" = "%d already added";
 "Drucker, die schon in LabelWerk eingerichtet sind, werden in der Suche nicht angezeigt." = "Printers already set up in LabelWerk are not shown in the search.";
+"Gesucht über %@" = "Searched via %@";
+"Quellen …" = "Sources…";
+"Suchquellen wählen" = "Choose Search Sources";
+"Netze (%d) …" = "Networks (%d)…";
+"Netze …" = "Networks…";
+"Durchsuchte Netze anzeigen und eigene Netze eintragen (z. B. hinter einem VPN)" = "Show scanned networks and add your own networks (e.g. behind a VPN)";
+"Durchsuchte Netze: %@" = "Scanned networks: %@";
+"Mindestens eine Quelle auswählen" = "Select at least one source";
 "Suche stoppen" = "Stop Search";
 "Suche starten" = "Start Search";
 "noch %d s" = "%d s left";
-"Suche läuft … 1 neuer Zebra-Drucker" = "Searching … 1 new Zebra printer";
-"Suche läuft … %d neue Zebra-Drucker" = "Searching … %d new Zebra printers";
 "Drucker in der Nähe finden" = "Find Printers Nearby";
-"1 neuer Zebra-Drucker gefunden" = "1 new Zebra printer found";
-"%d neue Zebra-Drucker gefunden" = "%d new Zebra printers found";
-"Durchsucht: %@ – Netze: %@" = "Searched: %@ – Networks: %@";
-"Durchsucht: %@" = "Searched: %@";
-"Bonjour, Zebra-Suche, USB, Netzwerk, macOS-Warteschlangen und Bluetooth werden gleichzeitig durchsucht." = "Bonjour, Zebra discovery, USB, network, macOS queues and Bluetooth are searched simultaneously.";
-"Strom, Kabel und Netzwerk prüfen – oder den Drucker manuell hinzufügen." = "Check power, cables and network – or add the printer manually.";
-"„Hinzufügen“ richtet den Drucker in LabelWerk ein. Ein Klick auf einen Punkt im Radar zeigt ihn an." = "“Add” sets up the printer in LabelWerk. Click a dot on the radar to show it.";
+"Keine neuen Zebra-Drucker gefunden" = "No new Zebra printers found";
 "Bereits eingerichtet" = "Already set up";
 "Drucker hinzugefügt" = "Printer added";
 "Demo-Drucker ausprobieren" = "Try the Demo Printer";
@@ -581,24 +583,17 @@
 "Demo-Drucker öffnen" = "Open Demo Printer";
 "Probedruck ansehen" = "View Sample Print";
 "Drucker suchen" = "Find Printers";
-"Zebra-Drucker per Bonjour, Zebra-Suche, USB, Netzwerk-Scan, macOS-Warteschlange oder Bluetooth finden und einrichten – auch in anderen Netzen und über VPN." = "Find and set up Zebra printers via Bonjour, Zebra discovery, USB, network scan, macOS queue or Bluetooth – even on other networks and over VPN.";
+"Zebra-Drucker im Netzwerk, per USB und Bluetooth finden und einrichten – auch in anderen Netzen und über VPN." = "Find and set up Zebra printers on the network, via USB and Bluetooth – also in other networks and over VPN.";
 "%d Drucker eingerichtet" = "%d printers set up";
 "Suchen, manuell einrichten oder den Demo-Drucker ausprobieren." = "Search, set up manually or try the demo printer.";
 "Installationsassistent: Netzwerkdrucker wie unter Windows als macOS-Drucker einrichten" = "Setup assistant: set up network printers as macOS printers, just like on Windows";
 "Schließen (Esc)" = "Close (Esc)";
 
-/* MARK: Features/Discovery/DiscoveryRadar.swift */
-"Suche läuft" = "Searching";
-"Suchradar" = "Search radar";
-
 /* MARK: Features/Discovery/DiscoverySupport.swift */
 "Bonjour" = "Bonjour";
 "Zebra-Suche" = "Zebra Discovery";
-"USB" = "USB";
-"Netzwerk-Scan" = "Network Scan";
-"macOS-Warteschlangen" = "macOS Queues";
-"Bluetooth" = "Bluetooth";
 "Bluetooth LE" = "Bluetooth LE";
+"keine Quelle" = "no source";
 "Netzwerkdrucker, die sich per Bonjour (mDNS) melden" = "Network printers that announce themselves via Bonjour (mDNS)";
 "Zebras eigene Suche (UDP 4201) wie die Zebra-Programme unter Windows – findet Zebra-Drucker auch in anderen Netzen und über VPN" = "Zebra’s own discovery (UDP 4201), like Zebra’s Windows software – finds Zebra printers even on other networks and over VPN";
 "Direkt per USB angeschlossene Zebra-Drucker" = "Zebra printers connected directly via USB";
@@ -607,13 +602,11 @@
 "Klassisches Bluetooth (SPP), z. B. mobile ZQ-Drucker" = "Classic Bluetooth (SPP), e.g. mobile ZQ printers";
 "Bluetooth Low Energy (Link-OS-Drucker)" = "Bluetooth Low Energy (Link-OS printers)";
 "Das Gerät hat sich bei der Suche nicht als Zebra-Drucker zu erkennen gegeben (keine SNMP-Antwort). LabelWerk fragt nach dem Hinzufügen sofort und danach regelmäßig den Status ab – ein Büro- oder Tintenstrahldrucker würde diese Abfragen als Seiten voller Steuerzeichen drucken. Nur hinzufügen, wenn es sich um einen Zebra-Drucker handelt." = "The device did not identify itself as a Zebra printer during discovery (no SNMP response). After it is added, LabelWerk queries its status immediately and then at regular intervals – an office or inkjet printer would print these queries as pages full of control characters. Only add it if it is a Zebra printer.";
-"Netzwerk" = "Network";
 "Link-OS" = "Link-OS";
 "SGD-Befehle" = "SGD commands";
 "RFID" = "RFID";
 "Display" = "Display";
 "Linerless" = "Linerless";
-"Adresse" = "Address";
 "Dienst-Port" = "Service port";
 "Dienstname" = "Service name";
 "Diensttyp" = "Service type";
@@ -755,6 +748,7 @@
 "macOS rastert die Seite in Graustufen in der Auflösung des Druckkopfs (203, 300 oder 600 dpi)." = "macOS rasterizes the page in grayscale at the printhead’s resolution (203, 300 or 600 dpi).";
 "Der LabelWerk-Filter rastert in Schwarz/Weiß, komprimiert und erzeugt ZPL, EPL oder CPCL mit deinen Einstellungen (Schwärzung, Tempo, Medien)." = "The LabelWerk filter dithers to black and white, compresses, and generates ZPL, EPL or CPCL with your settings (darkness, speed, media).";
 "Die Daten gehen per USB oder Netzwerk (Port 9100) an den Zebra-Drucker – ohne Umweg über Zebra-Software." = "The data goes to the Zebra printer via USB or network (port 9100) – without any detour through Zebra software.";
+"macOS-Warteschlangen" = "macOS Queues";
 "Drucker, die in allen Programmen im Druckdialog erscheinen" = "Printers that appear in the print dialog of every app";
 "Netzwerk- oder USB-Drucker als macOS-Drucker installieren – wie unter Windows (⌥⌘N)" = "Install a network or USB printer as a macOS printer – just like on Windows (⌥⌘N)";
 "Alle synchronisieren" = "Sync All";
@@ -1593,6 +1587,8 @@
 "WPA2-PSK" = "WPA2-PSK";
 "WPA3-Personal" = "WPA3-Personal";
 "Andere: %@" = "Other: %@";
+"Aus" = "Off";
+"Ein" = "On";
 "DNS-Server" = "DNS server";
 "Hostname" = "Host name";
 "WLAN-Name (SSID)" = "Wi-Fi name (SSID)";
@@ -2486,7 +2482,6 @@
 "Wähle links einen Drucker oder füge einen neuen hinzu." = "Choose a printer on the left or add a new one.";
 
 /* MARK: Features/Root/SidebarView.swift */
-"Im Netzwerk" = "On the Network";
 "Drucker im Netzwerk finden und als macOS-Drucker mit dem LabelWerk-Treiber installieren (⌥⌘N)" = "Find printers on the network and install them as macOS printers with the LabelWerk driver (⌥⌘N)";
 "Drucker entfernen?" = "Remove Printer?";
 "„%@“ wird aus LabelWerk entfernt. Eine eingerichtete macOS-Warteschlange bleibt erhalten." = "“%@” will be removed from LabelWerk. A macOS queue that has been set up is kept.";
@@ -2494,11 +2489,8 @@
 "Aus Favoriten entfernen" = "Remove from Favorites";
 "Zu Favoriten" = "Add to Favorites";
 "Umbenennen …" = "Rename…";
-"Hinzufügen …" = "Add…";
-"Nur in LabelWerk hinzufügen" = "Add to LabelWerk Only";
-"In „Drucker suchen“ anzeigen" = "Show in “Find Printers”";
-"Adresse kopieren" = "Copy Address";
-"Drucker einrichten – der Installationsassistent öffnet sich mit dieser Adresse" = "Set up printer – the setup assistant opens with this address";
+"Neue Zebra-Drucker" = "New Zebra Printers";
+"Gefundene Zebra-Drucker in „Drucker suchen“ anzeigen und hinzufügen" = "Show and add found Zebra printers in “Find Printers”";
 
 /* MARK: Features/Settings/AppSettingsView.swift */
 "Allgemein" = "General";
@@ -2514,7 +2506,7 @@
 "Demo-Drucker anbieten" = "Offer demo printer";
 "Druckersuche" = "Printer Discovery";
 "Drucker im Netzwerk automatisch suchen" = "Automatically search for printers on the network";
-"5 Sekunden nach dem Start und danach alle 10 Minuten (Zebra-Suche über UDP 4201). Gefundene Drucker erscheinen in der Seitenleiste unter „Im Netzwerk“; weitere Netze, z. B. hinter einem VPN, unter „Drucker suchen“ › „Netze …“." = "5 seconds after launch and every 10 minutes thereafter (Zebra discovery via UDP 4201). Printers found appear in the sidebar under “On the Network”; add more networks, e.g. behind a VPN, under “Find Printers” › “Networks…”.";
+"5 Sekunden nach dem Start und danach alle 10 Minuten (Zebra-Suche über UDP 4201). Neue Zebra-Drucker zeigt die Seitenleiste unter „Neue Zebra-Drucker“; weitere Netze, z. B. hinter einem VPN, unter „Drucker suchen“ › „Netze …“." = "5 seconds after launch and then every 10 minutes (Zebra discovery via UDP 4201). New Zebra printers appear in the sidebar under “New Zebra Printers”; add more networks, e.g. behind a VPN, under “Find Printers” › “Networks…”.";
 "Bilder & Fotos" = "Images & Photos";
 "Standard-Rasterung" = "Default dithering";
 "Gilt für Bilder und PDFs im Designer. Für Text und Barcodes empfiehlt sich „Schwellenwert“." = "Applies to images and PDFs in the Designer. For text and barcodes, “Threshold” is recommended.";
@@ -2561,6 +2553,10 @@
 
 /* MARK: Features/Setup/SetupChooseStep.swift */
 "Drucker im Netzwerk werden gesucht …" = "Searching for printers on the network…";
+"Suche läuft … 1 neuer Zebra-Drucker" = "Searching … 1 new Zebra printer";
+"Suche läuft … %d neue Zebra-Drucker" = "Searching … %d new Zebra printers";
+"1 neuer Zebra-Drucker gefunden" = "1 new Zebra printer found";
+"%d neue Zebra-Drucker gefunden" = "%d new Zebra printers found";
 "Bonjour, Netzwerk-Scan (Port 9100) und USB – Drucker auswählen und „Weiter“ wählen." = "Bonjour, network scan (port 9100) and USB – select a printer and choose “Continue”.";
 "Adresse unten eingeben – sie steht auf dem Konfigurationsetikett des Druckers." = "Enter the address below – it is printed on the printer’s configuration label.";
 "Im Netzwerk wurde kein neuer Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben." = "No new Zebra printer was found on the network. Is it switched on and on the same network? The search may not find printers behind a router (another subnet) – enter the IP address below instead.";
@@ -2616,7 +2612,6 @@
 "Der Drucker ist gerade nicht erreichbar. Bitte das Modell unten wählen – unsicher? „Allgemeiner Zebra-Drucker“ passt zu allen ZPL-Druckern." = "The printer is not reachable right now. Please choose the model below – not sure? “Generic Zebra printer” works with all ZPL printers.";
 "Bitte das Modell unten wählen. Unsicher? „Allgemeiner Zebra-Drucker“ passt zu allen ZPL-Druckern." = "Please choose the model below. Not sure? “Generic Zebra printer” works with all ZPL printers.";
 "Firmware %@" = "Firmware %@";
-"Seriennr. %@" = "Serial no. %@";
 "Allgemeiner Treiber für %@ – passt, wenn das Modell fehlt" = "Generic driver for %@ – fits when the model is missing";
 "Erkannt" = "Detected";
 
@@ -2809,6 +2804,7 @@
 "Sende ZPL-, SGD- oder JSON-Befehle mit ⌘↩. Antworten erscheinen hier als Text mit sichtbaren Steuerzeichen." = "Send ZPL, SGD or JSON commands with ⌘↩. Responses appear here as text with visible control characters.";
 
 /* MARK: Features/Terminal/TerminalView.swift */
+"Nur Senden" = "Send Only";
 "Diese Verbindung (macOS-Warteschlange) überträgt nur Daten zum Drucker. Antworten wie Status, Konfiguration oder SGD-Werte sind nicht verfügbar." = "This connection (macOS queue) only transfers data to the printer. Responses such as status, configuration or SGD values are not available.";
 "Terminal" = "Terminal";
 "Hex" = "Hex";
@@ -3397,6 +3393,25 @@
 "Prüfen, ob der Drucker eingeschaltet und verbunden ist (USB-Kabel, Netzwerk oder Bluetooth-Kopplung), und danach „Neu verbinden“ wählen." = "Check that the printer is switched on and connected (USB cable, network or Bluetooth pairing), then choose “Reconnect”.";
 
 /* MARK: Nicht mehr verwendet – wird mit --prune entfernt */
+"Unbekanntes Modell: %@" = "Unknown model: %@";
+"Modell unbekannt" = "Model unknown";
+"Netze bearbeiten" = "Edit Networks";
+"Gefundene Zebra-Drucker, die noch nicht eingerichtet sind, erscheinen in der Seitenleiste unter „Im Netzwerk“." = "Zebra printers found that are not yet set up appear in the sidebar under “On the Network”.";
+"Suchen über" = "Search via";
+"Modelle werden automatisch aus dem Katalog zugeordnet." = "Models are matched automatically from the catalog.";
+"Durchsucht: %@ – Netze: %@" = "Searched: %@ – Networks: %@";
+"Durchsucht: %@" = "Searched: %@";
+"Bonjour, Zebra-Suche, USB, Netzwerk, macOS-Warteschlangen und Bluetooth werden gleichzeitig durchsucht." = "Bonjour, Zebra discovery, USB, network, macOS queues and Bluetooth are searched simultaneously.";
+"Strom, Kabel und Netzwerk prüfen – oder den Drucker manuell hinzufügen." = "Check power, cables and network – or add the printer manually.";
+"„Hinzufügen“ richtet den Drucker in LabelWerk ein. Ein Klick auf einen Punkt im Radar zeigt ihn an." = "“Add” sets up the printer in LabelWerk. Click a dot on the radar to show it.";
+"Zebra-Drucker per Bonjour, Zebra-Suche, USB, Netzwerk-Scan, macOS-Warteschlange oder Bluetooth finden und einrichten – auch in anderen Netzen und über VPN." = "Find and set up Zebra printers via Bonjour, Zebra discovery, USB, network scan, macOS queue or Bluetooth – even on other networks and over VPN.";
+"Netzwerk-Scan" = "Network Scan";
+"Im Netzwerk" = "On the Network";
+"Hinzufügen …" = "Add…";
+"Nur in LabelWerk hinzufügen" = "Add to LabelWerk Only";
+"In „Drucker suchen“ anzeigen" = "Show in “Find Printers”";
+"Drucker einrichten – der Installationsassistent öffnet sich mit dieser Adresse" = "Set up printer – the setup assistant opens with this address";
+"5 Sekunden nach dem Start und danach alle 10 Minuten (Zebra-Suche über UDP 4201). Gefundene Drucker erscheinen in der Seitenleiste unter „Im Netzwerk“; weitere Netze, z. B. hinter einem VPN, unter „Drucker suchen“ › „Netze …“." = "5 seconds after launch and every 10 minutes thereafter (Zebra discovery via UDP 4201). Printers found appear in the sidebar under “On the Network”; add more networks, e.g. behind a VPN, under “Find Printers” › “Networks…”.";
 "Nicht als Zebra-Drucker erkannt" = "Not recognized as a Zebra printer";
 "Hinzugefügt" = "Added";
 "Nur Zebra-Warteschlangen anzeigen" = "Show only Zebra queues";

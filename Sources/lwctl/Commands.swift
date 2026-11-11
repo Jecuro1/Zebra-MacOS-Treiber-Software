@@ -293,6 +293,14 @@ enum Commands {
         }
         if found.isEmpty {
             Console.out("Keine Zebra-Drucker gefunden.")
+        } else if !showAll {
+            // Ein Eintrag je Gerät (wie in der App): Zebra-Suche, Bonjour, BLE, USB und Warteschlangen
+            // desselben Druckers zusammengeführt; die Drucker-URI nennt die beste Verbindung.
+            let devices = DiscoveryFilter.groupDevices(found)
+            Console.table(["NAME", "MODELL", "ADRESSE", "SERIENNR.", "ERREICHBAR ÜBER", "DRUCKER-URI"], devices.map { device in
+                [device.title, device.displayModel, device.address ?? "–", device.serialNumber ?? "–",
+                 device.paths.map(\.displayName).joined(separator: ", "), device.preferred.descriptor.uriString]
+            })
         } else {
             Console.table(["NAME", "DRUCKER-URI", "QUELLE", "MODELL"], found.map { printer in
                 [printer.name, printer.descriptor.uriString, printer.source.displayName,

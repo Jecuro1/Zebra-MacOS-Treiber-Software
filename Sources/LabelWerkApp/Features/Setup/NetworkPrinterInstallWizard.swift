@@ -17,7 +17,7 @@ struct NetworkPrinterInstallWizard: View {
 
     /// Wird beim Schließen aufgerufen (z. B. damit ein umgebendes Sheet sich mit schließt).
     private let onExit: ((PrinterSetupExit) -> Void)?
-    /// Adresse eines schon gefundenen Druckers (Seitenleiste „Im Netzwerk“ › Hinzufügen).
+    /// Adresse eines schon gefundenen Druckers („Drucker suchen“ › „Drucker installieren …“).
     private let prefill: InstallWizardPrefill?
 
     init(prefill: InstallWizardPrefill? = nil, onExit: ((PrinterSetupExit) -> Void)? = nil) {

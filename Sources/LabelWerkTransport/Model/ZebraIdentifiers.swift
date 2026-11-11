@@ -27,11 +27,22 @@ public enum ZebraIdentifiers {
         return bluetoothOUIs.contains(String(hex.prefix(6)))
     }
 
-    /// `true` für Seriennummern im Format mobiler Zebra-Drucker („XXQLJ120900310“) – deren
-    /// Bluetooth-Name ab Werk die Seriennummer ist.
+    /// `true` für Seriennummern im Format von Zebra-Druckern – Link-OS-Drucker melden sich ab Werk unter
+    /// ihrer Seriennummer (Bluetooth-/BLE-Name, Systemname der Zebra-Suche, Bonjour-Name):
+    ///
+    /// * mobile Drucker: „XX“ + drei Buchstaben + mindestens sechs Ziffern („XXQLJ120900310“);
+    /// * Desktop- und Industriedrucker: zwei Zeichen (Werk/Baureihe) + „J“ + Jahr (zwei Ziffern) +
+    ///   Kalenderwoche (01–53) + fünfstellige laufende Nummer („D6J250301793“, „28J154300589“,
+    ///   „52J162000000“). Das „J“ an dritter Stelle haben alle bekannten Desktop-Seriennummern; ohne
+    ///   diese Einschränkung passten auch beliebige andere Gerätenamen („ABC123451234“), die dann als
+    ///   Zebra-Drucker und als Seriennummer zum Zusammenführen gälten.
     public static func looksLikeZebraSerialNumber(_ text: String) -> Bool {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return value.range(of: #"^XX[A-Z]{3}[0-9]{6,}$"#, options: .regularExpression) != nil
+        if value.range(of: #"^XX[A-Z]{3}[0-9]{6,}$"#, options: .regularExpression) != nil { return true }
+        guard value.range(of: #"^[0-9A-Z]{2}J[0-9]{9}$"#, options: .regularExpression) != nil else { return false }
+        let digits = Array(value.dropFirst(3))
+        guard let week = Int(String(digits[2...3])) else { return false }
+        return (1...53).contains(week)
     }
 
     /// Zebra Parser Service (BLE, Link-OS).

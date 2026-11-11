@@ -344,6 +344,7 @@ public enum DiscoveryFilter {
             addSerial(uriKeys.serialNumber)
         }
         addSerial(printer.details["serialNumber"])
+        for serial in nameSerialNumbers(of: printer) { addSerial(serial) }
         keys.macAddress = DiscoveryRegistry.macKey(printer.details["macAddress"])
         if printer.source == .bonjour || printer.details["serviceType"] != nil {
             addServiceName(printer.details["serviceName"])
@@ -439,6 +440,32 @@ public enum DiscoveryFilter {
             return value.isEmpty ? nil : value
         }
         return nil
+    }
+
+    /// Seriennummern, die ein Fund **als Name** trägt: Link-OS-Drucker melden sich ab Werk unter ihrer
+    /// Seriennummer – als Bluetooth-/BLE-Name, Systemname der Zebra-Suche, SNMP-`sysName` und
+    /// Bonjour-Name (auch in `dnssd://`-Warteschlangen). Zählt nur, was dem Seriennummernformat von
+    /// Zebra entspricht (``ZebraIdentifiers/looksLikeZebraSerialNumber(_:)``). Die Seriennummer des
+    /// Druckservers (`printServerSerial`) zählt nie als die des Druckers. Vergleichsform wie ``serialKey(_:)``.
+    public static func nameSerialNumbers(of printer: DiscoveredPrinter) -> [String] {
+        var texts: [String?] = [printer.name, printer.details["name"], printer.details["sysName"],
+                                printer.details["serviceName"]]
+        switch printer.descriptor {
+        case .bluetooth(_, let name), .ble(_, let name): texts.append(name)
+        case .cupsQueue(let name): texts.append(name)
+        default: break
+        }
+        if let uri = printer.details["deviceURI"], let scheme = uri.split(separator: ":").first?.lowercased(),
+           scheme == "dnssd" || scheme == "mdns" {
+            texts.append(CUPSQueueLister.modelHint(fromDeviceURI: uri))
+        }
+        var result: [String] = []
+        for text in texts {
+            guard let text, ZebraIdentifiers.looksLikeZebraSerialNumber(text), let key = serialKey(text),
+                  !result.contains(key) else { continue }
+            result.append(key)
+        }
+        return result
     }
 
     /// Seriennummer in Vergleichsform (Großbuchstaben, ohne Leerraum) oder `nil`.
