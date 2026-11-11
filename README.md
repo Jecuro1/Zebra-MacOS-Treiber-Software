@@ -182,6 +182,7 @@ Den Drucker wählt `--printer` (bzw. `-p` oder die Umgebungsvariable `LWCTL_PRIN
 ```bash
 lwctl discover                                        # Drucker suchen (Bonjour, Zebra-Suche UDP 4201, Netzwerk, USB, Bluetooth, CUPS)
 lwctl discover --networks 10.62.13.0/24               # zusätzlich ein Netz hinter VPN/Router durchsuchen
+lwctl discover --all                                  # auch Geräte, die sich nicht als Zebra-Drucker zu erkennen geben
 lwctl install -p tcp://192.168.1.50                   # als macOS-Drucker einrichten (Modell erkennen, lpadmin)
 lwctl queues --labelwerk                              # eingerichtete Warteschlangen mit LabelWerk-Treiber
 lwctl uninstall-queue Zebra_ZD421t_192.168.1.50       # Warteschlange entfernen

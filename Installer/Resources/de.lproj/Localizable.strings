@@ -436,12 +436,9 @@
 "Details" = "Details";
 "Nur Senden" = "Nur Senden";
 "Über diese Verbindung kann LabelWerk drucken, aber keinen Live-Status abfragen." = "Über diese Verbindung kann LabelWerk drucken, aber keinen Live-Status abfragen.";
-"Nicht als Zebra-Drucker erkannt" = "Nicht als Zebra-Drucker erkannt";
 "Unbekanntes Modell: %@" = "Unbekanntes Modell: %@";
 "Modell wird beim Verbinden erkannt" = "Modell wird beim Verbinden erkannt";
 "Modell unbekannt" = "Modell unbekannt";
-"Öffnen" = "Öffnen";
-"Hinzugefügt" = "Hinzugefügt";
 "Hinzufügen" = "Hinzufügen";
 
 /* MARK: Features/Discovery/DiscoveryManualForm.swift */
@@ -457,14 +454,9 @@
 "Erreichbar · %d ms" = "Erreichbar · %d ms";
 "Warteschlangen werden gelesen …" = "Warteschlangen werden gelesen …";
 "In macOS ist noch keine Druckerwarteschlange eingerichtet." = "In macOS ist noch keine Druckerwarteschlange eingerichtet.";
-"Nur Zebra-Warteschlangen anzeigen" = "Nur Zebra-Warteschlangen anzeigen";
-"Alle Warteschlangen anzeigen (%d weitere)" = "Alle Warteschlangen anzeigen (%d weitere)";
-"Warteschlangen ohne erkennbaren Zebra-Drucker (z. B. Büro- oder Tintenstrahldrucker)" = "Warteschlangen ohne erkennbaren Zebra-Drucker (z. B. Büro- oder Tintenstrahldrucker)";
-"„%@“ wurde nicht als Zebra-Drucker erkannt. LabelWerk sendet Etikettendaten (ZPL, EPL oder CPCL) als Rohdaten – ein Büro- oder Tintenstrahldrucker würde stattdessen Seiten voller Steuerzeichen drucken. Nur auswählen, wenn diese Warteschlange zu einem Zebra-Drucker führt." = "„%@“ wurde nicht als Zebra-Drucker erkannt. LabelWerk sendet Etikettendaten (ZPL, EPL oder CPCL) als Rohdaten – ein Büro- oder Tintenstrahldrucker würde stattdessen Seiten voller Steuerzeichen drucken. Nur auswählen, wenn diese Warteschlange zu einem Zebra-Drucker führt.";
+"Keine neue Zebra-Warteschlange in macOS. Warteschlangen anderer Drucker und bereits hinzugefügter Drucker werden nicht angezeigt." = "Keine neue Zebra-Warteschlange in macOS. Warteschlangen anderer Drucker und bereits hinzugefügter Drucker werden nicht angezeigt.";
 "Aktualisieren" = "Aktualisieren";
 "Über eine Warteschlange sendet LabelWerk Rohdaten an CUPS. Live-Status und Gerätewerkzeuge sind damit nicht verfügbar." = "Über eine Warteschlange sendet LabelWerk Rohdaten an CUPS. Live-Status und Gerätewerkzeuge sind damit nicht verfügbar.";
-"Kein Zebra-Drucker erkannt · %@" = "Kein Zebra-Drucker erkannt · %@";
-"Diese Warteschlange gehört vermutlich nicht zu einem Zebra-Drucker. Etikettendaten würden dort als unlesbare Seiten gedruckt." = "Diese Warteschlange gehört vermutlich nicht zu einem Zebra-Drucker. Etikettendaten würden dort als unlesbare Seiten gedruckt.";
 "Kein USB-Drucker gefunden. Ist der Drucker eingeschaltet und das Kabel angeschlossen?" = "Kein USB-Drucker gefunden. Ist der Drucker eingeschaltet und das Kabel angeschlossen?";
 "USB-Geräte werden gesucht …" = "USB-Geräte werden gesucht …";
 "Keine Bluetooth-Drucker in Reichweite gefunden. Bluetooth am Drucker aktivieren und ihn sichtbar machen." = "Keine Bluetooth-Drucker in Reichweite gefunden. Bluetooth am Drucker aktivieren und ihn sichtbar machen.";
@@ -543,13 +535,10 @@
 "Suchen" = "Suchen";
 "Manuell" = "Manuell";
 "Demo-Drucker" = "Demo-Drucker";
-"„%@“ wurde nicht als Zebra-Drucker erkannt" = "„%@“ wurde nicht als Zebra-Drucker erkannt";
-"Trotzdem hinzufügen" = "Trotzdem hinzufügen";
 "Suchen über" = "Suchen über";
-"Gefundene Drucker" = "Gefundene Drucker";
+"Neue Zebra-Drucker" = "Neue Zebra-Drucker";
 "Modelle werden automatisch aus dem Katalog zugeordnet." = "Modelle werden automatisch aus dem Katalog zugeordnet.";
-"%d hinzugefügt" = "%d hinzugefügt";
-"Kein Drucker gefunden" = "Kein Drucker gefunden";
+"Keine neuen Zebra-Drucker gefunden" = "Keine neuen Zebra-Drucker gefunden";
 "Ist der Drucker eingeschaltet und zeigt „Bereit“?" = "Ist der Drucker eingeschaltet und zeigt „Bereit“?";
 "Sind Mac und Drucker im selben Netzwerk bzw. WLAN?" = "Sind Mac und Drucker im selben Netzwerk bzw. WLAN?";
 "Drucker in einem anderen Netz, z. B. über VPN? Unter „Netze …“ das Netz eintragen, etwa 10.62.13.0/24." = "Drucker in einem anderen Netz, z. B. über VPN? Unter „Netze …“ das Netz eintragen, etwa 10.62.13.0/24.";
@@ -557,19 +546,22 @@
 "Für Bluetooth die Quellen „Bluetooth“ bzw. „Bluetooth LE“ aktivieren." = "Für Bluetooth die Quellen „Bluetooth“ bzw. „Bluetooth LE“ aktivieren.";
 "Mindestens eine Quelle auswählen" = "Mindestens eine Quelle auswählen";
 "Manuell hinzufügen" = "Manuell hinzufügen";
-"Gefundene Drucker erscheinen hier, sobald sie antworten." = "Gefundene Drucker erscheinen hier, sobald sie antworten.";
-"Noch keine Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden." = "Noch keine Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden.";
+"Neue Zebra-Drucker erscheinen hier, sobald sie antworten." = "Neue Zebra-Drucker erscheinen hier, sobald sie antworten.";
+"Noch keine neuen Zebra-Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden." = "Noch keine neuen Zebra-Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden.";
 "Demo-Drucker ist eingerichtet" = "Demo-Drucker ist eingerichtet";
 "Demo-Drucker verwenden" = "Demo-Drucker verwenden";
 "Manuell hinzufügen …" = "Manuell hinzufügen …";
 "%d eingerichtet" = "%d eingerichtet";
+"%d bereits hinzugefügt" = "%d bereits hinzugefügt";
+"Drucker, die schon in LabelWerk eingerichtet sind, werden in der Suche nicht angezeigt." = "Drucker, die schon in LabelWerk eingerichtet sind, werden in der Suche nicht angezeigt.";
 "Suche stoppen" = "Suche stoppen";
 "Suche starten" = "Suche starten";
 "noch %d s" = "noch %d s";
-"Suche läuft … %d gefunden" = "Suche läuft … %d gefunden";
+"Suche läuft … 1 neuer Zebra-Drucker" = "Suche läuft … 1 neuer Zebra-Drucker";
+"Suche läuft … %d neue Zebra-Drucker" = "Suche läuft … %d neue Zebra-Drucker";
 "Drucker in der Nähe finden" = "Drucker in der Nähe finden";
-"%d Drucker gefunden" = "%d Drucker gefunden";
-"Keine Drucker gefunden" = "Keine Drucker gefunden";
+"1 neuer Zebra-Drucker gefunden" = "1 neuer Zebra-Drucker gefunden";
+"%d neue Zebra-Drucker gefunden" = "%d neue Zebra-Drucker gefunden";
 "Durchsucht: %@ – Netze: %@" = "Durchsucht: %@ – Netze: %@";
 "Durchsucht: %@" = "Durchsucht: %@";
 "Bonjour, Zebra-Suche, USB, Netzwerk, macOS-Warteschlangen und Bluetooth werden gleichzeitig durchsucht." = "Bonjour, Zebra-Suche, USB, Netzwerk, macOS-Warteschlangen und Bluetooth werden gleichzeitig durchsucht.";
@@ -1498,6 +1490,7 @@
 "Sichern" = "Sichern";
 "Sicherung öffnen" = "Sicherung öffnen";
 "LabelWerk-Sicherung (.lwbackup) wählen" = "LabelWerk-Sicherung (.lwbackup) wählen";
+"Öffnen" = "Öffnen";
 "Alle Einstellungen lesen (allconfig)" = "Alle Einstellungen lesen (allconfig)";
 "Dateiliste des Druckers lesen" = "Dateiliste des Druckers lesen";
 "Gruppen auswerten & Befehle aussortieren" = "Gruppen auswerten & Befehle aussortieren";
@@ -2567,7 +2560,7 @@
 "Drucker im Netzwerk werden gesucht …" = "Drucker im Netzwerk werden gesucht …";
 "Bonjour, Netzwerk-Scan (Port 9100) und USB – Drucker auswählen und „Weiter“ wählen." = "Bonjour, Netzwerk-Scan (Port 9100) und USB – Drucker auswählen und „Weiter“ wählen.";
 "Adresse unten eingeben – sie steht auf dem Konfigurationsetikett des Druckers." = "Adresse unten eingeben – sie steht auf dem Konfigurationsetikett des Druckers.";
-"Im Netzwerk wurde kein Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben." = "Im Netzwerk wurde kein Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben.";
+"Im Netzwerk wurde kein neuer Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben." = "Im Netzwerk wurde kein neuer Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben.";
 "Adresse eingeben" = "Adresse eingeben";
 "IP-Adresse oder Hostname, z. B. 192.168.1.50" = "IP-Adresse oder Hostname, z. B. 192.168.1.50";
 "Trotzdem fortfahren" = "Trotzdem fortfahren";
@@ -2661,7 +2654,6 @@
 "So erscheint der Drucker in macOS und in jedem Druckdialog." = "So erscheint der Drucker in macOS und in jedem Druckdialog.";
 "LabelWerk richtet den Drucker als macOS-Drucker ein." = "LabelWerk richtet den Drucker als macOS-Drucker ein.";
 "%@ liegt nicht im Netz dieses Macs. Das funktioniert nur, wenn ein Router zwischen den Netzen vermittelt – sonst die IP-Adresse am Drucker prüfen." = "%@ liegt nicht im Netz dieses Macs. Das funktioniert nur, wenn ein Router zwischen den Netzen vermittelt – sonst die IP-Adresse am Drucker prüfen.";
-"Nicht als Zebra-Drucker erkannt · %@" = "Nicht als Zebra-Drucker erkannt · %@";
 "vom Drucker erkannt" = "vom Drucker erkannt";
 "Der Drucker hat keine Etikettengröße gemeldet. Bitte unter „Benutzerdefiniert …“ eingeben." = "Der Drucker hat keine Etikettengröße gemeldet. Bitte unter „Benutzerdefiniert …“ eingeben.";
 "In LabelWerk war bisher „%@“ eingestellt." = "In LabelWerk war bisher „%@“ eingestellt.";

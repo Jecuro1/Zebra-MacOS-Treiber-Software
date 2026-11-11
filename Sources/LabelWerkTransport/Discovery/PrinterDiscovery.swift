@@ -418,15 +418,7 @@ public final class PrinterDiscovery: Sendable {
     static func discoverCUPS(options: Options, sink: DiscoverySink) async {
         let queues = await CUPSQueueLister.queuesAsync()
         for queue in queues where !options.cupsOnlyZebra || queue.looksLikeZebra {
-            var details = ["deviceURI": queue.deviceURI, "isDefault": queue.isDefault ? "true" : "false"]
-            if let makeAndModel = queue.makeAndModel { details["makeAndModel"] = makeAndModel }
-            sink.emit(DiscoveredPrinter(
-                name: queue.name,
-                modelHint: queue.modelHint,
-                descriptor: .cupsQueue(name: queue.name),
-                source: .cups,
-                details: details
-            ))
+            sink.emit(DiscoveryFilter.discoveredPrinter(for: queue))
         }
     }
 

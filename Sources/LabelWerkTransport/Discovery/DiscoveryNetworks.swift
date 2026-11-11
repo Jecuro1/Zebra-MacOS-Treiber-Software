@@ -445,9 +445,10 @@ public enum DiscoveryNetworks {
     /// eckige Klammern; `nil` für USB, Bonjour (`dnssd://`), Dateien und Loopback.
     ///
     /// Anders als `QueueAdoption.deviceEndpoint(ofDeviceURI:)` (das nur URIs akzeptiert, die das Gerät
-    /// selbst nennen) zählt hier jeder Pfad: Für die Netze der Suche und den Abgleich „schon
-    /// eingerichtet“ genügt der Host – auch eine benannte LPD-Warteschlange eines Zebra-Druckservers
-    /// liegt im Netz des Druckers.
+    /// selbst nennen) zählt hier jeder Pfad: Für die Netze der Suche und das Auflösen von Hostnamen
+    /// genügt der Host – auch eine benannte LPD-Warteschlange eines Zebra-Druckservers liegt im Netz des
+    /// Druckers. Der Abgleich „schon eingerichtet“ (`DiscoveryFilter`) nimmt dagegen nur Adressen, die
+    /// das Gerät selbst nennen.
     public static func host(ofDeviceURI uri: String) -> String? {
         guard let endpoint = QueueAdoption.endpoint(ofDeviceURI: uri),
               QueueAdoption.networkSchemes.contains(endpoint.scheme),

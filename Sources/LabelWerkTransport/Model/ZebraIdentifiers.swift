@@ -12,6 +12,28 @@ public enum ZebraIdentifiers {
     /// Standard-Port für Rohdaten (JetDirect/„RAW“).
     public static let rawPort = 9100
 
+    /// Zweiter Rohdatenport vieler Zebra-Drucker (Link-OS, ZBI) – dasselbe Gerät wie Port 9100.
+    public static let alternateRawPort = 6101
+
+    /// Herstellerkennungen (OUI, sechs Hex-Ziffern) von Bluetooth-Adressen mobiler Zebra-Drucker:
+    /// bei Zebra Technologies registrierte Blöcke und `AC3FA4` (Bluetooth-Modul von Taiyo Yuden in
+    /// ZQ-/QLn-/iMZ-Druckern).
+    public static let bluetoothOUIs: Set<String> = ["00074D", "4083DE", "84248D", "94FB29", "AC3FA4"]
+
+    /// `true`, wenn die Bluetooth-Adresse aus einem Adressblock mobiler Zebra-Drucker stammt.
+    public static func isZebraBluetoothAddress(_ address: String) -> Bool {
+        let hex = address.uppercased().filter(\.isHexDigit)
+        guard hex.count == 12 else { return false }
+        return bluetoothOUIs.contains(String(hex.prefix(6)))
+    }
+
+    /// `true` für Seriennummern im Format mobiler Zebra-Drucker („XXQLJ120900310“) – deren
+    /// Bluetooth-Name ab Werk die Seriennummer ist.
+    public static func looksLikeZebraSerialNumber(_ text: String) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return value.range(of: #"^XX[A-Z]{3}[0-9]{6,}$"#, options: .regularExpression) != nil
+    }
+
     /// Zebra Parser Service (BLE, Link-OS).
     public static let bleParserServiceUUID = "38EB4A80-C570-11E3-9507-0002A5D5C51B"
     /// Charakteristik „Write to Printer“.

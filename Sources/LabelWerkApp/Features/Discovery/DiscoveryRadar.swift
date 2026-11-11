@@ -3,6 +3,7 @@ import LabelWerkKit
 
 /// Radar der Druckersuche: Gitterringe, Radar-Wellen, rotierender Suchstrahl, Fortschrittsbogen
 /// und gefundene Drucker als leuchtende Punkte. Punkte glühen auf, wenn der Strahl sie überstreicht.
+/// Gezeigt werden nur neue Zebra-Drucker (`DiscoveryFilter`) – schon eingerichtete erscheinen nicht.
 ///
 /// Die Zeitleiste läuft nur während einer Suche (30 Bilder/s) und steht sonst still.
 struct DiscoveryRadar: View {
@@ -10,7 +11,6 @@ struct DiscoveryRadar: View {
     let isScanning: Bool
     let startedAt: Date?
     let duration: Double
-    let addedIDs: Set<String>
     let highlightedID: String?
     let reduceMotion: Bool
     var onSelect: (DiscoveredPrinter) -> Void = { _ in }
@@ -93,7 +93,6 @@ struct DiscoveryRadar: View {
         return DiscoveryRadarBlip(
             tint: DiscoverySourceStyle.tint(printer.source),
             glow: glow,
-            isAdded: addedIDs.contains(printer.id),
             isHighlighted: highlightedID == printer.id,
             label: printer.name,
             reduceMotion: reduceMotion
@@ -238,7 +237,6 @@ private struct DiscoveryRadarCore: View {
 private struct DiscoveryRadarBlip: View {
     let tint: Color
     let glow: Double
-    let isAdded: Bool
     let isHighlighted: Bool
     let label: String
     let reduceMotion: Bool
@@ -272,15 +270,6 @@ private struct DiscoveryRadarBlip: View {
                     .frame(width: 12, height: 12)
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.2))
                     .shadow(color: tint.opacity(0.9), radius: 3 + 5 * glow)
-                if isAdded {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 7, weight: .black))
-                        .foregroundStyle(.white)
-                        .padding(2.5)
-                        .background(Circle().fill(Theme.ready))
-                        .offset(x: 8, y: -8)
-                        .transition(.scale.combined(with: .opacity))
-                }
             }
             .scaleEffect((1 + 0.22 * glow) * (hovering ? 1.25 : 1))
             .contentShape(Circle())
@@ -305,7 +294,6 @@ private struct DiscoveryRadarBlip: View {
             }
         }
         .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: isHighlighted)
-        .animation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion), value: isAdded)
         .help(label)
         .accessibilityLabel(label)
         .accessibilityAddTraits(.isButton)

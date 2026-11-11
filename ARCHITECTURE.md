@@ -817,7 +817,8 @@ verkehrte Bereiche, ungültige Präfixe. Je Eintrag höchstens **4096 Adressen**
 App gekennzeichnet („Großes Netz: Nur die ersten 4096 Adressen werden durchsucht.“). Der
 Netzwerk-Scan (Port 9100) prüft dieselben Adressen, für Adressen außerhalb der lokalen Netze mit
 längerer Frist (`remoteConnectTimeout`, 900 ms); identifiziert wird wie bisher per SNMP und `~HI` nur
-bei positiver Zebra-Erkennung, nicht identifizierte Geräte erscheinen gesondert mit Warnung.
+bei positiver Zebra-Erkennung; nicht identifizierte Geräte zeigen App und `lwctl discover` nicht an
+(siehe „Anzeigen“, `lwctl discover --all` führt sie mit auf).
 
 **Zusammenführen (`DiscoveryRegistry`).** Gleiche `id`, dann gleiche Seriennummer des Druckers
 (`serialNumber`), dann gleiche Seriennummer des Druckservers (`printServerSerial`), dann gleiche
@@ -826,6 +827,36 @@ Nummernarten werden nie miteinander verglichen. Rangfolge der Erkennung: Zebra-S
 USB, CUPS, Bluetooth (2) > offener Port ohne Identifikation (1). Ein besserer späterer Fund ergänzt den
 Eintrag (Kennung und Verbindung bleiben; allgemeine Namen wie „Zebra ZD421“ weichen keinem eigenen);
 `PrinterDiscovery.discover` liefert ihn mit derselben `id` erneut, Verbraucher ersetzen ihn.
+
+**Anzeigen (`DiscoveryFilter`, `Sources/LabelWerkTransport/Discovery/DiscoveryFilter.swift`).** Eine
+gemeinsame Regel für „Drucker suchen“ (Liste, Radar, Zähler), die Seitenleiste „Im Netzwerk“, die
+macOS-Warteschlangen und USB-/Bluetooth-Geräte unter „Manuell“, den Installationsassistenten und
+`lwctl discover`: `DiscoveryFilter.partition` teilt Treffer in `new` (angezeigt), `alreadyAdded` und
+`unidentified` (beide ausgeblendet; die App nennt nur die Zahl „N bereits hinzugefügt“ – gezählt
+werden eingerichtete **Drucker** (`Partition.addedIdentityIndices`/`hiddenAddedPrinterCount`), nicht
+Treffer: Ein Drucker taucht oft mehrfach auf, etwa mit LabelWerk-Warteschlange, Etikettentyp-Warteschlangen
+und Netzwerk-Fund).
+* **Nur Zebra** (`isIdentifiedZebra`): Antwort auf die Zebra-Suche oder `~HI`; Netzwerk-Scan nur mit
+  Zebra-`sysDescr`/Modellhinweis; Bonjour und BLE (melden ohnehin nur Zebra-Dienste); USB mit
+  Hersteller-ID 0x0A5F; Warteschlange mit Zebra-/LabelWerk-Treiber, -URI oder -Namen
+  (`CUPSQueueInfo.looksLikeZebra`); Bluetooth mit Zebra-Namen, Zebra-Seriennummer als Name
+  („XXQLJ…“) oder Adressblock mobiler Zebra-Drucker (`ZebraIdentifiers.bluetoothOUIs`). Ein offener
+  Port 9100 allein genügt nicht – solche Adressen lassen sich nur unter „Manuell“ eintragen.
+* **Nie Dubletten** (`isAlreadyAdded`/`matchingIdentityIndex` gegen `AddedPrinterIdentity` je
+  eingerichtetem Drucker, gebaut in `NetworkDiscoveryService.addedIdentities`): gleiche Verbindung
+  (`stableID`); eine seiner Warteschlangen (eigene, übernommene `adoptedQueueNames`, Etikettentypen;
+  ohne Groß-/Kleinschreibung); gleiche Drucker-Seriennummer (auch aus `usb://…?serial=`); gleiche
+  MAC-Adresse; gleicher Bonjour-Name (`dnssd://`-Warteschlange); gleiche Adresse – Verbindung, vom
+  Drucker gemeldete IP-Adresse und Ziele seiner Warteschlangen, soweit sie das Gerät selbst nennen
+  (`QueueAdoption.deviceEndpoint`: keine Druckserver-Freigabe `ipp://server/printers/X`, keine benannte
+  LPD-Warteschlange `lpd://ps/PORT2`), Hostnamen auch über ihre aufgelöste IPv4-Adresse. Ports müssen
+  passen: gleich, unbekannt (IPP-Endpunkt bzw. LPD-Standardwarteschlange des Geräts, gemeldete IP) oder
+  9100/6101 (beide Rohdatenports eines Zebra-Druckers); 9100 und 9101 sind zwei Anschlüsse eines
+  Druckservers und damit verschiedene Drucker. Die gemeldete IP gilt deshalb nur für den Port der
+  Verbindung, wenn diese über einen anderen Port als 9100/6101 läuft, und gar nicht, wenn sie der Host
+  einer Druckserver-Warteschlange ist bzw. der Drucker nur über eine benannte LPD-Warteschlange
+  erreicht wird. USB ohne gemeinsame Seriennummer: gleiches Produkt am
+  gleichen Anschluss.
 
 **Automatische Suche (App, `Services/NetworkDiscoveryService.swift`, `model.networkDiscovery`).**
 5 s nach dem Start vollständig (Zebra-Suche, Bonjour, Netzwerk-Scan), danach alle 10 Minuten im
@@ -836,9 +867,8 @@ vollständige Suche älter als 10 Minuten ist; „Erneut suchen“ jederzeit. Ab
 `AppPreferences.automaticNetworkDiscovery` (Einstellungen › Allgemein › Druckersuche, Editor
 „Netze …“). Ergebnisse fließen in „Drucker suchen“ (zusätzlich zu den Treffern der Seite) und – noch
 nicht eingerichtete, als Zebra erkannte Netzwerkdrucker, die in den letzten 35 Minuten geantwortet
-haben – in die Seitenleiste **„Im Netzwerk“**. „Schon eingerichtet“ heißt: gleiche Verbindung, gleiche
-Adresse, gleiche MAC- bzw. gemeldete IP-Adresse oder eine macOS-Warteschlange des Druckers mit dieser
-Adresse (Hostnamen auch über ihre aufgelöste Adresse). „Hinzufügen“ öffnet den Installationsassistenten
+haben – in die Seitenleiste **„Im Netzwerk“**. „Schon eingerichtet“ entscheidet `DiscoveryFilter`
+(siehe „Anzeigen“). „Hinzufügen“ öffnet den Installationsassistenten
 mit dem Fund selbst (`AppModel.openInstallWizard(for:)`, `InstallWizardPrefill.printer`): Der
 Assistent übernimmt ihn als Suchtreffer (`DiscoveryController.inject(_:)`, übersteht neue Suchläufe,
 ein schwächerer Fund desselben Geräts verdrängt ihn nicht) und wählt ihn aus – die Erkennung beginnt

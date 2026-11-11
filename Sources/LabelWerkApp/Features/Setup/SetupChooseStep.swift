@@ -55,6 +55,15 @@ struct SetupChooseStep: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                // Leiser Hinweis: Schon eingerichtete Drucker werden nicht angezeigt (Dubletten).
+                if wizard.hiddenAddedCount > 0 {
+                    Label(tr("%d bereits hinzugefügt", wizard.hiddenAddedCount), systemImage: "checkmark.circle")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .contentTransition(.numericText(value: Double(wizard.hiddenAddedCount)))
+                        .help(tr("Drucker, die schon in LabelWerk eingerichtet sind, werden in der Suche nicht angezeigt."))
+                        .transition(.opacity)
+                }
             }
             Spacer(minLength: 8)
             Button {
@@ -68,14 +77,24 @@ struct SetupChooseStep: View {
             .disabled(wizard.discovery.isScanning)
         }
         .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: wizard.discovery.isScanning)
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: wizard.hiddenAddedCount)
     }
 
+    /// Zählt nur neue Zebra-Drucker (schon eingerichtete sind ausgeblendet).
     private var searchTitle: String {
         let count = wizard.candidates.count
         if wizard.discovery.isScanning {
-            return count == 0 ? tr("Drucker im Netzwerk werden gesucht …") : tr("Suche läuft … %d gefunden", count)
+            switch count {
+            case 0: return tr("Drucker im Netzwerk werden gesucht …")
+            case 1: return tr("Suche läuft … 1 neuer Zebra-Drucker")
+            default: return tr("Suche läuft … %d neue Zebra-Drucker", count)
+            }
         }
-        return count == 0 ? tr("Kein Drucker gefunden") : tr("%d Drucker gefunden", count)
+        switch count {
+        case 0: return tr("Keine neuen Zebra-Drucker gefunden")
+        case 1: return tr("1 neuer Zebra-Drucker gefunden")
+        default: return tr("%d neue Zebra-Drucker gefunden", count)
+        }
     }
 
     private var searchSubtitle: String {
@@ -101,7 +120,7 @@ struct SetupChooseStep: View {
             } else {
                 DiscoveryInlineNote(
                     systemImage: "magnifyingglass",
-                    text: tr("Im Netzwerk wurde kein Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben.")
+                    text: tr("Im Netzwerk wurde kein neuer Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben.")
                 )
                 .transition(.opacity)
             }
@@ -302,11 +321,6 @@ struct SetupPrinterRow: View {
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 8)
-                if info.isUnidentified {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(isSelected ? Color.white : Theme.warning)
-                        .help(DiscoveryMatcher.unidentifiedWarning)
-                }
                 Label(DiscoverySourceStyle.title(printer.source), systemImage: DiscoverySourceStyle.systemImage(printer.source))
                     .font(.system(size: 10.5, weight: .semibold))
                     .labelStyle(.titleAndIcon)

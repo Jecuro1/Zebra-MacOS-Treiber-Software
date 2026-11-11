@@ -439,12 +439,9 @@
 "Details" = "Details";
 "Nur Senden" = "Send Only";
 "Über diese Verbindung kann LabelWerk drucken, aber keinen Live-Status abfragen." = "Over this connection LabelWerk can print but cannot query live status.";
-"Nicht als Zebra-Drucker erkannt" = "Not recognized as a Zebra printer";
 "Unbekanntes Modell: %@" = "Unknown model: %@";
 "Modell wird beim Verbinden erkannt" = "Model is detected when connecting";
 "Modell unbekannt" = "Model unknown";
-"Öffnen" = "Open";
-"Hinzugefügt" = "Added";
 "Hinzufügen" = "Add";
 
 /* MARK: Features/Discovery/DiscoveryManualForm.swift */
@@ -460,14 +457,9 @@
 "Erreichbar · %d ms" = "Reachable · %d ms";
 "Warteschlangen werden gelesen …" = "Reading queues…";
 "In macOS ist noch keine Druckerwarteschlange eingerichtet." = "No printer queue has been set up in macOS yet.";
-"Nur Zebra-Warteschlangen anzeigen" = "Show only Zebra queues";
-"Alle Warteschlangen anzeigen (%d weitere)" = "Show all queues (%d more)";
-"Warteschlangen ohne erkennbaren Zebra-Drucker (z. B. Büro- oder Tintenstrahldrucker)" = "Queues without a recognizable Zebra printer (e.g. office or inkjet printers)";
-"„%@“ wurde nicht als Zebra-Drucker erkannt. LabelWerk sendet Etikettendaten (ZPL, EPL oder CPCL) als Rohdaten – ein Büro- oder Tintenstrahldrucker würde stattdessen Seiten voller Steuerzeichen drucken. Nur auswählen, wenn diese Warteschlange zu einem Zebra-Drucker führt." = "“%@” was not recognized as a Zebra printer. LabelWerk sends label data (ZPL, EPL or CPCL) as raw data – an office or inkjet printer would instead print pages full of control characters. Only select it if this queue leads to a Zebra printer.";
+"Keine neue Zebra-Warteschlange in macOS. Warteschlangen anderer Drucker und bereits hinzugefügter Drucker werden nicht angezeigt." = "No new Zebra queue in macOS. Queues of other printers and of printers already added are not shown.";
 "Aktualisieren" = "Refresh";
 "Über eine Warteschlange sendet LabelWerk Rohdaten an CUPS. Live-Status und Gerätewerkzeuge sind damit nicht verfügbar." = "Through a queue, LabelWerk sends raw data to CUPS. Live status and device tools are not available this way.";
-"Kein Zebra-Drucker erkannt · %@" = "No Zebra printer detected · %@";
-"Diese Warteschlange gehört vermutlich nicht zu einem Zebra-Drucker. Etikettendaten würden dort als unlesbare Seiten gedruckt." = "This queue probably does not belong to a Zebra printer. Label data would be printed there as unreadable pages.";
 "Kein USB-Drucker gefunden. Ist der Drucker eingeschaltet und das Kabel angeschlossen?" = "No USB printer found. Is the printer switched on and the cable connected?";
 "USB-Geräte werden gesucht …" = "Searching for USB devices…";
 "Keine Bluetooth-Drucker in Reichweite gefunden. Bluetooth am Drucker aktivieren und ihn sichtbar machen." = "No Bluetooth printers found in range. Turn on Bluetooth on the printer and make it discoverable.";
@@ -546,13 +538,10 @@
 "Suchen" = "Search";
 "Manuell" = "Manual";
 "Demo-Drucker" = "Demo Printer";
-"„%@“ wurde nicht als Zebra-Drucker erkannt" = "“%@” was not recognized as a Zebra printer";
-"Trotzdem hinzufügen" = "Add Anyway";
 "Suchen über" = "Search via";
-"Gefundene Drucker" = "Printers Found";
+"Neue Zebra-Drucker" = "New Zebra Printers";
 "Modelle werden automatisch aus dem Katalog zugeordnet." = "Models are matched automatically from the catalog.";
-"%d hinzugefügt" = "%d added";
-"Kein Drucker gefunden" = "No printer found";
+"Keine neuen Zebra-Drucker gefunden" = "No new Zebra printers found";
 "Ist der Drucker eingeschaltet und zeigt „Bereit“?" = "Is the printer switched on and showing “Ready”?";
 "Sind Mac und Drucker im selben Netzwerk bzw. WLAN?" = "Are the Mac and the printer on the same network or Wi-Fi?";
 "Drucker in einem anderen Netz, z. B. über VPN? Unter „Netze …“ das Netz eintragen, etwa 10.62.13.0/24." = "Printer on another network, e.g. via VPN? Add the network under “Networks…”, such as 10.62.13.0/24.";
@@ -560,19 +549,22 @@
 "Für Bluetooth die Quellen „Bluetooth“ bzw. „Bluetooth LE“ aktivieren." = "For Bluetooth, enable the “Bluetooth” or “Bluetooth LE” sources.";
 "Mindestens eine Quelle auswählen" = "Select at least one source";
 "Manuell hinzufügen" = "Add Manually";
-"Gefundene Drucker erscheinen hier, sobald sie antworten." = "Printers appear here as soon as they respond.";
-"Noch keine Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden." = "No printers found yet. You can search again, add the printer manually or use the demo printer.";
+"Neue Zebra-Drucker erscheinen hier, sobald sie antworten." = "New Zebra printers appear here as soon as they respond.";
+"Noch keine neuen Zebra-Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden." = "No new Zebra printers found yet. You can search again, add the printer manually or use the demo printer.";
 "Demo-Drucker ist eingerichtet" = "Demo printer is set up";
 "Demo-Drucker verwenden" = "Use Demo Printer";
 "Manuell hinzufügen …" = "Add Manually…";
 "%d eingerichtet" = "%d set up";
+"%d bereits hinzugefügt" = "%d already added";
+"Drucker, die schon in LabelWerk eingerichtet sind, werden in der Suche nicht angezeigt." = "Printers already set up in LabelWerk are not shown in the search.";
 "Suche stoppen" = "Stop Search";
 "Suche starten" = "Start Search";
 "noch %d s" = "%d s left";
-"Suche läuft … %d gefunden" = "Searching… %d found";
+"Suche läuft … 1 neuer Zebra-Drucker" = "Searching … 1 new Zebra printer";
+"Suche läuft … %d neue Zebra-Drucker" = "Searching … %d new Zebra printers";
 "Drucker in der Nähe finden" = "Find Printers Nearby";
-"%d Drucker gefunden" = "%d printers found";
-"Keine Drucker gefunden" = "No printers found";
+"1 neuer Zebra-Drucker gefunden" = "1 new Zebra printer found";
+"%d neue Zebra-Drucker gefunden" = "%d new Zebra printers found";
 "Durchsucht: %@ – Netze: %@" = "Searched: %@ – Networks: %@";
 "Durchsucht: %@" = "Searched: %@";
 "Bonjour, Zebra-Suche, USB, Netzwerk, macOS-Warteschlangen und Bluetooth werden gleichzeitig durchsucht." = "Bonjour, Zebra discovery, USB, network, macOS queues and Bluetooth are searched simultaneously.";
@@ -1501,6 +1493,7 @@
 "Sichern" = "Back Up";
 "Sicherung öffnen" = "Open Backup";
 "LabelWerk-Sicherung (.lwbackup) wählen" = "Choose a LabelWerk backup (.lwbackup)";
+"Öffnen" = "Open";
 "Alle Einstellungen lesen (allconfig)" = "Read all settings (allconfig)";
 "Dateiliste des Druckers lesen" = "Read the printer’s file list";
 "Gruppen auswerten & Befehle aussortieren" = "Evaluate groups & filter out commands";
@@ -2570,7 +2563,7 @@
 "Drucker im Netzwerk werden gesucht …" = "Searching for printers on the network…";
 "Bonjour, Netzwerk-Scan (Port 9100) und USB – Drucker auswählen und „Weiter“ wählen." = "Bonjour, network scan (port 9100) and USB – select a printer and choose “Continue”.";
 "Adresse unten eingeben – sie steht auf dem Konfigurationsetikett des Druckers." = "Enter the address below – it is printed on the printer’s configuration label.";
-"Im Netzwerk wurde kein Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben." = "No Zebra printer was found on the network. Is it switched on and on the same network? The search cannot find printers behind a router (another subnet) – enter the IP address below instead.";
+"Im Netzwerk wurde kein neuer Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben." = "No new Zebra printer was found on the network. Is it switched on and on the same network? The search may not find printers behind a router (another subnet) – enter the IP address below instead.";
 "Adresse eingeben" = "Enter address";
 "IP-Adresse oder Hostname, z. B. 192.168.1.50" = "IP address or host name, e.g. 192.168.1.50";
 "Trotzdem fortfahren" = "Continue anyway";
@@ -2664,7 +2657,6 @@
 "So erscheint der Drucker in macOS und in jedem Druckdialog." = "This is how the printer appears in macOS and in every print dialog.";
 "LabelWerk richtet den Drucker als macOS-Drucker ein." = "LabelWerk sets up the printer as a macOS printer.";
 "%@ liegt nicht im Netz dieses Macs. Das funktioniert nur, wenn ein Router zwischen den Netzen vermittelt – sonst die IP-Adresse am Drucker prüfen." = "%@ is not on this Mac’s network. This only works if a router connects the networks – otherwise check the IP address on the printer.";
-"Nicht als Zebra-Drucker erkannt · %@" = "Not identified as a Zebra printer · %@";
 "vom Drucker erkannt" = "detected from printer";
 "Der Drucker hat keine Etikettengröße gemeldet. Bitte unter „Benutzerdefiniert …“ eingeben." = "The printer did not report a label size. Please enter it under “Custom …”.";
 "In LabelWerk war bisher „%@“ eingestellt." = "LabelWerk was previously set to “%@”.";
@@ -3405,6 +3397,26 @@
 "Prüfen, ob der Drucker eingeschaltet und verbunden ist (USB-Kabel, Netzwerk oder Bluetooth-Kopplung), und danach „Neu verbinden“ wählen." = "Check that the printer is switched on and connected (USB cable, network or Bluetooth pairing), then choose “Reconnect”.";
 
 /* MARK: Nicht mehr verwendet – wird mit --prune entfernt */
+"Nicht als Zebra-Drucker erkannt" = "Not recognized as a Zebra printer";
+"Hinzugefügt" = "Added";
+"Nur Zebra-Warteschlangen anzeigen" = "Show only Zebra queues";
+"Alle Warteschlangen anzeigen (%d weitere)" = "Show all queues (%d more)";
+"Warteschlangen ohne erkennbaren Zebra-Drucker (z. B. Büro- oder Tintenstrahldrucker)" = "Queues without a recognizable Zebra printer (e.g. office or inkjet printers)";
+"„%@“ wurde nicht als Zebra-Drucker erkannt. LabelWerk sendet Etikettendaten (ZPL, EPL oder CPCL) als Rohdaten – ein Büro- oder Tintenstrahldrucker würde stattdessen Seiten voller Steuerzeichen drucken. Nur auswählen, wenn diese Warteschlange zu einem Zebra-Drucker führt." = "“%@” was not recognized as a Zebra printer. LabelWerk sends label data (ZPL, EPL or CPCL) as raw data – an office or inkjet printer would instead print pages full of control characters. Only select it if this queue leads to a Zebra printer.";
+"Kein Zebra-Drucker erkannt · %@" = "No Zebra printer detected · %@";
+"Diese Warteschlange gehört vermutlich nicht zu einem Zebra-Drucker. Etikettendaten würden dort als unlesbare Seiten gedruckt." = "This queue probably does not belong to a Zebra printer. Label data would be printed there as unreadable pages.";
+"„%@“ wurde nicht als Zebra-Drucker erkannt" = "“%@” was not recognized as a Zebra printer";
+"Trotzdem hinzufügen" = "Add Anyway";
+"Gefundene Drucker" = "Printers Found";
+"%d hinzugefügt" = "%d added";
+"Kein Drucker gefunden" = "No printer found";
+"Gefundene Drucker erscheinen hier, sobald sie antworten." = "Printers appear here as soon as they respond.";
+"Noch keine Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden." = "No printers found yet. You can search again, add the printer manually or use the demo printer.";
+"Suche läuft … %d gefunden" = "Searching… %d found";
+"%d Drucker gefunden" = "%d printers found";
+"Keine Drucker gefunden" = "No printers found";
+"Im Netzwerk wurde kein Zebra-Drucker gefunden. Ist er eingeschaltet und im selben Netzwerk? Drucker hinter einem Router (anderes Subnetz) findet die Suche nicht – dann die IP-Adresse unten eingeben." = "No Zebra printer was found on the network. Is it switched on and on the same network? The search cannot find printers behind a router (another subnet) – enter the IP address below instead.";
+"Nicht als Zebra-Drucker erkannt · %@" = "Not identified as a Zebra printer · %@";
 "Bonjour, USB, Netzwerk, macOS-Warteschlangen und Bluetooth werden gleichzeitig durchsucht." = "Bonjour, USB, network, macOS queues and Bluetooth are searched simultaneously.";
 "Zebra-Drucker per Bonjour, USB, Netzwerk-Scan, macOS-Warteschlange oder Bluetooth finden und einrichten." = "Find and set up Zebra printers via Bonjour, USB, network scan, macOS queue or Bluetooth.";
 "Durchsucht das lokale Subnetz nach Port 9100 (RAW)" = "Scans the local subnet for port 9100 (RAW)";

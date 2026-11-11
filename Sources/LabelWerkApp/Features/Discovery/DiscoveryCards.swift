@@ -85,26 +85,22 @@ struct DiscoverySourceBadge: View {
 
 // MARK: - Trefferkarte
 
-/// Karte eines gefundenen Druckers. Fliegt beim Erscheinen gestaffelt ein; „Hinzufügen“ verwandelt
-/// sich nach dem Hinzufügen in ein grünes Häkchen.
+/// Karte eines gefundenen, noch nicht eingerichteten Zebra-Druckers (`DiscoveryFilter`). Fliegt beim
+/// Erscheinen gestaffelt ein; nach „Hinzufügen“ verlässt sie die Liste (eingerichtete Drucker werden in
+/// der Suche nicht angezeigt).
 struct DiscoveryPrinterCard: View {
     let printer: DiscoveredPrinter
-    let isAdded: Bool
     let isHighlighted: Bool
     let appearDelay: Double
     let reduceMotion: Bool
     var compact: Bool = false
     let onAdd: () -> Void
-    var onOpen: (() -> Void)?
 
     @State private var appeared = false
     @State private var showDetails = false
-    @State private var successPulse = 0
-    @Namespace private var namespace
 
     private var tint: Color { DiscoverySourceStyle.tint(printer.source) }
     private var catalogModel: PrinterModel? { DiscoveryMatcher.model(for: printer) }
-    private var isUnidentified: Bool { DiscoveryMatcher.isUnidentified(printer) }
 
     var body: some View {
         Group {
@@ -124,15 +120,12 @@ struct DiscoveryPrinterCard: View {
                 }
             }
         }
-        .onChange(of: isAdded) { _, added in
-            if added && !reduceMotion { successPulse += 1 }
-        }
     }
 
     // MARK: Groß
 
     private var fullBody: some View {
-        GlassCard(padding: 14, tint: isAdded ? Theme.ready : (isHighlighted ? tint : nil)) {
+        GlassCard(padding: 14, tint: isHighlighted ? tint : nil) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 12) {
                     icon(size: 42)
@@ -221,19 +214,13 @@ struct DiscoveryPrinterCard: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 HStack(spacing: 4) {
-                    if isUnidentified {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Theme.warning)
-                    } else {
-                        Image(systemName: printer.descriptor.systemImage)
-                    }
+                    Image(systemName: printer.descriptor.systemImage)
                     Text(DiscoveryMatcher.modelLine(for: printer) ?? printer.descriptor.displayString)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
-                .help(isUnidentified ? DiscoveryMatcher.unidentifiedWarning : "")
             }
             Spacer(minLength: 4)
             actionArea
@@ -243,12 +230,11 @@ struct DiscoveryPrinterCard: View {
         .padding(.vertical, 8)
         .background {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(isAdded ? Theme.ready.opacity(0.1) : Theme.subtleFill)
+                .fill(Theme.subtleFill)
         }
         .overlay {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .strokeBorder(isHighlighted ? tint : (isAdded ? Theme.ready.opacity(0.35) : Theme.cardStroke),
-                              lineWidth: isHighlighted ? 1.5 : 1)
+                .strokeBorder(isHighlighted ? tint : Theme.cardStroke, lineWidth: isHighlighted ? 1.5 : 1)
         }
         .animation(Motion.animation(Motion.snappy, reduceMotion: reduceMotion), value: isHighlighted)
     }
@@ -265,32 +251,11 @@ struct DiscoveryPrinterCard: View {
                     .background(Circle().fill(.regularMaterial))
                     .offset(x: size * 0.14, y: size * 0.14)
             }
-            .keyframeAnimator(initialValue: DiscoveryCardPop(), trigger: successPulse) { content, value in
-                content
-                    .scaleEffect(value.scale)
-                    .rotationEffect(.degrees(value.rotation))
-            } keyframes: { _ in
-                KeyframeTrack(\.scale) {
-                    SpringKeyframe(1.18, duration: 0.18, spring: .snappy)
-                    SpringKeyframe(1.0, duration: 0.45, spring: .bouncy)
-                }
-                KeyframeTrack(\.rotation) {
-                    CubicKeyframe(-8, duration: 0.12)
-                    CubicKeyframe(6, duration: 0.14)
-                    SpringKeyframe(0, duration: 0.35, spring: .bouncy)
-                }
-            }
     }
 
     @ViewBuilder
     private var modelLine: some View {
-        if isUnidentified {
-            Label(tr("Nicht als Zebra-Drucker erkannt"), systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.warning)
-                .lineLimit(1)
-                .help(DiscoveryMatcher.unidentifiedWarning)
-        } else if let line = DiscoveryMatcher.modelLine(for: printer) {
+        if let line = DiscoveryMatcher.modelLine(for: printer) {
             Label(line, systemImage: "checkmark.seal.fill")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.teal)
@@ -313,50 +278,11 @@ struct DiscoveryPrinterCard: View {
         }
     }
 
-    /// „Hinzufügen“ ↔ „Hinzugefügt“ (morphende Kapsel über `matchedGeometryEffect`).
+    /// „Hinzufügen“: Danach verlässt die Karte die Liste (Übergang in `DiscoveryPanel`).
     private var actionArea: some View {
-        HStack(spacing: 6) {
-            if isAdded {
-                if let onOpen {
-                    Button(tr("Öffnen"), action: onOpen)
-                        .buttonStyle(.labelWerkPlain)
-                        .transition(.opacity.combined(with: .move(edge: .trailing)))
-                }
-                HStack(spacing: 5) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .symbolEffect(.bounce, value: successPulse)
-                    Text(tr("Hinzugefügt"))
-                }
-                .font(.system(size: compact ? 11.5 : 12.5, weight: .semibold))
-                .foregroundStyle(Theme.ready)
-                .padding(.horizontal, compact ? 9 : 12)
-                .padding(.vertical, compact ? 4 : 6)
-                .background {
-                    Capsule()
-                        .fill(Theme.ready.opacity(0.15))
-                        .overlay(Capsule().strokeBorder(Theme.ready.opacity(0.4), lineWidth: 1))
-                        .matchedGeometryEffect(id: "action", in: namespace)
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.8)))
-            } else {
-                Button(action: onAdd) {
-                    Label(tr("Hinzufügen"), systemImage: "plus.circle.fill")
-                }
-                .buttonStyle(.labelWerkPrimary)
-                .background {
-                    Capsule()
-                        .fill(Color.clear)
-                        .matchedGeometryEffect(id: "action", in: namespace)
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
-            }
+        Button(action: onAdd) {
+            Label(tr("Hinzufügen"), systemImage: "plus.circle.fill")
         }
-        .animation(Motion.animation(Motion.bouncy, reduceMotion: reduceMotion), value: isAdded)
+        .buttonStyle(.labelWerkPrimary)
     }
-}
-
-/// Werte der „Pop“-Animation nach dem Hinzufügen.
-struct DiscoveryCardPop {
-    var scale: CGFloat = 1
-    var rotation: Double = 0
 }

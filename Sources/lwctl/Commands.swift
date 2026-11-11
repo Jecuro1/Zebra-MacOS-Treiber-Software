@@ -283,18 +283,25 @@ enum Commands {
             }
         }
         found.sort { ($0.name, $0.id) < ($1.name, $1.id) }
+        // Standard: nur sicher als Zebra erkannte Drucker (wie in der App); `--all` zeigt alles.
+        let showAll = context.arguments.has("all")
+        let hidden = showAll ? 0 : found.filter { !DiscoveryFilter.isIdentifiedZebra($0) }.count
+        if !showAll { found = found.filter(DiscoveryFilter.isIdentifiedZebra) }
         if context.json {
             try Console.json(found)
             return .success
         }
         if found.isEmpty {
-            Console.out("Keine Drucker gefunden.")
-            return .success
+            Console.out("Keine Zebra-Drucker gefunden.")
+        } else {
+            Console.table(["NAME", "DRUCKER-URI", "QUELLE", "MODELL"], found.map { printer in
+                [printer.name, printer.descriptor.uriString, printer.source.displayName,
+                 printer.modelHint.flatMap { ModelCatalog.shared.match(productName: $0)?.displayName ?? $0 } ?? "–"]
+            })
         }
-        Console.table(["NAME", "DRUCKER-URI", "QUELLE", "MODELL"], found.map { printer in
-            [printer.name, printer.descriptor.uriString, printer.source.displayName,
-             printer.modelHint.flatMap { ModelCatalog.shared.match(productName: $0)?.displayName ?? $0 } ?? "–"]
-        })
+        if hidden > 0 {
+            Console.err("\(hidden) nicht als Zebra-Drucker erkannte(s) Gerät(e) ausgeblendet – anzeigen mit --all.")
+        }
         return .success
     }
 

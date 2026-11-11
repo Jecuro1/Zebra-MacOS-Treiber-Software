@@ -56,7 +56,6 @@ struct PrinterSetupCandidateInfo: Equatable {
     var systemImage: String
     var isInLabelWerk: Bool
     var hasMacQueue: Bool
-    var isUnidentified: Bool
 }
 
 /// Wie der Assistent verlassen wurde (für umgebende Sheets).
@@ -186,6 +185,8 @@ final class PrinterSetupWizardModel {
         // Wie „Drucker suchen“: auch die Netze bekannter Drucker und die eigenen Netze (VPN).
         discovery.start(options: app.networkDiscovery.discoveryOptions())
         Task { [weak self] in
+            // macOS-Warteschlangen und Hostnamen für den Abgleich „schon eingerichtet“.
+            await app.networkDiscovery.refreshKnownPrintersIfStale()
             if DriverInstaller.shared.snapshot == nil { await DriverInstaller.shared.refresh() }
             await self?.reloadMacQueues()
         }
@@ -254,23 +255,41 @@ final class PrinterSetupWizardModel {
 
     // MARK: Schritt 1
 
-    /// Gefundene Drucker: Netzwerk zuerst (identifizierte vor nicht identifizierten), dann USB.
+    /// Gefundene Drucker wie in „Drucker suchen“ (`DiscoveryFilter`): nur als Zebra erkannte, die noch
+    /// nicht in LabelWerk eingerichtet sind – Netzwerk zuerst, dann USB. Der gewählte Drucker bleibt
+    /// sichtbar, auch wenn er inzwischen eingerichtet ist (etwa nach der Installation).
     var candidates: [DiscoveredPrinter] {
-        discovery.found
-            .filter { PrinterInstallRequest.supports($0.descriptor) }
-            .sorted { lhs, rhs in
-                let left = rank(lhs)
-                let right = rank(rhs)
-                if left != right { return left < right }
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-            }
+        let partition = candidatePartition
+        var printers = partition.new
+        if case .discovered(let id) = candidate, let selected = partition.alreadyAdded.first(where: { $0.id == id }) {
+            printers.append(selected)
+        }
+        return printers.sorted { lhs, rhs in
+            let left = rank(lhs)
+            let right = rank(rhs)
+            if left != right { return left < right }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    /// Schon eingerichtete Zebra-Drucker (Drucker, nicht Treffer), die deshalb nicht angezeigt werden –
+    /// ohne den gewählten, der sichtbar bleibt.
+    var hiddenAddedCount: Int {
+        var selectedID: String?
+        if case .discovered(let id) = candidate { selectedID = id }
+        return candidatePartition.hiddenAddedPrinterCount(excluding: selectedID)
+    }
+
+    private var candidatePartition: DiscoveryFilter.Partition {
+        let supported = discovery.found.filter { PrinterInstallRequest.supports($0.descriptor) }
+        return app?.networkDiscovery.partition(supported) ?? DiscoveryFilter.partition(supported, identities: [])
     }
 
     private func rank(_ printer: DiscoveredPrinter) -> Int {
         switch printer.descriptor.kind {
-        case .tcp: return DiscoveryMatcher.isUnidentified(printer) ? 1 : 0
-        case .usb: return 2
-        default: return 3
+        case .tcp: return 0
+        case .usb: return 1
+        default: return 2
         }
     }
 
@@ -315,21 +334,12 @@ final class PrinterSetupWizardModel {
     func info(for printer: DiscoveredPrinter) -> PrinterSetupCandidateInfo {
         let modelLine = DiscoveryMatcher.modelLine(for: printer)
         let address = printer.descriptor.displayString
-        let unidentified = DiscoveryMatcher.isUnidentified(printer)
-        let subtitle: String
-        if let modelLine {
-            subtitle = "\(modelLine) · \(address)"
-        } else if unidentified {
-            subtitle = tr("Nicht als Zebra-Drucker erkannt · %@", address)
-        } else {
-            subtitle = address
-        }
+        let subtitle = modelLine.map { "\($0) · \(address)" } ?? address
         return PrinterSetupCandidateInfo(
             subtitle: subtitle,
             systemImage: DiscoveryMatcher.model(for: printer)?.systemImage ?? printer.descriptor.systemImage,
             isInLabelWerk: existingSession(for: printer.descriptor) != nil,
-            hasMacQueue: hasMacQueue(for: printer),
-            isUnidentified: unidentified
+            hasMacQueue: hasMacQueue(for: printer)
         )
     }
 

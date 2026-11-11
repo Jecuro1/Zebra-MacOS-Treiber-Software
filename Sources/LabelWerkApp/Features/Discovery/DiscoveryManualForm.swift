@@ -5,7 +5,7 @@ import LabelWerkKit
 /// USB, Bluetooth), Modell aus dem Katalog (gruppiert, durchsuchbar, mit Kenndaten), Auflösung,
 /// Sprache, Etikett, Name, Standort und Akzentfarbe – mit Live-Vorschau.
 struct DiscoveryManualForm: View {
-    /// Bereits gefundene Drucker (aus der Suche), z. B. für die USB-/Bluetooth-Auswahl.
+    /// Bereits gefundene, neue Zebra-Drucker (aus der Suche), z. B. für die USB-/Bluetooth-Auswahl.
     let discovered: [DiscoveredPrinter]
     /// Wird nach dem Hinzufügen (oder beim Öffnen eines bereits eingerichteten Druckers) aufgerufen.
     let onComplete: (PrinterSession) -> Void
@@ -17,7 +17,6 @@ struct DiscoveryManualForm: View {
     @State private var queues: [CUPSQueueInfo] = []
     @State private var isLoadingQueues = false
     @State private var queuesLoaded = false
-    @State private var showAllQueues = false
     @State private var deviceScanner = DiscoveryController(sources: [.usb, .bluetooth, .ble], persistsSources: false)
     @State private var modelSearch = ""
     @State private var interfaces: [NetworkInterfaceInfo] = []
@@ -166,33 +165,13 @@ struct DiscoveryManualForm: View {
             } else if queues.isEmpty {
                 DiscoveryInlineNote(systemImage: "tray",
                                     text: tr("In macOS ist noch keine Druckerwarteschlange eingerichtet."))
+            } else if newZebraQueues.isEmpty {
+                DiscoveryInlineNote(systemImage: "tray",
+                                    text: tr("Keine neue Zebra-Warteschlange in macOS. Warteschlangen anderer Drucker und bereits hinzugefügter Drucker werden nicht angezeigt."))
             } else {
-                ForEach(visibleQueues, id: \.name) { queue in
+                ForEach(newZebraQueues, id: \.name) { queue in
                     queueRow(queue)
                         .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-                if !zebraQueues.isEmpty && !otherQueues.isEmpty {
-                    Button {
-                        withAnimation(Motion.animation(Motion.spring, reduceMotion: reduceMotion)) {
-                            showAllQueues.toggle()
-                        }
-                    } label: {
-                        Label(showAllQueues
-                              ? tr("Nur Zebra-Warteschlangen anzeigen")
-                              : tr("Alle Warteschlangen anzeigen (%d weitere)", otherQueues.count),
-                              systemImage: showAllQueues ? "chevron.up" : "chevron.down")
-                    }
-                    .buttonStyle(.labelWerkPlain)
-                    .controlSize(.small)
-                    .help(tr("Warteschlangen ohne erkennbaren Zebra-Drucker (z. B. Büro- oder Tintenstrahldrucker)"))
-                }
-                if let selected = selectedQueue, !selected.looksLikeZebra {
-                    DiscoveryInlineNote(
-                        systemImage: "exclamationmark.triangle.fill",
-                        text: tr("„%@“ wurde nicht als Zebra-Drucker erkannt. LabelWerk sendet Etikettendaten (ZPL, EPL oder CPCL) als Rohdaten – ein Büro- oder Tintenstrahldrucker würde stattdessen Seiten voller Steuerzeichen drucken. Nur auswählen, wenn diese Warteschlange zu einem Zebra-Drucker führt.", selected.name),
-                        tint: Theme.warning
-                    )
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             HStack(spacing: 8) {
@@ -212,22 +191,17 @@ struct DiscoveryManualForm: View {
     }
 
     private func queueRow(_ queue: CUPSQueueInfo) -> some View {
-        let isZebra = queue.looksLikeZebra
         let detail = DiscoveryMatcher.model(for: queue)?.displayName ?? queue.makeAndModel ?? queue.deviceURI
-        let symbol = isZebra ? (queue.isDefault ? "star.circle.fill" : "printer") : "exclamationmark.triangle.fill"
         return DiscoveryOptionRow(
             title: queue.name,
-            subtitle: isZebra ? detail : tr("Kein Zebra-Drucker erkannt · %@", detail),
-            systemImage: symbol,
-            tint: isZebra ? nil : Theme.warning,
+            subtitle: detail,
+            systemImage: queue.isDefault ? "star.circle.fill" : "printer",
             isSelected: draft.queueName == queue.name,
             namespace: namespace
         ) {
             selectQueue(queue)
         }
-        .help(isZebra
-              ? queue.deviceURI
-              : tr("Diese Warteschlange gehört vermutlich nicht zu einem Zebra-Drucker. Etikettendaten würden dort als unlesbare Seiten gedruckt."))
+        .help(queue.deviceURI)
     }
 
     private var usbFields: some View {
@@ -747,13 +721,18 @@ struct DiscoveryManualForm: View {
         )
     }
 
+    /// USB-/Bluetooth-Geräte aus Suche und Gerätesuche: nur als Zebra erkannte, noch nicht eingerichtete
+    /// (`DiscoveryFilter`, wie „Drucker suchen“). Das gewählte Gerät bleibt sichtbar.
     private var knownDevices: [DiscoveredPrinter] {
         var seen = Set<String>()
         var result: [DiscoveredPrinter] = []
         for printer in discovered + deviceScanner.found where seen.insert(printer.id).inserted {
             result.append(printer)
         }
-        return result
+        let partition = model.networkDiscovery.partition(result)
+        return result.filter { printer in
+            printer.id == draft.deviceID || partition.new.contains { $0.id == printer.id }
+        }
     }
 
     private var usbDevices: [DiscoveredPrinter] {
@@ -799,20 +778,15 @@ struct DiscoveryManualForm: View {
         return model.sessions.first { $0.saved.descriptor.refersToSameDevice(as: descriptor) }
     }
 
-    private var zebraQueues: [CUPSQueueInfo] { queues.filter(\.looksLikeZebra) }
-
-    private var otherQueues: [CUPSQueueInfo] { queues.filter { !$0.looksLikeZebra } }
-
-    /// Zebra-/LabelWerk-Warteschlangen zuerst; andere nur auf Wunsch (oder wenn sie gewählt sind
-    /// bzw. keine Zebra-Warteschlange erkannt wurde – z. B. Rohdaten-Warteschlange per IP).
-    private var visibleQueues: [CUPSQueueInfo] {
-        if zebraQueues.isEmpty || showAllQueues { return zebraQueues + otherQueues }
-        return zebraQueues + otherQueues.filter { $0.name == draft.queueName }
-    }
-
-    private var selectedQueue: CUPSQueueInfo? {
-        guard let name = draft.queueName else { return nil }
-        return queues.first { $0.name == name }
+    /// Warteschlangen, die zu einem Zebra-Drucker führen (`DiscoveryFilter.isIdentifiedZebra`) und
+    /// nicht zu einem schon eingerichteten Drucker gehören – weder als dessen Verbindung noch als eigene,
+    /// übernommene oder Etikettentyp-Warteschlange noch über dieselbe Adresse. Die gewählte bleibt sichtbar.
+    private var newZebraQueues: [CUPSQueueInfo] {
+        let candidates = queues.map(DiscoveryFilter.discoveredPrinter(for:))
+        let newIDs = Set(model.networkDiscovery.partition(candidates).new.map(\.id))
+        return queues.filter { queue in
+            queue.name == draft.queueName || newIDs.contains(DiscoveryFilter.discoveredPrinter(for: queue).id)
+        }
     }
 
     private var validationMessage: String? {

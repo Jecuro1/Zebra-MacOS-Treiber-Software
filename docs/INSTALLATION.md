@@ -407,11 +407,14 @@ PostScript-Drucker“.
 2. Den gefundenen Drucker mit **„Hinzufügen“** übernehmen. Modell, Auflösung und Druckersprache
    werden automatisch zugeordnet und beim Verbinden überprüft. Netzwerk-, USB- und
    Bluetooth-Drucker lassen sich auch manuell anlegen (IP-Adresse und Port 9100, USB-Gerät,
-   Bluetooth-Adresse). Netzwerkgeräte mit offenem Port 9100, die sich bei der Suche weder per
-   SNMP noch per `~HI` als Zebra-Drucker zu erkennen geben, sind mit **„Nicht als Zebra-Drucker
-   erkannt“** markiert und lassen sich erst nach Bestätigung (**„Trotzdem hinzufügen“**)
-   übernehmen: LabelWerk fragt den Status regelmäßig ab, und ein Büro- oder Tintenstrahldrucker
-   würde diese Abfragen als Seiten voller Steuerzeichen drucken.
+   Bluetooth-Adresse). Die Suche zeigt **nur Zebra-Drucker** – Geräte, die sich als Zebra zu erkennen
+   geben (Zebra-Suche, SNMP/`~HI`, Bonjour, Zebra-USB-Kennung, Treiber der macOS-Warteschlange).
+   Andere Geräte mit offenem Port 9100 erscheinen nicht: LabelWerk fragt den Status regelmäßig ab,
+   und ein Büro- oder Tintenstrahldrucker würde diese Abfragen als Seiten voller Steuerzeichen
+   drucken. Eine solche Adresse lässt sich bewusst unter **„Manuell“** eintragen. Drucker, die schon
+   in LabelWerk eingerichtet sind, zeigt die Suche ebenfalls nicht noch einmal an – auch nicht über
+   ihre macOS-Warteschlange, ihren Bonjour-Namen oder eine andere Adresse desselben Geräts; die Zeile
+   **„1 bereits hinzugefügt“** unter der Überschrift nennt nur ihre Zahl.
 3. Unter **„Treiber & Warteschlangen“** den Treiber installieren, falls noch nicht geschehen, und
    beim Drucker **„Einrichten“** wählen. LabelWerk legt eine macOS-Warteschlange mit der passenden
    PPD-Datei und den Druckeinstellungen des Druckers an. Danach erscheint der Drucker in jedem

@@ -71,7 +71,9 @@ final class NetworkDiscoveryService {
 
     @ObservationIgnored private weak var model: AppModel?
     @ObservationIgnored private var registry = DiscoveryRegistry()
-    @ObservationIgnored private var macQueues: [CUPSQueueInfo] = []
+    /// macOS-Warteschlangen (`lpstat -v`) – für Netze und den Abgleich „schon eingerichtet“ (beobachtet,
+    /// damit Suchergebnisse nach dem Lesen neu gefiltert werden).
+    private(set) var macQueues: [CUPSQueueInfo] = []
     @ObservationIgnored private var macQueuesLoadedAt: Date?
     /// Aufgelöste Hostnamen bekannter Drucker (`DiscoveryNetworks.hostKey` → IPv4-Adresse).
     private var resolvedHosts: [String: String] = [:]
@@ -95,39 +97,54 @@ final class NetworkDiscoveryService {
 
     /// Seitenleiste „Im Netzwerk“: als Zebra erkannte Netzwerkdrucker, die noch nicht eingerichtet sind.
     var newPrinters: [DiscoveredPrinter] {
-        recentPrinters
-            .filter { printer in
-                guard case .tcp = printer.descriptor, printer.source != .cups else { return false }
-                return !DiscoveryMatcher.isUnidentified(printer) && !isAdded(printer)
-            }
+        let network = recentPrinters.filter { printer in
+            guard case .tcp = printer.descriptor else { return false }
+            return printer.source != .cups
+        }
+        return partition(network).new
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    /// `true`, wenn der Drucker schon in LabelWerk eingerichtet ist – über dieselbe Verbindung, dieselbe
-    /// Adresse (auch über den aufgelösten Hostnamen), eine macOS-Warteschlange des Druckers mit dieser
-    /// Adresse oder dieselbe MAC-Adresse.
-    func isAdded(_ printer: DiscoveredPrinter) -> Bool {
-        guard let model else { return false }
-        let host = Self.host(of: printer.descriptor)
-        let mac = DiscoveryRegistry.macKey(printer.details["macAddress"])
-        for session in model.sessions {
+    /// Identitäten der eingerichteten Drucker für den Abgleich „schon hinzugefügt“
+    /// (`DiscoveryFilter`): Verbindung, eigene, übernommene und Etikettentyp-Warteschlangen samt
+    /// deren Zielen (`lpstat -v`), Seriennummer, MAC- und IP-Adresse, die der Drucker gemeldet hat.
+    var addedIdentities: [AddedPrinterIdentity] {
+        (model?.sessions ?? []).map { session in
             let saved = session.saved
-            if saved.descriptor.refersToSameDevice(as: printer.descriptor) { return true }
-            if let mac, DiscoveryRegistry.macKey(session.identity?.macAddress) == mac { return true }
-            guard let host else { continue }
-            if addresses(of: Self.host(of: saved.descriptor)).contains(host) { return true }
-            if session.identity?.ipAddress?.lowercased() == host { return true }
-            if queueHosts(of: saved).contains(where: { addresses(of: $0).contains(host) }) { return true }
+            var queueNames = saved.adoptedQueueNames
+            if let name = saved.cupsQueueName { queueNames.append(name) }
+            queueNames += saved.labelTypes.compactMap(\.queueName)
+            return AddedPrinterIdentity(
+                descriptor: saved.descriptor,
+                queueNames: queueNames,
+                serialNumber: session.identity?.serialNumber,
+                macAddress: session.identity?.macAddress,
+                ipAddress: session.identity?.ipAddress,
+                queues: macQueues
+            )
         }
-        return false
     }
 
-    /// Ein Host und – bei Hostnamen – seine aufgelöste IPv4-Adresse.
-    private func addresses(of host: String?) -> [String] {
-        guard let host else { return [] }
-        let key = DiscoveryNetworks.hostKey(host)
-        guard !key.isEmpty else { return [] }
-        return [key] + (resolvedHosts[key].map { [$0] } ?? [])
+    /// Teilt Suchtreffer auf: neue Zebra-Drucker, schon eingerichtete, nicht als Zebra erkannte.
+    /// Gemeinsame Regel für „Drucker suchen“, Radar, „Im Netzwerk“ und den Installationsassistenten.
+    func partition(_ printers: [DiscoveredPrinter]) -> DiscoveryFilter.Partition {
+        DiscoveryFilter.partition(printers, identities: addedIdentities, resolved: resolvedHosts)
+    }
+
+    /// `true`, wenn der Drucker schon in LabelWerk eingerichtet ist – über dieselbe Verbindung, eine
+    /// seiner macOS-Warteschlangen, Seriennummer, MAC-Adresse, Bonjour-Namen oder dieselbe Adresse
+    /// (auch über den aufgelösten Hostnamen; `DiscoveryFilter.matchingIdentityIndex`).
+    func isAdded(_ printer: DiscoveredPrinter) -> Bool {
+        addedSession(for: printer) != nil
+    }
+
+    /// Der eingerichtete Drucker, der dasselbe Gerät ist wie `printer`.
+    func addedSession(for printer: DiscoveredPrinter) -> PrinterSession? {
+        guard let sessions = model?.sessions, !sessions.isEmpty else { return nil }
+        let identities = addedIdentities
+        guard let index = DiscoveryFilter.matchingIdentityIndex(for: printer, among: identities, resolved: resolvedHosts),
+              sessions.indices.contains(index) else { return nil }
+        return sessions[index]
     }
 
     // MARK: Start & Zeitplan
@@ -277,10 +294,16 @@ final class NetworkDiscoveryService {
     /// vor über einer Minute gelesen wurden – damit auch Drucker, die nur als macOS-Warteschlange
     /// eingerichtet sind (z. B. „10.62.13.19“), ihr Netz in die erste Suche einbringen.
     func preparedDiscoveryOptions() async -> PrinterDiscovery.Options {
+        await refreshKnownPrintersIfStale()
+        return discoveryOptions()
+    }
+
+    /// Liest macOS-Warteschlangen und Hostnamen neu, wenn sie noch nie bzw. vor über einer Minute
+    /// gelesen wurden (für Netze und den Abgleich „schon eingerichtet“).
+    func refreshKnownPrintersIfStale() async {
         if macQueuesLoadedAt.map({ Date().timeIntervalSince($0) > 60 }) ?? true {
             await refreshKnownNetworks()
         }
-        return discoveryOptions()
     }
 
     /// Suchoptionen mit den Netzen bekannter Drucker und den eigenen Netzen (für jede Suche der App).

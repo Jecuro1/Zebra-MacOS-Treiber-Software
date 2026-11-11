@@ -54,8 +54,6 @@ struct DiscoveryPanel: View {
     @State private var controller = DiscoveryController()
     @State private var highlightedID: String?
     @State private var highlightToken = 0
-    /// Nicht als Zebra erkanntes Netzwerkgerät, das erst nach Rückfrage hinzugefügt wird.
-    @State private var pendingUnidentified: DiscoveredPrinter?
     /// Editor „Durchsuchte Netze“.
     @State private var showNetworks = false
     /// Suche, die noch auf ihre Optionen wartet (macOS-Warteschlangen, Hostnamen) – abbrechbar.
@@ -128,17 +126,6 @@ struct DiscoveryPanel: View {
             DiscoveryNetworksSheet(onSearch: { startSearch() })
                 .environment(model)
         }
-        .confirmationDialog(
-            tr("„%@“ wurde nicht als Zebra-Drucker erkannt", pendingUnidentified?.name ?? ""),
-            isPresented: Binding(get: { pendingUnidentified != nil }, set: { if !$0 { pendingUnidentified = nil } }),
-            titleVisibility: .visible,
-            presenting: pendingUnidentified
-        ) { printer in
-            Button(tr("Trotzdem hinzufügen")) { add(printer, confirmed: true) }
-            Button(tr("Abbrechen"), role: .cancel) {}
-        } message: { _ in
-            Text(DiscoveryMatcher.unidentifiedWarning)
-        }
     }
 
     @ViewBuilder
@@ -147,7 +134,7 @@ struct DiscoveryPanel: View {
         case .search:
             searchContent
         case .manual:
-            DiscoveryManualForm(discovered: displayedPrinters) { session in
+            DiscoveryManualForm(discovered: discoveryResults.new) { session in
                 onFinished?(session)
             }
         case .demo:
@@ -192,20 +179,12 @@ struct DiscoveryPanel: View {
 
     @ViewBuilder
     private var results: some View {
-        let printers = displayedPrinters
+        let printers = discoveryResults.new
         if !printers.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(tr("Gefundene Drucker"),
+                SectionHeader(tr("Neue Zebra-Drucker"),
                               subtitle: tr("Modelle werden automatisch aus dem Katalog zugeordnet."),
-                              systemImage: "printer.fill") {
-                    let addedCount = addedIDs.count
-                    if addedCount > 0 {
-                        Label(tr("%d hinzugefügt", addedCount), systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.ready)
-                            .contentTransition(.numericText(value: Double(addedCount)))
-                    }
-                }
+                              systemImage: "printer.fill")
                 if printers.contains(where: { PrinterInstallRequest.supports($0.descriptor) }) {
                     MacPrinterInstallToggle(isOn: $installMacPrinter)
                         .padding(.horizontal, 12)
@@ -216,20 +195,22 @@ struct DiscoveryPanel: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: style == .page ? 330 : 300), spacing: 14)],
                           alignment: .leading, spacing: 14) {
                     ForEach(printers) { printer in
-                        let openAction: (() -> Void)? = style == .page ? { open(printer) } : nil
                         DiscoveryPrinterCard(
                             printer: printer,
-                            isAdded: addedIDs.contains(printer.id),
                             isHighlighted: highlightedID == printer.id,
                             appearDelay: controller.appearanceDelays[printer.id] ?? 0,
                             reduceMotion: reduceMotion,
-                            onAdd: { add(printer) },
-                            onOpen: openAction
+                            onAdd: { add(printer) }
                         )
                         .id(printer.id)
-                        .transition(.opacity)
+                        // Nach „Hinzufügen“ ist der Drucker eingerichtet und verlässt die Liste.
+                        .transition(reduceMotion ? .opacity : .asymmetric(
+                            insertion: .opacity,
+                            removal: .opacity.combined(with: .scale(scale: 0.92))
+                        ))
                     }
                 }
+                .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: printers.map(\.id))
             }
             .transition(.opacity)
         } else if controller.isScanning {
@@ -269,7 +250,7 @@ struct DiscoveryPanel: View {
             HStack(alignment: .top, spacing: 18) {
                 IconBadge(systemImage: "magnifyingglass", tint: Theme.warning, size: 44)
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(tr("Kein Drucker gefunden"))
+                    Text(tr("Keine neuen Zebra-Drucker gefunden"))
                         .font(Theme.Typography.headline)
                     VStack(alignment: .leading, spacing: 5) {
                         tip("power", tr("Ist der Drucker eingeschaltet und zeigt „Bereit“?"))
@@ -328,10 +309,10 @@ struct DiscoveryPanel: View {
                             .controlSize(.small)
                     }
                     sourceToggles(compact: true)
-                    if displayedPrinters.isEmpty {
+                    if discoveryResults.new.isEmpty {
                         Text(controller.isScanning
-                             ? tr("Gefundene Drucker erscheinen hier, sobald sie antworten.")
-                             : tr("Noch keine Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden."))
+                             ? tr("Neue Zebra-Drucker erscheinen hier, sobald sie antworten.")
+                             : tr("Noch keine neuen Zebra-Drucker gefunden. Du kannst die Suche wiederholen, den Drucker manuell hinzufügen oder den Demo-Drucker verwenden."))
                             .font(.system(size: 11.5))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -339,18 +320,17 @@ struct DiscoveryPanel: View {
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 6) {
-                                ForEach(displayedPrinters) { printer in
+                                ForEach(discoveryResults.new) { printer in
                                     DiscoveryPrinterCard(
                                         printer: printer,
-                                        isAdded: addedIDs.contains(printer.id),
                                         isHighlighted: highlightedID == printer.id,
                                         appearDelay: controller.appearanceDelays[printer.id] ?? 0,
                                         reduceMotion: reduceMotion,
                                         compact: true,
-                                        onAdd: { add(printer) },
-                                        onOpen: nil
+                                        onAdd: { add(printer) }
                                     )
                                     .id(printer.id)
+                                    .transition(.opacity)
                                 }
                             }
                             .padding(.vertical, 2)
@@ -393,7 +373,7 @@ struct DiscoveryPanel: View {
                 }
             }
         }
-        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: displayedPrinters.isEmpty)
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: discoveryResults.new.map(\.id))
         .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: model.sessions.count)
     }
 
@@ -401,11 +381,10 @@ struct DiscoveryPanel: View {
 
     private func radar(_ proxy: ScrollViewProxy?) -> some View {
         DiscoveryRadar(
-            printers: displayedPrinters,
+            printers: discoveryResults.new,
             isScanning: controller.isScanning,
             startedAt: controller.startedAt,
             duration: controller.duration,
-            addedIDs: addedIDs,
             highlightedID: highlightedID,
             reduceMotion: reduceMotion
         ) { printer in
@@ -414,21 +393,35 @@ struct DiscoveryPanel: View {
     }
 
     private func statusText(large: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(headline)
+        let results = discoveryResults
+        // Drucker zählen, nicht Treffer: Ein eingerichteter Drucker taucht oft mehrfach auf
+        // (LabelWerk-Warteschlange, Etikettentypen, übernommene Warteschlange, Netzwerk-Fund).
+        let hiddenCount = results.hiddenAddedPrinterCount()
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(headline(newCount: results.new.count))
                 .font(large ? Theme.Typography.title : Theme.Typography.headline)
                 .contentTransition(.opacity)
-            Text(subline)
+            Text(subline(isEmpty: results.new.isEmpty))
                 .font(.system(size: large ? 13 : 11.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .contentTransition(.opacity)
+            // Leiser Hinweis: Schon eingerichtete Drucker werden nicht angezeigt (Dubletten).
+            if hiddenCount > 0 {
+                Label(tr("%d bereits hinzugefügt", hiddenCount), systemImage: "checkmark.circle")
+                    .font(.system(size: large ? 11.5 : 10.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .contentTransition(.numericText(value: Double(hiddenCount)))
+                    .help(tr("Drucker, die schon in LabelWerk eingerichtet sind, werden in der Suche nicht angezeigt."))
+                    .transition(.opacity)
+            }
         }
-        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: headline)
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: headline(newCount: results.new.count))
+        .animation(Motion.animation(Motion.spring, reduceMotion: reduceMotion), value: hiddenCount)
     }
 
     private func sourceToggles(compact: Bool) -> some View {
-        let printers = displayedPrinters
+        let printers = discoveryResults.new
         return DiscoveryFlowLayout(spacing: compact ? 6 : 8) {
             ForEach(DiscoverySourceStyle.ordered, id: \.self) { source in
                 DiscoverySourceToggle(source: source, isOn: sourceBinding(source),
@@ -474,16 +467,24 @@ struct DiscoveryPanel: View {
         }
     }
 
-    private var headline: String {
-        let count = displayedPrinters.count
+    /// Überschrift: zählt nur neue Zebra-Drucker (schon eingerichtete sind ausgeblendet).
+    private func headline(newCount count: Int) -> String {
         if controller.isScanning {
-            return count == 0 ? tr("Suche läuft …") : tr("Suche läuft … %d gefunden", count)
+            switch count {
+            case 0: return tr("Suche läuft …")
+            case 1: return tr("Suche läuft … 1 neuer Zebra-Drucker")
+            default: return tr("Suche läuft … %d neue Zebra-Drucker", count)
+            }
         }
         if controller.scanCount == 0 && count == 0 { return tr("Drucker in der Nähe finden") }
-        return count == 0 ? tr("Keine Drucker gefunden") : tr("%d Drucker gefunden", count)
+        switch count {
+        case 0: return tr("Keine neuen Zebra-Drucker gefunden")
+        case 1: return tr("1 neuer Zebra-Drucker gefunden")
+        default: return tr("%d neue Zebra-Drucker gefunden", count)
+        }
     }
 
-    private var subline: String {
+    private func subline(isEmpty: Bool) -> String {
         if controller.isScanning {
             let names = DiscoverySourceStyle.ordered
                 .filter { controller.sources.contains($0) }
@@ -497,7 +498,7 @@ struct DiscoveryPanel: View {
         if controller.scanCount == 0 {
             return tr("Bonjour, Zebra-Suche, USB, Netzwerk, macOS-Warteschlangen und Bluetooth werden gleichzeitig durchsucht.")
         }
-        if displayedPrinters.isEmpty {
+        if isEmpty {
             return tr("Strom, Kabel und Netzwerk prüfen – oder den Drucker manuell hinzufügen.")
         }
         return tr("„Hinzufügen“ richtet den Drucker in LabelWerk ein. Ein Klick auf einen Punkt im Radar zeigt ihn an.")
@@ -507,13 +508,14 @@ struct DiscoveryPanel: View {
 
     /// Treffer dieser Suche, ergänzt um die Netzwerkdrucker der automatischen Suche
     /// (`NetworkDiscoveryService`, zuletzt gesehen in den letzten 35 Minuten) – zusammengeführt, damit
-    /// jeder Drucker nur einmal erscheint.
-    private var displayedPrinters: [DiscoveredPrinter] {
+    /// jeder Drucker nur einmal erscheint – und aufgeteilt (`DiscoveryFilter`): angezeigt werden nur
+    /// `new`, also als Zebra erkannte Drucker, die noch nicht in LabelWerk eingerichtet sind.
+    private var discoveryResults: DiscoveryFilter.Partition {
         var registry = DiscoveryRegistry(controller.found)
         for printer in model.networkDiscovery.recentPrinters {
             registry.insert(printer)
         }
-        return registry.printers
+        return model.networkDiscovery.partition(registry.printers)
     }
 
     /// Netze der laufenden bzw. letzten Suche, sonst der automatischen Suche.
@@ -543,17 +545,11 @@ struct DiscoveryPanel: View {
         pendingStart = nil
     }
 
-    /// IDs gefundener Drucker, die bereits eingerichtet sind. Verglichen wird über
-    /// `ConnectionDescriptor.stableID` – ein anderer Bluetooth-Name oder USB-Anschluss ist dasselbe Gerät.
-    /// Ein Drucker, der nur über seine macOS-Warteschlange eingerichtet ist, bleibt hier hinzufügbar:
-    /// die direkte Netzwerkverbindung bringt Live-Status, Dateien und Firmware.
-    private var addedIDs: Set<String> {
-        let stableIDs = Set(model.sessions.map { $0.saved.descriptor.stableID })
-        return Set(displayedPrinters.filter { stableIDs.contains($0.descriptor.stableID) }.map(\.id))
-    }
-
+    /// Bereits eingerichteter Drucker desselben Geräts (gleiche Verbindung, Warteschlange, Adresse,
+    /// Seriennummer … – `NetworkDiscoveryService.addedSession(for:)`).
     private func existingSession(for printer: DiscoveredPrinter) -> PrinterSession? {
-        model.sessions.first { $0.saved.descriptor.refersToSameDevice(as: printer.descriptor) }
+        model.networkDiscovery.addedSession(for: printer)
+            ?? model.sessions.first { $0.saved.descriptor.refersToSameDevice(as: printer.descriptor) }
     }
 
     private func sourceBinding(_ source: DiscoverySource) -> Binding<Bool> {
@@ -569,19 +565,13 @@ struct DiscoveryPanel: View {
         )
     }
 
-    private func add(_ printer: DiscoveredPrinter, confirmed: Bool = false) {
+    private func add(_ printer: DiscoveredPrinter) {
         // `AppModel.addPrinter(from:)` vergleicht exakt; hier zählt dasselbe Gerät (keine Dubletten).
+        // Die Liste zeigt nur neue Zebra-Drucker – das greift nur, wenn sich der Stand gerade ändert.
         if let existing = existingSession(for: printer) {
             if style == .page {
                 model.toast(tr("Bereits eingerichtet"), message: existing.displayName, style: .info)
             }
-            highlight(printer.id, proxy: scrollProxy)
-            return
-        }
-        // Hinzufügen verbindet sofort und fragt den Status ab (`~HI`, `~HS` …). Ein nicht als Zebra
-        // erkanntes Gerät könnte ein Bürodrucker sein, der das als Seiten ausdruckt – erst nachfragen.
-        if !confirmed && DiscoveryMatcher.isUnidentified(printer) {
-            pendingUnidentified = printer
             return
         }
         let previousSelection = model.selection
@@ -595,13 +585,6 @@ struct DiscoveryPanel: View {
             model.selection = previousSelection
             model.toast(tr("Drucker hinzugefügt"), message: session.displayName, style: .success)
         }
-        highlight(printer.id, proxy: nil)
-    }
-
-    private func open(_ printer: DiscoveredPrinter) {
-        guard let session = existingSession(for: printer) else { return }
-        model.selection = .printer(session.id)
-        onFinished?(session)
     }
 
     /// Hebt einen Treffer kurz hervor (Radar & Karte) und scrollt zu seiner Karte.
