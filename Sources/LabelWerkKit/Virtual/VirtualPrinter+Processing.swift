@@ -479,13 +479,15 @@ extension VirtualPrinter {
 
     // MARK: - Neustart & Werkseinstellungen
 
-    /// Neustart (`~JR`, SGD `device.reset`): Pause, Warteschlange und `^MD`-Versatz enden,
-    /// Netzwerkeinstellungen werden übernommen. Nachfolgende Daten desselben Blocks verwirft
-    /// ``process(_:)``; ``VirtualPrinterServer`` trennt die Verbindung.
+    /// Neustart (`~JR`, SGD `device.reset`): Pause, Warteschlange und `^MD`-Versatz enden, Dateien
+    /// im RAM-Laufwerk `R:` sind weg (wie beim Aus- und Einschalten), Netzwerkeinstellungen werden
+    /// übernommen. Nachfolgende Daten desselben Blocks verwirft ``process(_:)``;
+    /// ``VirtualPrinterServer`` trennt die Verbindung.
     func restartDevice() {
         restartCount += 1
         paused = false
         cancelAllFormats()
+        storedFiles = storedFiles.filter { $0.value.drive != "R:" }
         relativeDarkness = 0
         bootDate = Date()
         let protocolValue = store.rawValue("ip.ip_protocol") ?? "dhcp"

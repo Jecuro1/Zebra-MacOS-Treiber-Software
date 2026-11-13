@@ -327,7 +327,13 @@ struct LabelPrintOptionsPanel: View {
 
     private var printButtonTitle: String {
         switch store.printPhase {
-        case .sending: return tr("Wird gedruckt …")
+        case .sending:
+            // Etikett für Etikett: „Etikett 37 von 50“ bzw. der Wartegrund („Papier leer“).
+            if let job = store.session?.printJob {
+                if let reason = job.waiting { return PrintJobProgress.title(for: reason) }
+                if job.paced { return job.counterText }
+            }
+            return tr("Wird gedruckt …")
         case .success(.direct): return tr("Gedruckt")
         case .success(.queue): return tr("An macOS übergeben")
         case .failure: return tr("Erneut drucken")

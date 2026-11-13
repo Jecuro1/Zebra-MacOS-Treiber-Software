@@ -705,6 +705,83 @@ Die wichtigsten Optionen (vollständig in ARCHITECTURE.md §9):
 
 `Default` bedeutet: Der Drucker behält seinen eigenen Wert.
 
+## Papier oder Farbband leer – Druck geht automatisch weiter
+
+Gehen mitten in einem Auftrag die Etiketten oder das Farbband aus (oder wird der Druckkopf geöffnet),
+muss **nichts nachgezählt und nichts neu gedruckt** werden – wie bei einem normalen Bürodrucker:
+
+1. **Der Auftrag bleibt stehen und meldet, was fehlt.**
+   * In der **macOS-Warteschlange** (Dock-Symbol des Druckers bzw. Systemeinstellungen › Drucker &
+     Scanner › Druckwarteschlange öffnen) bleibt der Auftrag mit **„Kein Papier“**, **„Farbband leer“**
+     bzw. **„Druckkopf offen“** stehen, darunter der Stand, z. B. **„Etikett 37 von 50“**.
+   * Beim Druck **aus LabelWerk** (Designer, Etikettendruck „Mit LabelWerk drucken“, „Erneut drucken“ im
+     Verlauf) erscheint oben im Fenster ein Hinweis, z. B.
+     **„Papier leer – neue Etikettenrolle einlegen. Der Druck geht danach automatisch weiter.“** – bei
+     leerem Farbband „Farbband leer – neues Farbband einlegen …“, bei offenem Kopf „Druckkopf offen –
+     Druckkopf schließen …“. Während des Drucks steht dort der Fortschritt („Etikett 37 von 50“). Ist
+     LabelWerk gerade nicht im Vordergrund, kommt zusätzlich eine Mitteilung.
+2. **Neue Rolle bzw. neues Farbband einlegen, Druckkopf schließen.** Mehr ist nicht zu tun: Der Druck
+   geht **von selbst** genau dort weiter, wo er stand. Das Etikett, das beim Ausgehen gerade gedruckt
+   wurde (oft nur halb oder leer), druckt der Drucker noch einmal; alle anderen kommen **genau einmal**.
+   Bleibt der Drucker nach dem Einlegen im Pausezustand stehen (bei vielen Zebra-Modellen leuchtet dann
+   die Pause-Taste), setzt LabelWerk ihn selbst fort. Hat jemand den Drucker dagegen von Hand mit der
+   Pause-Taste angehalten, wartet der Auftrag mit „Drucker pausiert“, bis die Taste erneut gedrückt wird.
+3. **Abbrechen** geht jederzeit – in der macOS-Warteschlange (Auftrag löschen) bzw. im Hinweis in
+   LabelWerk mit **„Abbrechen“**. LabelWerk leert dann auch den Speicher des Druckers (`~JA`), damit
+   nach dem Einlegen keine Reste des abgebrochenen Auftrags mehr herauskommen. Der Verlauf in LabelWerk
+   vermerkt, wie viele Etiketten gedruckt wurden („Abgebrochen – 36 von 50 Etiketten gedruckt.“).
+
+Wird der Drucker zum Einlegen **aus- und wieder eingeschaltet**, geht sein Speicher verloren. LabelWerk
+erkennt das sicher – zu Beginn des Auftrags legt es dafür eine winzige Merkdatei im Arbeitsspeicher des
+Druckers ab (`R:LWJOB.GRF` bzw. beim Druck aus der App `R:LWAPP.GRF`, 1 Byte), die beim Ausschalten
+verschwindet – und sendet die Einstellungen des Auftrags und die noch fehlenden Etiketten erneut. Das
+gilt auch, wenn der Drucker mitten im Druck ohne Fehler ausgeschaltet wurde.
+
+Bricht dagegen nur die **Netzwerkverbindung** ab (WLAN weg, Router neu gestartet), während der Drucker
+an bleibt, verbindet LabelWerk neu und druckt weiter – **ohne** etwas doppelt zu senden: Hat der Drucker
+nach dem Einlegen der Rolle in der Zwischenzeit schon allein weitergedruckt, zählt das. Einzige seltene
+Ausnahme: Meldet ein Drucker die Merkdatei nicht (sehr alte Firmware oder ein Druckserver dazwischen),
+lässt sich nach einem Verbindungsabbruch nicht prüfen, ob er neu gestartet wurde. Dann wiederholt
+LabelWerk nichts automatisch, sondern meldet **„bitte nachzählen“** mit der Zahl der Etiketten, die
+möglicherweise fehlen (in der Warteschlange als Warnung, in der App als Hinweis und im Verlauf).
+
+Während ein Auftrag aus der App wartet, verhindert LabelWerk den Ruhezustand des Macs, damit die
+Verbindung zum Drucker nicht einschläft (für Aufträge über die macOS-Warteschlange tut macOS das
+selbst). **„Abbrechen“** im Hinweis wirkt sofort, auch während LabelWerk noch mit dem Drucker verbindet;
+warten weitere Aufträge, verwirft **„Wartende verwerfen“** sie, ohne dass sie gesendet werden.
+
+**So funktioniert es:** Bisher übergab macOS einen Auftrag in einem Stück an den Drucker und meldete ihn
+sofort als erledigt – was der Drucker nach „Papier leer“ noch im Speicher hatte, wusste der Mac nicht.
+Jetzt sendet LabelWerk ein Etikett nach dem anderen und fragt den Drucker dazwischen nach seinem Zustand
+(`~HS`): Erst wenn ein Etikett fertig ist, folgt das nächste. Im Drucker liegt deshalb nie mehr als ein
+Etikett, und der Mac weiß jederzeit, wie weit der Auftrag ist. Dazu schaltet LabelWerk am Drucker
+„Etikett nach Fehler erneut drucken“ ein (`^JZY`). Die macOS-Warteschlangen, die LabelWerk anlegt oder
+übernimmt, nutzen dafür den LabelWerk-Anschluss **`labelwerk://Adresse:9100`** statt `socket://`
+(bestehende LabelWerk-Warteschlangen stellt das Update automatisch um); beim Druck aus der App macht
+LabelWerk dasselbe selbst.
+
+**Einstellung:** **Druckeinstellungen › Druckoptionen › „Bei Papier- oder Farbbandende anhalten und
+fortsetzen“** (Standard: an, je Drucker). Sie wirkt nur am Mac und wird nicht an den Drucker
+übertragen. Ausgeschaltet geht jeder Auftrag wie bisher in einem Stück an den Drucker (`socket://`) –
+etwas schneller bei sehr großen Serien, weil zwischen zwei Etiketten nicht auf die Rückmeldung des
+Druckers gewartet wird (je Etikett meist unter einer halben Sekunde), aber ohne Warten und Fortsetzen.
+
+**Grenzen:**
+
+* **Netzwerkdrucker (LAN/WLAN) mit ZPL.** Drucker, die über **USB** angeschlossen sind, behalten
+  `usb://`: Der Auftrag geht dort in einem Stück an den Drucker – der Drucker hält ihn bei „Papier leer“
+  zwar im Speicher und druckt nach dem Einlegen weiter, die Warteschlange zeigt aber keinen Stand. EPL-
+  und CPCL-Drucker melden keinen Druckfortschritt; ihre Aufträge gehen ebenfalls in einem Stück.
+* Antwortet ein Drucker nicht auf Statusabfragen (z. B. weil ein Druckserver dazwischen sitzt, der nur
+  Daten annimmt), sendet LabelWerk den Auftrag in einem Stück wie bisher.
+* Eine Rohdaten-Sendung über das Terminal von LabelWerk (`Senden`) und `lp -o raw` an eine
+  `socket://`-Warteschlange laufen weiterhin ohne Überwachung.
+* Geht ein Auftrag in einem Stück hinaus (EPL/CPCL, Drucker ohne Statusantwort, Einstellung aus) und
+  bricht die Verbindung mitten im Senden ab, endet er mit einem Fehler, statt alles noch einmal zu
+  senden – was schon angekommen ist, würde sonst doppelt gedruckt.
+* Wird der Drucker genau zwischen zwei Statusabfragen ausgeschaltet, kann ein einzelnes Etikett doppelt
+  kommen – fehlen wird keines.
+
 ## Druckeinstellungen wie unter Windows
 
 Unter Windows stellt man Zebra-Drucker im Dialog **„Druckeinstellungen für ZD421 …“** des

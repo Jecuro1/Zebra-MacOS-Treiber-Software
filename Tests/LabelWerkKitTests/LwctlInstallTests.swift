@@ -839,4 +839,69 @@ struct LwctlInstallTests {
             #expect(overview.output.contains("  \(command) "), "\(command)")
         }
     }
+
+    // MARK: - Backend labelwerk (Druck geht nach Papier- oder Farbbandende weiter)
+
+    @Test("Mit Backend labelwerk://, --no-resume socket:// mit Markierung; vorhandene Wahl bleibt")
+    func resumeAfterErrorSelectsDeviceURI() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ppds = try ppdDirectory(["LabelWerk-zd421t-203dpi.ppd.gz"])
+        defer { try? FileManager.default.removeItem(at: ppds) }
+        let backend = directory.appendingPathComponent("labelwerk")
+        try Data("#!/bin/sh\n".utf8).write(to: backend)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: backend.path)
+        var (environment, _) = try stubCUPS(in: directory, queues: [
+            StubQueue(name: "Aus", uri: "socket://192.0.2.30:9100", makeAndModel: "Zebra ZD421t (203 dpi) - LabelWerk",
+                      info: "Aus", ppd: labelWerkQueuePPD, options: "lwResumeOnError=false"),
+        ])
+        environment["LWCTL_CUPS_BACKEND"] = backend.path
+
+        // Neu, Standard: labelwerk://, keine Markierung.
+        let fresh = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--ppd-dir", ppds.path,
+                                             "--dry-run", "--json"], environment: environment)
+        #expect(fresh.status == 0, "\(fresh.errors)")
+        let freshPlan = try decodePlan(fresh)
+        #expect(freshPlan.deviceURI == "labelwerk://192.0.2.10:9100")
+        #expect(freshPlan.commands.first?.contains("-v") == true)
+        #expect(freshPlan.commands.first.map { $0.contains("labelwerk://192.0.2.10:9100") } == true)
+        #expect(freshPlan.commands.first.map { $0.joined(separator: " ").contains("lwResumeOnError") } == false)
+
+        // --no-resume: socket:// und lwResumeOnError-default=False.
+        let off = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--no-resume",
+                                           "--ppd-dir", ppds.path, "--dry-run", "--json"], environment: environment)
+        #expect(off.status == 0, "\(off.errors)")
+        let offPlan = try decodePlan(off)
+        #expect(offPlan.deviceURI == "socket://192.0.2.10:9100")
+        #expect(offPlan.commands.first.map { Array($0.suffix(2)) } == ["-o", "lwResumeOnError-default=False"])
+
+        // Vorhandene Warteschlange mit abgeschaltetem Fortsetzen: bleibt ohne Angabe bei socket://.
+        let kept = try await CLIRunner.run(["install", "-p", "tcp://192.0.2.30", "-m", "zd421t", "--name", "Aus",
+                                            "--ppd-dir", ppds.path, "--dry-run", "--json"], environment: environment)
+        #expect(kept.status == 0, "\(kept.errors)")
+        let keptPlan = try decodePlan(kept)
+        #expect(keptPlan.existing)
+        #expect(keptPlan.deviceURI == "socket://192.0.2.30:9100")
+        // … mit --resume wieder labelwerk:// und die Markierung entfällt.
+        let resumed = try await CLIRunner.run(["install", "-p", "tcp://192.0.2.30", "-m", "zd421t", "--name", "Aus",
+                                               "--resume", "--ppd-dir", ppds.path, "--dry-run", "--json"],
+                                              environment: environment)
+        #expect(resumed.status == 0, "\(resumed.errors)")
+        let resumedPlan = try decodePlan(resumed)
+        #expect(resumedPlan.deviceURI == "labelwerk://192.0.2.30:9100")
+        #expect(resumedPlan.commands.first.map { Array($0.suffix(2)) } == ["-R", "lwResumeOnError-default"])
+
+        // Ohne Backend (älterer Treiber): socket://; --resume warnt.
+        environment["LWCTL_CUPS_BACKEND"] = directory.appendingPathComponent("fehlt").path
+        let old = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--resume",
+                                           "--ppd-dir", ppds.path, "--dry-run", "--json"], environment: environment)
+        #expect(old.status == 0, "\(old.errors)")
+        let oldPlan = try decodePlan(old)
+        #expect(oldPlan.deviceURI == "socket://192.0.2.10:9100")
+        #expect(oldPlan.warnings.contains { $0.contains("Backend") })
+
+        let both = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--resume", "--no-resume",
+                                            "--ppd-dir", ppds.path, "--dry-run"], environment: environment)
+        #expect(both.status != 0)
+    }
 }

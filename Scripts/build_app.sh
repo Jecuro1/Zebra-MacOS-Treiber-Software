@@ -232,6 +232,11 @@ else
         lw_codesign "${filter}" "${BUNDLE_ID}.$(basename "${filter}")"
     done
 fi
+# CUPS-Backend im Treiberpaket (Notarisierung verlangt jedes Programm im Bundle signiert).
+BUNDLED_BACKEND="${CONTENTS}/Resources/Driver/usr/libexec/cups/backend/labelwerk"
+if [[ "${LW_DRY_RUN}" == "1" || -f "${BUNDLED_BACKEND}" ]]; then
+    lw_codesign "${BUNDLED_BACKEND}" "${BUNDLE_ID}.backend.labelwerk"
+fi
 lw_codesign "${CONTENTS}/Helpers/lwctl" "${BUNDLE_ID}.lwctl"
 lw_codesign "${APP}" "" --entitlements "${ENTITLEMENTS}"
 

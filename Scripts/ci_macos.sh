@@ -229,6 +229,10 @@ step_test_driver() {
     done
     lw_run make -C Driver/filter -j "${JOBS}" tests
     lw_run make -C Driver/filter test
+    lw_run make -C Driver/backend -j "${JOBS}" universal
+    require_universal "Driver/backend/build/universal/labelwerk"
+    lw_run make -C Driver/backend -j "${JOBS}" tests
+    lw_run make -C Driver/backend test
 }
 
 step_test_ppd() {
@@ -283,6 +287,12 @@ step_verify_pkg() {
         codesign --verify --strict "${driver}/Library/Printers/LabelWerk/Filter/${filter}" \
             || lw_die "Signatur von ${filter} ungültig."
     done
+    # CUPS-Backend labelwerk (ARCHITECTURE.md §10): Universal, signiert, 0755 (cupsd startet es als _lp).
+    local backend="${driver}/usr/libexec/cups/backend/labelwerk"
+    [[ -x "${backend}" ]] || lw_die "Backend labelwerk fehlt im Paket."
+    require_universal "${backend}"
+    codesign --verify --strict "${backend}" || lw_die "Signatur des Backends ungültig."
+    [[ "$(stat -f %Lp "${backend}")" == "755" ]] || lw_die "Backend hat nicht die Rechte 0755."
     [[ "$(cat "${driver}/Library/Printers/LabelWerk/VERSION")" == "${VERSION}" ]] || lw_die "VERSION im Treiber falsch."
     [[ -f "${driver}/Library/Printers/LabelWerk/Icons/LabelWerk.icns" ]] || lw_die "Druckersymbol fehlt."
     local ppds
@@ -291,7 +301,7 @@ step_verify_pkg() {
     for script in preinstall postinstall; do
         [[ -x "${expanded}/LabelWerkDriver.pkg/Scripts/${script}" ]] || lw_die "${script} fehlt."
     done
-    lw_ok "Treiber: 2 Filter (Universal, signiert), ${ppds} PPD-Dateien, Skripte"
+    lw_ok "Treiber: 2 Filter und Backend (Universal, signiert), ${ppds} PPD-Dateien, Skripte"
 
     # App-Komponente.
     local app="${expanded}/LabelWerkApp.pkg/Payload/${APP_NAME}.app"
@@ -315,6 +325,7 @@ step_verify_pkg() {
             || lw_die "${lang}.lproj/Localizable.strings ungültig."
     done
     [[ -d "${app}/Contents/Resources/Driver/Library/Printers/LabelWerk" ]] || lw_die "Treiberpaket fehlt in der App."
+    [[ -x "${app}/Contents/Resources/Driver/usr/libexec/cups/backend/labelwerk" ]] || lw_die "Backend fehlt im Treiberpaket der App."
     require_universal "${app}/Contents/MacOS/LabelWerk"
     lw_ok "App: ${BUNDLE_ID} ${VERSION} (${BUILD}), Universal, signiert, Berechtigungen, Lokalisierung, Treiber, Updates aus ${UPDATE_REPOSITORY:-(abgeschaltet)}"
 

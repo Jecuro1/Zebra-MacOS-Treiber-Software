@@ -3,7 +3,8 @@
 #
 # LabelWerk – Deinstallation
 #
-# Entfernt den CUPS-Treiber (/Library/Printers/LabelWerk, LabelWerk-PPDs), die App, den
+# Entfernt den CUPS-Treiber (/Library/Printers/LabelWerk, LabelWerk-PPDs, Backend
+# /usr/libexec/cups/backend/labelwerk), die App, den
 # lwctl-Link, den PDF-Dienst „Mit LabelWerk drucken“ und die Paketbelege. Druckerwarteschlangen,
 # die LabelWerk-PPDs verwenden, werden nur mit --remove-queues entfernt (sonst wird gewarnt, dass
 # sie danach nicht mehr drucken).
@@ -60,7 +61,7 @@ usage() {
     cat <<EOF
 Aufruf: sudo $(basename "$0") [Optionen]
 
-Entfernt ${APP_NAME}: CUPS-Treiber (Filter, PPD-Dateien, Druckersymbol), die App
+Entfernt ${APP_NAME}: CUPS-Treiber (Filter, Backend, PPD-Dateien, Druckersymbol), die App
 /Applications/${APP_NAME}.app, den Link /usr/local/bin/lwctl, den PDF-Dienst
 „${PDF_SERVICE_NAME}“ (~/Library/PDF Services) und die Installationsbelege.
 
@@ -117,6 +118,8 @@ if [[ "${SYSTEM_ROOT}" == "1" && "${DRY_RUN}" != "1" && "$(id -u)" != "0" ]]; th
 fi
 
 DRIVER_DIR="${ROOT}/Library/Printers/LabelWerk"
+# CUPS-Backend „labelwerk“ (Druck geht nach Papier- oder Farbbandende weiter, ARCHITECTURE.md §10).
+BACKEND="${ROOT}/usr/libexec/cups/backend/labelwerk"
 PPD_DIR="${ROOT}/Library/Printers/PPDs/Contents/Resources"
 CUPS_PPD_DIR="${ROOT}/etc/cups/ppd"
 APP_PATH="${ROOT}/Applications/${APP_NAME}.app"
@@ -169,6 +172,7 @@ target_user_home() {
 }
 
 add_target "${DRIVER_DIR}"
+add_target "${BACKEND}"
 shopt -s nullglob
 for ppd in "${PPD_DIR}"/LabelWerk-*.ppd.gz "${PPD_DIR}"/LabelWerk-*.ppd; do
     add_target "${ppd}"

@@ -12,6 +12,13 @@ import LabelWerkKit
 /// Standard-Papiergröße der Warteschlange. Steht sie nicht in der Modell-PPD, erhält die Warteschlange
 /// eine Kopie der PPD mit dieser benannten Seitengröße (`lpadmin -P`), dazu `lwLabelWidth`/
 /// `lwLabelHeight` als Warteschlangen-Standard für „An Etikett anpassen“.
+///
+/// Geräte-URI (ARCHITECTURE.md §10 „Backend labelwerk“): Netzwerkdrucker erhalten `labelwerk://host:port`
+/// – der Auftrag bleibt in der Warteschlange, bis jedes Etikett gedruckt ist, und geht nach Papier- oder
+/// Farbbandende weiter –, mit „Bei Papier- oder Farbbandende anhalten und fortsetzen“ aus
+/// (`PrintSettings.resumeAfterError`) bzw. ohne installiertes Backend `socket://host:port`
+/// (``QueueDeviceURI``). ``apply(_:to:force:allowAdminPrompt:deviceURI:)`` stellt vorhandene
+/// Warteschlangen um.
 enum CUPSService {
     static let lpadmin = "/usr/sbin/lpadmin"
     static let lpinfo = "/usr/sbin/lpinfo"
@@ -23,6 +30,13 @@ enum CUPSService {
     /// Installationsorte gemäß ARCHITECTURE.md §10.
     static let driverRoot = URL(fileURLWithPath: "/Library/Printers/LabelWerk")
     static let ppdDirectory = URL(fileURLWithPath: "/Library/Printers/PPDs/Contents/Resources")
+    /// CUPS-Backend `labelwerk` (Druck geht nach Papier- oder Farbbandende weiter).
+    static let backendPath = QueueDeviceURI.backendPath
+
+    /// Wird nach dem Installieren, Aktualisieren oder Entfernen des Treibers aus der App gesendet
+    /// (`DriverInstaller`); `QueueSyncService` gleicht danach alle Warteschlangen ab (Geräte-URI
+    /// `labelwerk://` bzw. `socket://`).
+    static let driverDidChangeNotification = Notification.Name("LabelWerkDriverDidChange")
 
     enum CUPSError: LocalizedError {
         case driverNotInstalled
@@ -104,6 +118,12 @@ enum CUPSService {
         FileManager.default.isExecutableFile(atPath: driverRoot.appendingPathComponent("Filter/rastertolabelwerk").path)
     }
 
+    /// Ist das Backend `labelwerk` installiert? Ohne es erhalten Warteschlangen `socket://` (CUPS lehnt
+    /// `lpadmin -v labelwerk://…` ohne Backend ab).
+    static var isBackendInstalled: Bool {
+        FileManager.default.isExecutableFile(atPath: backendPath)
+    }
+
     static var installedDriverVersion: String? {
         try? String(contentsOf: driverRoot.appendingPathComponent("VERSION"), encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -128,14 +148,15 @@ enum CUPSService {
         return nil
     }
 
-    /// Geräte-URI für eine LabelWerk-Verbindung.
+    /// Geräte-URI für eine LabelWerk-Verbindung: Netzwerk `labelwerk://host:port` (mit `resume` und
+    /// installiertem Backend) bzw. `socket://host:port`, USB die von CUPS gemeldete URI.
     ///
     /// - Throws: `CUPSError.ambiguousUSBDevice`, wenn mehrere Zebra-USB-Drucker angeschlossen sind
     ///   und keiner eindeutig zu Seriennummer bzw. Modell passt.
-    static func deviceURI(for descriptor: ConnectionDescriptor) async throws -> String? {
+    static func deviceURI(for descriptor: ConnectionDescriptor, resume: Bool = true) async throws -> String? {
         switch descriptor {
         case .tcp(let host, let port):
-            return socketURI(host: host, port: port)
+            return QueueDeviceURI.networkURI(host: host, port: port, resume: resume && isBackendInstalled)
         case .usb(let usb):
             // Von CUPS gemeldete USB-URI (z. B. `usb://Zebra%20Technologies/ZTC%20ZD421-203dpi%20ZPL?serial=…`).
             let uris = await zebraDeviceURIs().filter { $0.hasPrefix("usb://") }
@@ -199,7 +220,9 @@ enum CUPSService {
     static func installQueue(for printer: SavedPrinter, queueName: String? = nil,
                              stock: LabelStock? = nil) async throws -> String {
         guard isDriverInstalled else { throw CUPSError.driverNotInstalled }
-        guard let uri = try await deviceURI(for: printer.descriptor) else { throw CUPSError.noDeviceURI }
+        guard let uri = try await deviceURI(for: printer.descriptor, resume: printer.settings.resumeAfterError) else {
+            throw CUPSError.noDeviceURI
+        }
         guard let ppd = ppdURL(modelID: printer.modelID, resolution: printer.resolution, language: printer.language) else {
             throw CUPSError.noPPD(printer.name)
         }
@@ -219,6 +242,12 @@ enum CUPSService {
                     "-D", printer.name, "-o", "printer-is-shared=false"]
         if !printer.location.isEmpty { args += ["-L", printer.location] }
         args += plan.arguments
+        // Abgeschaltetes Fortsetzen merken (bzw. die Markierung entfernen; -R nur bei vorhandenen).
+        var currentResume: String?
+        if exists { currentResume = await queueState(name).options[QueueDeviceURI.resumeOption] }
+        args += QueueDeviceURI.arguments(currentURI: nil, currentOption: currentResume,
+                                         resumeAfterError: printer.settings.resumeAfterError,
+                                         backendInstalled: isBackendInstalled)
         try await runLpadmin(args)
         // Die Warteschlange steht; abweichende Optionen gleicht der automatische Abgleich bzw.
         // „Druckeinstellungen“ erneut ab.
@@ -281,10 +310,16 @@ enum CUPSService {
         let plan = configuration.plan(removingStale: true)
         let queuePPD = try queuePPDFile(base: ppd, size: configuration.labelSize, queue: queue)
         defer { queuePPD.cleanup() }
-        var args = ["-p", queue, "-v", deviceURI, "-P", queuePPD.path]
+        // `QueueAdoption.decide` liefert `socket://`; mit Fortsetzen (und Backend) wird daraus `labelwerk://`.
+        let resume = configuration.settings.resumeAfterError && isBackendInstalled
+        let uri = QueueDeviceURI.target(for: deviceURI, resume: resume) ?? deviceURI
+        var args = ["-p", queue, "-v", uri, "-P", queuePPD.path]
         let info = description.trimmingCharacters(in: .whitespacesAndNewlines)
         if !info.isEmpty { args += ["-D", info] }
         args += plan.arguments
+        args += QueueDeviceURI.arguments(currentURI: nil, currentOption: before.options[QueueDeviceURI.resumeOption],
+                                         resumeAfterError: configuration.settings.resumeAfterError,
+                                         backendInstalled: isBackendInstalled)
         try await runLpadmin(args, allowAdminPrompt: allowAdminPrompt)
 
         let after = await queueState(queue)
@@ -341,10 +376,16 @@ enum CUPSService {
             let plan = configuration.plan(removingStale: false)
             let queuePPD = try queuePPDFile(base: ppd, size: configuration.labelSize, queue: name)
             defer { queuePPD.cleanup() }
-            var args = ["-p", name, "-E", "-v", deviceURI, "-P", queuePPD.path, "-o", "printer-is-shared=false"]
+            // Geräte-URI des Druckers, mit Fortsetzen (und Backend) als `labelwerk://`.
+            let resume = configuration.settings.resumeAfterError && isBackendInstalled
+            let uri = QueueDeviceURI.target(for: deviceURI, resume: resume) ?? deviceURI
+            var args = ["-p", name, "-E", "-v", uri, "-P", queuePPD.path, "-o", "printer-is-shared=false"]
             if !info.isEmpty { args += ["-D", info] }
             if !location.isEmpty { args += ["-L", location] }
             args += plan.arguments
+            args += QueueDeviceURI.arguments(currentURI: nil, currentOption: nil,
+                                             resumeAfterError: configuration.settings.resumeAfterError,
+                                             backendInstalled: isBackendInstalled)
             try await runLpadmin(args, allowAdminPrompt: allowAdminPrompt)
             let after = await queueState(name)
             if after.isKnown {
@@ -359,9 +400,10 @@ enum CUPSService {
             return .created
         }
         guard state.isLabelWerk else { throw CUPSError.notLabelWerkQueue(name) }
-        let outcome = try await apply(configuration, to: name, force: false, allowAdminPrompt: allowAdminPrompt)
+        // Geräte-URI (die des Druckers, `labelwerk://` bzw. `socket://`) stellt `apply` mit um.
+        let outcome = try await apply(configuration, to: name, force: false, allowAdminPrompt: allowAdminPrompt,
+                                      deviceURI: deviceURI)
         var identity: [String] = []
-        if let current = state.deviceURI, !current.isEmpty, current != deviceURI { identity += ["-v", deviceURI] }
         if !info.isEmpty, (state.info ?? "") != info { identity += ["-D", info] }
         if !identity.isEmpty {
             try await runLpadmin(["-p", name] + identity, allowAdminPrompt: allowAdminPrompt)
@@ -536,22 +578,32 @@ enum CUPSService {
     /// CUPS-PPD „Zebra ZPL Label Printer“) bleiben unverändert: Nur eine ausdrückliche Einrichtung
     /// (``installQueue(for:queueName:stock:)``) stellt eine Warteschlange auf LabelWerk um.
     ///
+    /// Geräte-URI: `socket://` ↔ `labelwerk://` nach `PrintSettings.resumeAfterError` (und installiertem
+    /// Backend), dazu der Warteschlangen-Standard `lwResumeOnError` (``QueueDeviceURI/arguments(currentURI:currentOption:resumeAfterError:backendInstalled:desiredURI:)``);
+    /// `deviceURI` gibt eine feste Soll-URI vor (Etikettentypen: die des Druckers). USB- und andere URIs
+    /// bleiben.
+    ///
     /// - Throws: `CUPSError.optionsNotApplied` (Abweichungen nach dem Abgleich), `noPPD`, `notAuthorized`,
     ///   `queueMissing`, `notLabelWerkQueue`, Fehler von `lpadmin`.
     @discardableResult
     static func apply(_ configuration: QueueConfiguration, to queue: String, force: Bool,
-                      allowAdminPrompt: Bool) async throws -> QueueApplyOutcome {
+                      allowAdminPrompt: Bool, deviceURI: String? = nil) async throws -> QueueApplyOutcome {
         let (plan, difference, state) = await check(configuration, queue: queue)
         // `lpadmin -p` legte eine fehlende Warteschlange (ohne Geräte-URI) neu an.
         guard state.isKnown else { throw CUPSError.queueMissing(queue) }
         guard state.isLabelWerk else { throw CUPSError.notLabelWerkQueue(queue) }
-        guard force || !difference.isEmpty else {
+        let deviceArguments = QueueDeviceURI.arguments(
+            currentURI: state.deviceURI, currentOption: state.options[QueueDeviceURI.resumeOption],
+            resumeAfterError: configuration.settings.resumeAfterError, backendInstalled: isBackendInstalled,
+            desiredURI: deviceURI)
+        let applyOptions = force || !difference.isEmpty
+        guard applyOptions || !deviceArguments.isEmpty else {
             return QueueApplyOutcome(changed: false, replacedPPD: false, approximated: plan.approximated,
                                      difference: difference)
         }
         var args = ["-p", queue]
         var queuePPD: QueuePPDFile?
-        if difference.needsPPD {
+        if applyOptions, difference.needsPPD {
             guard let base = basePPD(queuePPD: state.ppdText, configuration: configuration) else {
                 throw CUPSError.noPPD(queue)
             }
@@ -560,13 +612,15 @@ enum CUPSService {
             args += ["-P", file.path]
         }
         defer { queuePPD?.cleanup() }
-        args += plan.arguments
+        if applyOptions { args += plan.arguments }
+        args += deviceArguments
         try await runLpadmin(args, allowAdminPrompt: allowAdminPrompt)
 
         let after = await queueState(queue)
         let remaining = QueueDefaults.difference(plan, current: after.options, pageSizeChoices: after.pageSizeChoices)
-        // `lpoptions` nicht verfügbar oder ohne Ausgabe: nicht prüfbar.
-        if after.isKnown {
+        // `lpoptions` nicht verfügbar oder ohne Ausgabe: nicht prüfbar. Nur die Geräte-URI geändert:
+        // Optionen waren schon auf dem Stand.
+        if after.isKnown, applyOptions {
             var failed = remaining.mismatchedOptions
             if remaining.missingPageSize, !failed.contains(QueueDefaults.pageSizeOption) {
                 failed.append(QueueDefaults.pageSizeOption)

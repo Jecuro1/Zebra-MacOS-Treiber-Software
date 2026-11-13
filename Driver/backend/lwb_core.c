@@ -230,6 +230,25 @@ static size_t read_number(const uint8_t *data, size_t len, size_t i, long *value
     return j;
 }
 
+bool lwb_segment_is_download(const uint8_t *data, size_t len, lwb_prefixes prefixes)
+{
+    size_t i = 0;
+    while (i < len) {
+        int c = data[i];
+        if (c < 0x09 || (c >= 0x0E && c < 0x20)) {
+            /* STX/ETX kommen in ZPL-Aufträgen nicht vor; alles andere Binäre auch nicht. */
+            return true;
+        }
+        scan_result r = scan_command(data, len, i, true, &prefixes);
+        if (r.step == SCAN_COMMAND && !r.format && r.cmd[0] == 'D' &&
+            (r.cmd[1] == 'G' || r.cmd[1] == 'Y' || r.cmd[1] == 'B' || r.cmd[1] == 'S' || r.cmd[1] == 'T' ||
+             r.cmd[1] == 'U' || r.cmd[1] == 'N'))
+            return true;
+        i = r.next > len ? len : r.next;
+    }
+    return false;
+}
+
 void lwb_format_analyze(const uint8_t *data, size_t len, lwb_prefixes prefixes, lwb_format_info *info)
 {
     memset(info, 0, sizeof(*info));
@@ -465,6 +484,7 @@ bool lwb_parse_host_status(const uint8_t *data, size_t len, lwb_host_status *sta
     status->over_temperature = f1.values[11] != 0;
     status->head_open = f2.values[2] != 0;
     status->ribbon_out = f2.values[3] != 0;
+    status->thermal_transfer = f2.values[4] != 0;
     status->label_waiting = f2.values[7] != 0;
     status->labels_remaining = f2.values[8];
 
@@ -484,12 +504,89 @@ bool lwb_parse_host_status(const uint8_t *data, size_t len, lwb_host_status *sta
     return true;
 }
 
+/* ------------------------------------------------------------------------------------------ */
+/* ^HW-Antwort                                                                                */
+/* ------------------------------------------------------------------------------------------ */
+
+static bool contains_ci(const uint8_t *data, size_t len, const char *needle)
+{
+    size_t n = strlen(needle);
+    for (size_t i = 0; n > 0 && i + n <= len; i++) {
+        size_t k = 0;
+        while (k < n && upper(data[i + k]) == upper((unsigned char)needle[k]))
+            k++;
+        if (k == n)
+            return true;
+    }
+    return false;
+}
+
+/* Eintragszeile „*R:NAME.EXT  größe“ (Leerzeichen vor/nach „*“ erlaubt) mit genau `name`? */
+static bool line_lists(const uint8_t *line, size_t len, const char *name)
+{
+    size_t i = 0;
+    while (i < len && (line[i] == ' ' || line[i] == '\t'))
+        i++;
+    if (i >= len || line[i] != '*')
+        return false;
+    i++;
+    while (i < len && (line[i] == ' ' || line[i] == '\t'))
+        i++;
+    size_t start = i;
+    while (i < len && line[i] != ' ' && line[i] != '\t')
+        i++;
+    size_t n = strlen(name);
+    if (i - start != n)
+        return false;
+    for (size_t k = 0; k < n; k++) {
+        if (upper(line[start + k]) != upper((unsigned char)name[k]))
+            return false;
+    }
+    return true;
+}
+
+int lwb_parse_directory(const uint8_t *data, size_t len, const char *name, size_t *consumed)
+{
+    size_t pos = 0;
+    for (;;) {
+        const uint8_t *stx = pos < len ? memchr(data + pos, STX, len - pos) : NULL;
+        if (stx == NULL) {
+            *consumed = len;
+            return -1;
+        }
+        size_t start = (size_t)(stx - data);
+        const uint8_t *etx = memchr(data + start + 1, ETX, len - start - 1);
+        if (etx == NULL) {
+            *consumed = start;
+            return -1;
+        }
+        size_t end = (size_t)(etx - data);
+        const uint8_t *body = data + start + 1;
+        size_t body_len = end - start - 1;
+        if (!contains_ci(body, body_len, "bytes free") && !contains_ci(body, body_len, "DIR")) {
+            pos = end + 1;   /* fremder Rahmen (z. B. ~HS) */
+            continue;
+        }
+        bool found = false;
+        size_t line = 0;
+        for (size_t i = 0; i <= body_len && !found; i++) {
+            if (i == body_len || body[i] == '\r' || body[i] == '\n') {
+                found = line_lists(body + line, i - line, name);
+                line = i + 1;
+            }
+        }
+        *consumed = skip_line_end(data, len, end + 1);
+        return found ? 1 : 0;
+    }
+}
+
 unsigned lwb_status_reasons(const lwb_host_status *status)
 {
     unsigned reasons = 0;
     if (status->paper_out)
         reasons |= LWB_REASON_MEDIA_EMPTY;
-    if (status->ribbon_out)
+    /* Thermo-Direkt braucht kein Farbband: manche Modelle melden dann „Farbband leer“ ohne Folgen. */
+    if (status->ribbon_out && status->thermal_transfer)
         reasons |= LWB_REASON_RIBBON_EMPTY;
     if (status->head_open)
         reasons |= LWB_REASON_COVER_OPEN;

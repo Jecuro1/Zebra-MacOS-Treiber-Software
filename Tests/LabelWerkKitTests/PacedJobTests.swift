@@ -39,6 +39,7 @@ private actor FlakyConnection: PrinterConnection {
     private var broken = false
     private var opened = true
     private var failWriteContaining: String?
+    private var dropReplyContaining: String?
     private(set) var muted = false
     private(set) var opens = 0
 
@@ -53,6 +54,8 @@ private actor FlakyConnection: PrinterConnection {
     func failWrite(containing text: String) { failWriteContaining = text }
     /// Antworten des Druckers verwerfen (Drucker ohne `~HS`).
     func mute(_ on: Bool) { muted = on }
+    /// Antworten verwerfen, die `text` enthalten (z. B. Drucker ohne `^HW`).
+    func dropReplies(containing text: String?) { dropReplyContaining = text }
 
     /// Wie bei TCP bemerkt die Verbindung den Abbruch erst beim nächsten Lesen/Schreiben.
     var isOpen: Bool { opened }
@@ -81,6 +84,7 @@ private actor FlakyConnection: PrinterConnection {
     func read(timeout: Duration) async throws -> Data {
         guard opened, !broken else { throw TransportError.ioError("Verbindung unterbrochen") }
         let data = try await printer.read(timeout: timeout)
+        if let text = dropReplyContaining, String(decoding: data, as: UTF8.self).contains(text) { return Data() }
         return muted ? Data() : data
     }
 }
@@ -226,11 +230,12 @@ struct VirtualPrinterEngineTests {
     @Test("Mit Druckzeit meldet ~HS Formate im Puffer und Restetiketten")
     func timedStatus() async throws {
         let printer = try await KitTestSupport.makePrinter()
-        await printer.setPrintTime(.milliseconds(60))
+        await printer.setPrintTime(.milliseconds(200))
         _ = try await KitTestSupport.exchange(printer, "^XA^FO0,0^FDA^FS^PQ3^XZ^XA^FO0,0^FDB^FS^XZ")
         let status = try HostStatusParser.parse(Data(try await KitTestSupport.exchange(printer, "~HS").utf8))
         #expect(status.formatsInReceiveBuffer == 1)       // B wartet, A wird gedruckt
-        #expect(status.labelsRemainingInBatch == 4)
+        // 3 × A + 1 × B (unter Last kann das erste A schon fertig sein).
+        #expect((3...4).contains(status.labelsRemainingInBatch))
         #expect(await Paced.waitUntil { await printer.printLog == ["A", "A", "A", "B"] })
         let idle = try HostStatusParser.parse(Data(try await KitTestSupport.exchange(printer, "~HS").utf8))
         #expect(!idle.isBusy)
@@ -293,7 +298,7 @@ struct PacedJobSenderTests {
         #expect(log.events.last == .finished(printed: 6, total: 6))
         #expect(log.progress == Array(0...6))
         let received = String(decoding: await printer.receivedData, as: UTF8.self)
-        #expect(received.contains("~JA\n~SD15\n^XA^JZY^XZ\n^XA^MFF,F^XZ"))
+        #expect(received.contains("~JA\n~SD15\n^XA^JZY^XZ\n"))
     }
 
     @Test("Papier, Farbband, Druckkopf: Auftrag wartet und druckt danach jedes Etikett genau einmal",
@@ -343,7 +348,7 @@ struct PacedJobSenderTests {
 
     @Test("^PQ > 1: Fortschritt Etikett für Etikett, Papier leer mitten in der Menge")
     func quantityProgress() async throws {
-        let (printer, client) = try await makeTimedPrinter(printTime: .milliseconds(25))
+        let (printer, client) = try await makeTimedPrinter(printTime: .milliseconds(60))
         await printer.scheduleFault(.mediaOut, afterLabels: 4, clearAfter: .milliseconds(100))
         let log = EventLog()
         let result = try await PacedJobSender(client: client, options: Paced.options)
@@ -446,5 +451,120 @@ struct PacedJobSenderTests {
         _ = try await job.value
         #expect(log.contains { $0 == .resending(labels: 3) })
         #expect(await printer.printLog == Array(repeating: "P1", count: 5))
+    }
+
+    @Test("Nur die Verbindung bricht bei „Papier leer“ ab, Rolle wird währenddessen eingelegt: nichts doppelt")
+    func networkDropDuringFault() async throws {
+        let printer = try await KitTestSupport.makePrinter()
+        await printer.setPrintTime(.milliseconds(5))
+        await printer.scheduleFault(.mediaOut, afterLabels: 2)
+        let flaky = FlakyConnection(printer: printer)
+        let client = await KitTestSupport.makeClient(flaky)
+        var options = Paced.options
+        options.reconnectDelay = .milliseconds(300)
+        let log = EventLog()
+        let job = Task {
+            try await PacedJobSender(client: client, options: options)
+                .send(Paced.job(labels: 1, quantity: 5, prefix: "P"), onEvent: log.append)
+        }
+        #expect(await Paced.waitUntil { log.waitReasons == [.mediaOut] })
+        // WLAN weg, Drucker bleibt an: Er behält den Puffer und druckt nach dem Einlegen allein weiter.
+        await flaky.breakConnection()
+        await printer.setMediaOut(false)
+        let result = try await job.value
+        #expect(await printer.printLog == Array(repeating: "P1", count: 5))
+        #expect(!log.contains { if case .resending = $0 { return true } else { return false } })
+        #expect(result.uncertain == 0)
+        #expect(log.contains { $0 == .reconnected })
+    }
+
+    @Test("Drucker mitten in der Menge ohne Fehler aus- und eingeschaltet: Rest erneut gesendet")
+    func restartWithoutFault() async throws {
+        let printer = try await KitTestSupport.makePrinter()
+        await printer.setPrintTime(.milliseconds(60))
+        await printer.setReprintAfterError(false)
+        let flaky = FlakyConnection(printer: printer)
+        let client = await KitTestSupport.makeClient(flaky)
+        let log = EventLog()
+        let job = Task {
+            try await PacedJobSender(client: client, options: Paced.options)
+                .send(Paced.job(labels: 1, quantity: 5, prefix: "P"), onEvent: log.append)
+        }
+        #expect(await Paced.waitUntil { await printer.printLog.count >= 2 })
+        try await Task.sleep(for: .milliseconds(25))   // der Sender hat „3 Restexemplare“ gesehen
+        await flaky.breakConnection()
+        await printer.restartDevice()
+        _ = try await job.value
+        #expect(log.contains { $0 == .resending(labels: 3) })
+        #expect(await printer.printLog == Array(repeating: "P1", count: 5))
+        #expect(await printer.reprintsAfterError, "^JZY nach dem Neustart nicht erneut gesetzt")
+    }
+
+    @Test("Drucker ohne ^HW-Antwort: nach einem Abbruch nichts wiederholen, sondern melden")
+    func markerUnsupported() async throws {
+        let printer = try await KitTestSupport.makePrinter()
+        await printer.setPrintTime(.milliseconds(5))
+        await printer.scheduleFault(.mediaOut, afterLabels: 2)
+        let flaky = FlakyConnection(printer: printer)
+        await flaky.dropReplies(containing: "bytes free")
+        let client = await KitTestSupport.makeClient(flaky)
+        var options = Paced.options
+        options.reconnectDelay = .milliseconds(300)
+        let log = EventLog()
+        let job = Task {
+            try await PacedJobSender(client: client, options: options)
+                .send(Paced.job(labels: 1, quantity: 5, prefix: "P"), onEvent: log.append)
+        }
+        #expect(await Paced.waitUntil { log.waitReasons == [.mediaOut] })
+        await flaky.breakConnection()
+        await printer.setMediaOut(false)
+        let result = try await job.value
+        #expect(await printer.printLog == Array(repeating: "P1", count: 5))
+        #expect(log.contains { $0 == .uncertain(labels: 3) })
+        #expect(result.uncertain == 3)
+    }
+}
+
+@Suite("Neustart-Merker – Befehle und ^HW-Antwort")
+struct VolatileMarkerTests {
+
+    @Test("Befehle mit Standard- und eigenen Steuerzeichen")
+    func commands() {
+        #expect(VolatileMarker.storeCommand("R:LWAPP.GRF", characters: .standard) == "~DGR:LWAPP.GRF,1,1,00\n")
+        #expect(VolatileMarker.queryCommand("R:LWAPP.GRF", characters: .standard) == "^XA^HWR:LWAPP.GRF^XZ\n")
+        #expect(VolatileMarker.deleteCommand("R:LWAPP.GRF", characters: .standard) == "^XA^IDR:LWAPP.GRF^XZ\n")
+        let custom = ControlCharacters(formatPrefix: UInt8(ascii: "!"), controlPrefix: UInt8(ascii: "#"),
+                                       delimiter: UInt8(ascii: ";"))
+        #expect(VolatileMarker.storeCommand("R:LWAPP.GRF", characters: custom) == "#DGR:LWAPP.GRF;1;1;00\n")
+        #expect(VolatileMarker.queryCommand("R:LWAPP.GRF", characters: custom) == "!XA!HWR:LWAPP.GRF!XZ\n")
+    }
+
+    @Test("Dateiliste auswerten: Eintrag, nur Kopfzeile, ähnlicher Name, ~HS davor, unvollständig")
+    func parsing() {
+        let present = Data("\u{02}\r\n- DIR R:LWAPP.GRF\r\n*R:LWAPP.GRF        1\r\n\r\n-  794292 bytes free R:RAM\r\n\u{03}\r\n".utf8)
+        #expect(VolatileMarker.listed("R:LWAPP.GRF", in: present) == true)
+        #expect(VolatileMarker.replyComplete(present))
+        let absent = Data("\u{02}\r\n- DIR R:LWAPP.GRF\r\n\r\n-  794293 bytes free R:RAM\r\n\u{03}".utf8)
+        #expect(VolatileMarker.listed("R:LWAPP.GRF", in: absent) == false)
+        let similar = Data("\u{02}- DIR R:*.*\r\n*R:LWAPP.GRF2 1\r\n-1 bytes free\u{03}".utf8)
+        #expect(VolatileMarker.listed("R:LWAPP.GRF", in: similar) == false)
+        let hostStatus = Data("\u{02}030,0,0,0609,000,0,0,0,000,0,0,0\u{03}\r\n".utf8)
+        #expect(VolatileMarker.listed("R:LWAPP.GRF", in: hostStatus) == nil)
+        #expect(!VolatileMarker.replyComplete(hostStatus))
+        #expect(VolatileMarker.listed("R:LWAPP.GRF", in: hostStatus + present) == true)
+        #expect(!VolatileMarker.replyComplete(present.prefix(present.count - 4)))
+    }
+
+    @Test("Virtueller Drucker: Merker im RAM, nach Neustart weg")
+    func virtualPrinter() async throws {
+        let printer = try await KitTestSupport.makePrinter()
+        let client = await KitTestSupport.makeClient(printer)
+        try await client.storeVolatileMarker("R:LWAPP.GRF", characters: .standard)
+        #expect(try await client.volatileMarkerExists("R:LWAPP.GRF", characters: .standard, timeout: .seconds(2)) == true)
+        await printer.restartDevice()
+        #expect(try await client.volatileMarkerExists("R:LWAPP.GRF", characters: .standard, timeout: .seconds(2)) == false)
+        try await client.storeVolatileMarker("R:LWAPP.GRF", characters: .standard)
+        await client.deleteVolatileMarker("R:LWAPP.GRF", characters: .standard)
+        #expect(try await client.volatileMarkerExists("R:LWAPP.GRF", characters: .standard, timeout: .seconds(2)) == false)
     }
 }

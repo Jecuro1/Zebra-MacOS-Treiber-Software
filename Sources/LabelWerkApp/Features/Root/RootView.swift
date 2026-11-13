@@ -18,6 +18,12 @@ struct RootView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .background(MainWindowRegistrar())
+        .overlay(alignment: .top) {
+            // Laufende Druckaufträge: „Etikett 37 von 50“, bei Papier leer … ein deutlicher Hinweis.
+            PrintJobBannerStack()
+                .padding(.top, 12)
+                .padding(.horizontal, Theme.Metrics.paddingLarge)
+        }
         .overlay(alignment: .bottomTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
                 // „Update verfügbar“ (Update-Dienst) über den Hinweisen.

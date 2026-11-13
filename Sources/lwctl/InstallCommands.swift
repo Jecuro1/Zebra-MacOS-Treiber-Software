@@ -36,8 +36,12 @@ enum InstallCommands {
     struct InstallPlan: Encodable {
         /// Drucker-URI wie bei `--printer`, z. B. `tcp://192.168.1.50:9100`.
         var printer: String
-        /// Geräte-URI der Warteschlange, z. B. `socket://192.168.1.50:9100`.
+        /// Geräte-URI der Warteschlange, z. B. `labelwerk://192.168.1.50:9100` (Backend: Druck geht nach
+        /// Papier- oder Farbbandende weiter) bzw. `socket://192.168.1.50:9100`.
         var deviceURI: String
+        /// „Bei Papier- oder Farbbandende anhalten und fortsetzen“ (`--resume`/`--no-resume`; ohne Angabe
+        /// an, bei einer vorhandenen Warteschlange wie bisher). Wirkt nur mit installiertem Backend.
+        var resumeAfterError: Bool
         var queue: String
         var description: String
         var location: String?
@@ -193,6 +197,10 @@ enum InstallCommands {
         let setDefault = arguments.has("default")
         let testPage = arguments.has("test-page")
         let replace = arguments.has("replace")
+        if arguments.has("resume"), arguments.has("no-resume") {
+            throw CLIError.usage("--resume und --no-resume schließen sich aus.")
+        }
+        let resumeFlag: Bool? = arguments.has("no-resume") ? false : (arguments.has("resume") ? true : nil)
 
         // 3. Modell, Auflösung und Sprache vom Drucker erkennen (--model auto).
         var identity: PrinterIdentity?
@@ -264,7 +272,9 @@ enum InstallCommands {
         let modelLabel = model?.displayName
             ?? identity?.model.map { "Zebra \($0)" }
             ?? "Zebra-Etikettendrucker \(queueLanguage.displayName)"
-        let deviceURI = "socket://\(host.contains(":") ? "[\(host)]" : host):\(port)"
+        // Zum Vergleich mit vorhandenen Warteschlangen; socket:// und labelwerk:// gelten als dasselbe Gerät.
+        // Die endgültige URI (labelwerk:// bzw. socket://) steht fest, sobald die Warteschlange bekannt ist.
+        var deviceURI = QueueDeviceURI.networkURI(host: host, port: port, resume: false)
         var queue: String
         var description: String
         if let requestedName {
@@ -373,6 +383,18 @@ enum InstallCommands {
             }
         }
 
+        // Backend labelwerk (ARCHITECTURE.md §10): labelwerk://, sofern installiert und nicht abgeschaltet.
+        // Ohne --resume/--no-resume bleibt die Wahl einer vorhandenen Warteschlange (lwResumeOnError=False).
+        let resumeOption = existing?.options[QueueDeviceURI.resumeOption]
+        let resumeAfterError = resumeFlag ?? !QueueDeviceURI.isResumeDisabled(optionValue: resumeOption)
+        let backendPath = ProcessInfo.processInfo.environment["LWCTL_CUPS_BACKEND"] ?? QueueDeviceURI.backendPath
+        let backendInstalled = FileManager.default.isExecutableFile(atPath: backendPath)
+        if resumeAfterError, !backendInstalled, resumeFlag == true {
+            warn("Das Backend \(backendPath) fehlt (LabelWerk-Treiber zu alt) – die Warteschlange druckt über socket:// "
+                 + "ohne Fortsetzen nach Papier- oder Farbbandende.")
+        }
+        deviceURI = QueueDeviceURI.networkURI(host: host, port: port, resume: resumeAfterError && backendInstalled)
+
         // 7. Befehle.
         let lpadmin = ToolRunner.locate("lpadmin", fallbacks: lpadminFallbacks)
         var queueArguments = ["-p", queue, "-E", "-v", deviceURI, "-P", queuePPD, "-D", description]
@@ -393,6 +415,12 @@ enum InstallCommands {
             }
         }
         if let explicitLanguage, generic == nil { queueArguments += ["-o", "lwLanguage=\(explicitLanguage.cupsValue)"] }
+        if !resumeAfterError {
+            // Merkt die Wahl: Treiber-Updates (postinstall) und die App stellen nicht auf labelwerk:// um.
+            queueArguments += ["-o", "\(QueueDeviceURI.resumeOption)-default=False"]
+        } else if existing != nil, resumeOption != nil {
+            queueArguments += ["-R", "\(QueueDeviceURI.resumeOption)-default"]
+        }
         var commands: [[String]] = [[lpadmin] + queueArguments]
         if setDefault { commands.append([lpadmin, "-d", queue]) }
         var temporaryTestPage: String?
@@ -409,7 +437,8 @@ enum InstallCommands {
         }
 
         var plan = InstallPlan(
-            printer: descriptor.uriString, deviceURI: deviceURI, queue: queue, description: description,
+            printer: descriptor.uriString, deviceURI: deviceURI, resumeAfterError: resumeAfterError,
+            queue: queue, description: description,
             location: (location?.isEmpty ?? true) ? nil : location, existing: existing != nil, reused: reused,
             keptSettings: keptSettings, detected: autoDetect,
             detectedProduct: identity?.model, serialNumber: identity?.serialNumber,

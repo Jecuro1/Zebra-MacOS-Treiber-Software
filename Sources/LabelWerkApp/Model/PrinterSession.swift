@@ -38,6 +38,19 @@ final class PrinterSession: Identifiable {
     private(set) var lastUpdated: Date?
     /// In dieser Sitzung gedruckte Etiketten.
     private(set) var labelsPrintedThisSession = 0
+    /// Laufender Druckauftrag, der Etikett für Etikett gesendet wird (`PrinterSession+PrintJob.swift`):
+    /// Fortschritt „Etikett 37 von 50“, Wartegrund (Papier leer …). Nur dort ändern.
+    var printJob: PrintJobProgress?
+    /// Aufträge, die auf das Ende des laufenden warten.
+    var queuedPrintJobs = 0
+
+    @ObservationIgnored var printJobTask: Task<PacedJobResult, Error>?
+    /// Ende der Kette nacheinander auszuführender Druckaufträge.
+    @ObservationIgnored var printJobTail: Task<Void, Never>?
+    /// Kennungen der Aufträge, die noch auf ihren Beginn warten, und der davon verworfenen
+    /// (`cancelWaitingPrintJobs()`).
+    @ObservationIgnored var waitingPrintJobIDs: Set<UUID> = []
+    @ObservationIgnored var cancelledPrintJobIDs: Set<UUID> = []
 
     @ObservationIgnored weak var app: AppModel?
     @ObservationIgnored private var client: PrinterClient?
@@ -343,7 +356,12 @@ final class PrinterSession: Identifiable {
             if Date() < until { return }
             alertsMutedUntil = nil
         }
-        let relevant = newAlerts.filter { $0.severity >= .warning }
+        var relevant = newAlerts.filter { $0.severity >= .warning }
+        if printJob != nil {
+            // Während eines Auftrags meldet der Hinweis „Papier leer – neue Etikettenrolle einlegen …“
+            // (samt Mitteilung im Hintergrund) dieselben Zustände – nicht doppelt melden.
+            relevant.removeAll { PrintJobProgress.coveredAlertKinds.contains($0.kind) }
+        }
         guard !relevant.isEmpty, let app else { return }
         for alert in relevant {
             app.toast(tr("%@: %@", displayName, tr(alert.title)), message: tr(alert.recovery),
@@ -393,6 +411,13 @@ final class PrinterSession: Identifiable {
             }
             return nil
         }
+    }
+
+    /// Fortschritt der laufenden Operation (0…1, `nil` = unbestimmt) – für Erweiterungen in anderen
+    /// Dateien (z. B. den Etikettenfortschritt in `PrinterSession+PrintJob.swift`).
+    func setActivityProgress(_ value: Double?) {
+        guard activity != nil, progress != value else { return }
+        animate(.linear(duration: 0.2)) { progress = value }
     }
 
     /// Wie `run`, für Erweiterungen in anderen Dateien (z. B. `PrinterSession+Preferences.swift`).
@@ -449,13 +474,16 @@ final class PrinterSession: Identifiable {
             payload = Self.applyingQuantity(copies, to: zpl)
         }
         let data = Data(payload.utf8)
-        let labelCount = max(1, payload.components(separatedBy: "^XZ").count - 1) * max(1, copies)
-        let ok = await run(tr("Etikett wird gedruckt …")) { client in
-            try await client.send(data)
-        } != nil
-        let preview = ok ? await Self.previewPNG(zpl: zpl, dotsPerMM: resolution.dotsPerMM) : nil
-        recordJob(.zpl, title: title, labels: labelCount, bytes: data.count, success: ok,
-                  message: ok ? nil : lastError, preview: preview, payload: data)
+        let estimate = max(1, payload.components(separatedBy: "^XZ").count - 1) * max(1, copies)
+        let planned = PacedJobPlan.split(data).totalLabels
+        // Etikett für Etikett, mit Warten bei Papier leer … (`PrinterSession+PrintJob.swift`).
+        let outcome = await transmitPrintJob(data, title: title, labels: planned > 0 ? planned : estimate,
+                                             characters: nil, cancelPrefix: nil, delay: 0,
+                                             activity: tr("Etikett wird gedruckt …"))
+        let ok = outcome.succeeded
+        let preview = outcome.printedLabels > 0 || ok ? await Self.previewPNG(zpl: zpl, dotsPerMM: resolution.dotsPerMM) : nil
+        recordJob(.zpl, title: title, labels: outcome.printedLabels, bytes: data.count, success: ok,
+                  message: outcome.historyMessage, preview: preview, payload: data)
         if ok { app?.toast(tr("Gedruckt"), message: title, style: .success) }
         return ok
     }
@@ -484,12 +512,15 @@ final class PrinterSession: Identifiable {
         // warten, dann den Rest – wie der CUPS-Filter (ARCHITECTURE.md §8).
         let cancelPrefix = encoder.cancelPrefixLength()
         let delay = effective.clamped().cancelDelayMs
-        let ok = await run(tr("Bild wird gedruckt …")) { client in
-            try await client.sendJob(data, cancelPrefixLength: cancelPrefix, delayMilliseconds: delay)
-        } != nil
-        let preview = ok ? await Self.previewPNG(image: images[0]) : nil
-        recordJob(.image, title: title, labels: images.count * max(1, copies), bytes: data.count,
-                  success: ok, message: ok ? nil : lastError, preview: preview, payload: data)
+        // Etikett für Etikett, mit Warten bei Papier leer … (`PrinterSession+PrintJob.swift`).
+        let outcome = await transmitPrintJob(data, title: title, labels: images.count * max(1, copies),
+                                             characters: effective.effectiveControlCharacters,
+                                             cancelPrefix: cancelPrefix, delay: delay,
+                                             activity: tr("Bild wird gedruckt …"))
+        let ok = outcome.succeeded
+        let preview = ok || outcome.printedLabels > 0 ? await Self.previewPNG(image: images[0]) : nil
+        recordJob(.image, title: title, labels: outcome.printedLabels, bytes: data.count,
+                  success: ok, message: outcome.historyMessage, preview: preview, payload: data)
         if ok { app?.toast(tr("Gedruckt"), message: title, style: .success) }
         return ok
     }
@@ -524,11 +555,13 @@ final class PrinterSession: Identifiable {
         // ersten Druck nach ihr warten (Verzögerung aus den aktuellen Treibereinstellungen).
         let cancelPrefix = job.kind == .image ? PrinterClient.cancelPrefixLength(of: payload) : nil
         let delay = saved.settings.clamped().cancelDelayMs
-        let ok = await run(tr("Auftrag wird erneut gesendet …")) { client in
-            try await client.sendJob(payload, cancelPrefixLength: cancelPrefix, delayMilliseconds: delay)
-        } != nil
-        recordJob(job.kind, title: job.title, labels: job.labels, bytes: payload.count, success: ok,
-                  message: ok ? nil : lastError, preview: job.previewPNG, payload: payload)
+        let planned = saved.language == .zpl ? PacedJobPlan.split(payload).totalLabels : 0
+        let outcome = await transmitPrintJob(payload, title: job.title, labels: planned > 0 ? planned : job.labels,
+                                             characters: nil, cancelPrefix: cancelPrefix, delay: delay,
+                                             activity: tr("Auftrag wird erneut gesendet …"))
+        let ok = outcome.succeeded
+        recordJob(job.kind, title: job.title, labels: outcome.printedLabels, bytes: payload.count, success: ok,
+                  message: outcome.historyMessage, preview: job.previewPNG, payload: payload)
         if ok { app?.toast(tr("Erneut gedruckt"), message: job.title, style: .success) }
         return ok
     }

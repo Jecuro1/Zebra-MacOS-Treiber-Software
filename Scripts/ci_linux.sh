@@ -38,7 +38,8 @@ Schritte (Standard: alle, in dieser Reihenfolge):
   catalog       Modellkatalog: ModelCatalogData.swift aktuell?
   build         swift build (inkl. Tests und lwctl)
   test-swift    swift test
-  test-driver   CUPS-Filter: make -C Driver/filter test
+  test-driver   CUPS-Filter und -Backend: make -C Driver/filter test, make -C Driver/backend test
+                (Backend: C-Unit-Tests und End-to-End-Tests mit nachgebildetem Zebra-Drucker)
   test-ppd      PPDs erzeugen, mit cupstestppd prüfen, Generator-Tests
   test-scripts  Tests der Python- und Shell-Werkzeuge (Scripts/tests)
   driver-tree   Treiberbaum bauen (--host) und Probeläufe von App-, Paket- und Notarisierungsskript
@@ -237,7 +238,7 @@ step_lint() {
     local python_files=()
     while IFS= read -r -d '' script; do
         python_files+=("${script}")
-    done < <(find Scripts Driver/ppd Driver/filter/tests Catalog -name '*.py' -not -path '*/__pycache__/*' -print0)
+    done < <(find Scripts Driver/ppd Driver/filter/tests Driver/backend/tests Catalog -name '*.py' -not -path '*/__pycache__/*' -print0)
     if "${PYTHON}" - "${python_files[@]}" <<'PY'
 import ast, sys
 failed = False
@@ -320,6 +321,12 @@ step_test_driver() {
     fi
     lw_run make -C Driver/filter -j "${JOBS}" tests
     lw_run make -C Driver/filter test
+    if [[ ! -f Driver/backend/Makefile ]]; then
+        lw_ci_warning "Driver/backend/Makefile fehlt – Backendtests übersprungen."
+        return 0
+    fi
+    lw_run make -C Driver/backend -j "${JOBS}" tests
+    lw_run make -C Driver/backend test
 }
 
 step_test_ppd() {
@@ -344,10 +351,11 @@ step_driver_tree() {
     for filter in rastertolabelwerk commandtolabelwerk; do
         [[ -x "${root}/Library/Printers/LabelWerk/Filter/${filter}" ]] || lw_die "${filter} fehlt im Treiberbaum."
     done
+    [[ -x "${root}/usr/libexec/cups/backend/labelwerk" ]] || lw_die "Backend labelwerk fehlt im Treiberbaum."
     local ppds
     ppds="$(find "${root}/Library/Printers/PPDs/Contents/Resources" -name 'LabelWerk-*.ppd.gz' | wc -l | tr -d ' ')"
     [[ "${ppds}" -gt 0 ]] || lw_die "Keine PPD-Dateien im Treiberbaum."
-    lw_ok "Treiberbaum: 2 Filter, ${ppds} PPD-Dateien, Version $(cat "${root}/Library/Printers/LabelWerk/VERSION")"
+    lw_ok "Treiberbaum: 2 Filter, Backend, ${ppds} PPD-Dateien, Version $(cat "${root}/Library/Printers/LabelWerk/VERSION")"
     # Die macOS-Skripte müssen auch hier fehlerfrei durchlaufen (nur Anzeige der Befehle).
     lw_run Scripts/build_app.sh --dry-run --skip-driver --output "${CI_TMP}/dry"
     lw_run Scripts/make_pkg.sh --dry-run --skip-build --output "${CI_TMP}/dry"
@@ -355,6 +363,7 @@ step_driver_tree() {
     # Deinstallation gegen den eben gebauten Baum als Testwurzel.
     lw_run Scripts/uninstall.sh --root "${root}" --yes
     [[ ! -e "${root}/Library/Printers/LabelWerk" ]] || lw_die "uninstall.sh hat den Treiber nicht entfernt."
+    [[ ! -e "${root}/usr/libexec/cups/backend/labelwerk" ]] || lw_die "uninstall.sh hat das Backend nicht entfernt."
     lw_ok "Deinstallation (Testwurzel) erfolgreich"
 }
 

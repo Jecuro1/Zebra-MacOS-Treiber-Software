@@ -360,6 +360,15 @@ struct PrintPrefsOptionsPane: View {
                 }
             }
 
+            PrintPrefsGroup(tr("Papier- oder Farbbandende"), systemImage: "arrow.clockwise.circle") {
+                PrintPrefsRow(.resumeAfterError, context: context, note: resumeNote) {
+                    PrintPrefsSwitch(isOn: context.binding(\.settings.resumeAfterError),
+                                     caption: settings.resumeAfterError
+                                         ? tr("Der Druck geht nach dem Einlegen automatisch weiter")
+                                         : tr("Auftrag gilt als erledigt, sobald die Daten beim Drucker sind"))
+                }
+            }
+
             PrintPrefsGroup(tr("Aufträge vor dem Drucken abbrechen"), systemImage: "xmark.bin") {
                 PrintPrefsRow(.cancelJobs, context: context,
                               note: editor.draft.language == .cpcl ? tr("Wirkt nur bei ZPL und EPL.") : nil) {
@@ -415,6 +424,17 @@ struct PrintPrefsOptionsPane: View {
     }
 
     // MARK: Hinweise
+
+    /// Hinweis zu „Bei Papier- oder Farbbandende anhalten und fortsetzen“: wirkt nur mit ZPL, für
+    /// macOS-Warteschlangen nur mit installiertem Backend (älterer Treiber: socket://).
+    private var resumeNote: String? {
+        guard settings.resumeAfterError else { return nil }
+        if editor.draft.language != .zpl { return tr("Wirkt nur bei ZPL.") }
+        if CUPSService.isDriverInstalled, !CUPSService.isBackendInstalled {
+            return tr("Für macOS-Drucker den LabelWerk-Treiber aktualisieren (Backend „labelwerk“ fehlt).")
+        }
+        return nil
+    }
 
     private var darknessNote: String? {
         guard let darkness = settings.darkness else { return nil }

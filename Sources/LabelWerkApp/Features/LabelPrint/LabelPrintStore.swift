@@ -434,6 +434,9 @@ final class LabelPrintStore {
             case .failed(let message):
                 animate { printPhase = .failure(message) }
                 model?.toast(tr("Drucken fehlgeschlagen"), message: message, style: .error)
+            case .cancelled(let printed, let total):
+                // Den Hinweis „Druck abgebrochen“ zeigt die Druckersitzung.
+                animate { printPhase = .failure(tr("Abgebrochen – %d von %d Etiketten gedruckt.", printed, total)) }
             }
             try? await Task.sleep(for: .seconds(2.4))
             if case .sending = printPhase { return }

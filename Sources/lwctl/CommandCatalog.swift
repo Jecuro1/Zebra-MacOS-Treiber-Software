@@ -127,7 +127,7 @@ enum CommandCatalog {
             Verbindet sich mit dem Drucker, erkennt Modell, Auflösung und Druckersprache (--model auto),
             wählt die passende LabelWerk-PPD (LabelWerk-<modell>-<dpi>dpi, sonst eine generische PPD wie
             LabelWerk-generic-zpl-203dpi) und legt mit lpadmin eine Warteschlange an (Geräte-URI
-            socket://HOST:PORT, nicht freigegeben). Danach steht der Drucker unter „Drucker & Scanner“ und
+            labelwerk://HOST:PORT, nicht freigegeben). Danach steht der Drucker unter „Drucker & Scanner“ und
             in jedem Druckdialog bereit. Jeder ausgeführte Befehl wird angezeigt; --dry-run zeigt ihn nur an.
 
             Ohne Verbindung (z. B. zum Vorbereiten vieler Macs) das Modell mit --model angeben
@@ -149,6 +149,13 @@ enum CommandCatalog {
             Seiten anderer Größe (A4, Letter …) automatisch an das Etikett anpasst. Eine früher
             ergänzte Größe bleibt bei einer Aktualisierung ohne --stock/--size erhalten; fehlen
             lwLabelWidth/lwLabelHeight, gelten die Maße der Standard-Seitengröße der Warteschlange.
+
+            Papier- oder Farbbandende: Mit dem Backend labelwerk:// (Teil des Treibers) bleibt ein Auftrag
+            in der macOS-Warteschlange, bis jedes Etikett gedruckt ist; geht das Papier oder Farbband aus,
+            meldet macOS „Kein Papier“ bzw. „Farbband leer“, und nach dem Einlegen geht der Druck genau
+            dort weiter. --no-resume richtet stattdessen socket://HOST:PORT ein (Auftrag erledigt, sobald
+            die Daten beim Drucker sind) und merkt das in der Warteschlange (lwResumeOnError=False);
+            --resume schaltet es wieder ein. Ohne Angabe bleibt die Wahl einer vorhandenen Warteschlange.
             """,
             options: [
                 OptionSpec("model", short: "m", value: "auto|id|generic",
@@ -161,6 +168,8 @@ enum CommandCatalog {
                 OptionSpec("stock", short: "s", value: "id", "Etikettenformat als Standard-Papiergröße (Liste: lwctl stocks)"),
                 OptionSpec("size", value: "BxH(mm|in)",
                            "Eigene Etikettengröße als Standard-Papiergröße, z. B. 104x76.2mm oder 4x3in (statt --stock)"),
+                OptionSpec("no-resume", "socket:// statt labelwerk:// – Auftrag nicht bis zum letzten Etikett in der Warteschlange halten"),
+                OptionSpec("resume", "labelwerk:// (Standard): bei Papier- oder Farbbandende anhalten und danach fortsetzen"),
                 OptionSpec("default", "Als Standarddrucker festlegen"),
                 OptionSpec("test-page", "Danach eine Testseite über die neue Warteschlange drucken"),
                 OptionSpec("ppd-dir", value: "ordner", "Ordner mit den LabelWerk-PPDs (Standard: \(InstallCommands.defaultPPDDirectory))"),

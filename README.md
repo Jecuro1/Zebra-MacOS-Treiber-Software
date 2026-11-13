@@ -151,6 +151,7 @@ Sources/
                               Onboarding, MenuBar, Settings, Root
 Tests/                        Swift-Testing-Tests je Kernmodul (<Modul>Tests)
 Driver/filter/                CUPS-Filter in C (+ Tests, Python-Referenz-Encoder)
+Driver/backend/               CUPS-Backend labelwerk:// in C (Druck geht nach Papierende weiter; Tests mit Zebra-Nachbau)
 Driver/ppd/                   PPD-Generator
 Installer/                    config.env, Info.plist, Berechtigungen, Symbole, Lokalisierung (de/en), Paket
 Scripts/                      Bauen, Paket, Notarisierung, Symbole, Lokalisierung, CI (+ Tests)

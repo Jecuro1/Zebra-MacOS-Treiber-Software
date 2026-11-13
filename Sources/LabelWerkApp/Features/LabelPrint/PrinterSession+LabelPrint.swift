@@ -20,6 +20,8 @@ extension PrinterSession {
     enum LabelPrintOutcome: Equatable {
         case printed(LabelPrintRoute)
         case failed(String)
+        /// Mit „Abbrechen“ beendet (gedruckte Etiketten, Etiketten des Auftrags).
+        case cancelled(printed: Int, total: Int)
     }
 
     /// Ziel für einen Druck mit `type` (`nil` = Standard des Druckers): Einstellungen, Format und
@@ -54,11 +56,21 @@ extension PrinterSession {
         if connectionState != .connected { await connect() }
 
         var outcome: LabelPrintOutcome
+        var printedLabels = 0
+        var jobMessage: String?
         if connectionState == .connected {
-            let ok = await withClient(tr("Etiketten werden gedruckt …"), quiet: true) { client in
-                try await client.sendJob(data, cancelPrefixLength: cancelPrefix, delayMilliseconds: delay)
-            } != nil
-            outcome = ok ? .printed(.direct) : .failed(lastError ?? tr("Der Drucker hat den Auftrag nicht angenommen."))
+            // Etikett für Etikett, mit Warten bei Papier leer … (`PrinterSession+PrintJob.swift`).
+            let result = await transmitPrintJob(data, title: title, labels: labels,
+                                                characters: target.settings.effectiveControlCharacters,
+                                                cancelPrefix: cancelPrefix, delay: delay,
+                                                activity: tr("Etiketten werden gedruckt …"), quiet: true)
+            printedLabels = result.printedLabels
+            jobMessage = result.historyMessage
+            switch result {
+            case .printed: outcome = .printed(.direct)
+            case .cancelled(let printed, let total): outcome = .cancelled(printed: printed, total: total)
+            case .failed(let message, _, _): outcome = .failed(message)
+            }
         } else {
             outcome = .failed(lastError ?? tr("Der Drucker ist nicht erreichbar."))
             for queue in labelPrintFallbackQueues(for: type) {
@@ -81,17 +93,21 @@ extension PrinterSession {
             message = nil
         case .printed(.queue(let queue)):
             ok = true
+            printedLabels = labels
             message = tr("Über die macOS-Warteschlange „%@“ gesendet (Drucker nicht direkt erreichbar).", queue)
         case .failed(let error):
             ok = false
-            message = error
+            message = jobMessage ?? error
+        case .cancelled:
+            ok = false
+            message = jobMessage
         }
         var thumbnail: Data?
-        if ok, let preview { thumbnail = await Self.previewPNG(image: preview) }
-        // Wie jeder andere Druck der App: Verlauf (Nutzdaten nur bis zur Größengrenze), Zähler
-        // „In dieser Sitzung“ und Ton.
-        recordJob(.image, title: title, labels: ok ? labels : 0, bytes: data.count, success: ok,
-                  message: message, preview: thumbnail, payload: ok ? data : nil)
+        if ok || printedLabels > 0, let preview { thumbnail = await Self.previewPNG(image: preview) }
+        // Wie jeder andere Druck der App: Verlauf mit den tatsächlich gedruckten Etiketten (Nutzdaten nur
+        // bis zur Größengrenze), Zähler „In dieser Sitzung“ und Ton.
+        recordJob(.image, title: title, labels: printedLabels, bytes: data.count, success: ok,
+                  message: message, preview: thumbnail, payload: ok || printedLabels > 0 ? data : nil)
         return outcome
     }
 

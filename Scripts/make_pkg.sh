@@ -7,7 +7,8 @@
 #
 #   LabelWerkApp.pkg      build/LabelWerk.app → /Applications (nicht verschiebbar, „upgrade“,
 #                         Versionsprüfung: höhere Build-Nummer bei gleicher Version ersetzt die App)
-#   LabelWerkDriver.pkg   build/driver-root → / (Filter, PPDs, Symbol, VERSION)
+#   LabelWerkDriver.pkg   build/driver-root → / (Filter, PPDs, Symbol, VERSION, Backend
+#                         /usr/libexec/cups/backend/labelwerk)
 #                         mit preinstall (alte Version entfernen) und postinstall (Rechte,
 #                         cupsd-Neustart, vorhandene Warteschlangen aktualisieren)
 #   LabelWerkCLI.pkg      ohne Nutzdaten; postinstall legt /usr/local/bin/lwctl an (optional)
@@ -109,6 +110,8 @@ fi
 lw_require_file "${APP}/Contents/Info.plist" "App-Bundle" "Zuerst Scripts/build_app.sh ausführen."
 lw_require_file "${DRIVER_ROOT}/Library/Printers/LabelWerk/Filter/rastertolabelwerk" "Treiberbaum" \
     "Zuerst Scripts/build_driver.sh ausführen."
+lw_require_file "${DRIVER_ROOT}/usr/libexec/cups/backend/labelwerk" "CUPS-Backend im Treiberbaum" \
+    "Treiber neu bauen (Scripts/build_driver.sh)."
 if [[ "${LW_DRY_RUN}" != "1" ]]; then
     bundle_version="$(plutil -extract CFBundleShortVersionString raw -o - "${APP}/Contents/Info.plist")"
     [[ "${bundle_version}" == "${VERSION}" ]] \

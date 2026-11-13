@@ -56,14 +56,14 @@ help:
 	@echo "  Tests & Prüfungen"
 	@echo "    make test           alle Tests (Swift, Filter, PPD, Werkzeuge, Katalog)"
 	@echo "    make test-swift     swift test"
-	@echo "    make test-driver    CUPS-Filter: C-Unit-Tests und End-to-End-Tests"
+	@echo "    make test-driver    CUPS-Filter und Backend: C-Unit-Tests und End-to-End-Tests"
 	@echo "    make test-ppd       PPDs erzeugen, mit cupstestppd prüfen, Generator-Tests"
 	@echo "    make test-scripts   Tests der Python- und Shell-Werkzeuge"
 	@echo "    make lint           Syntax, ShellCheck, Workflow-YAML, Lokalisierung, Katalog"
 	@echo "    make ci             kompletter CI-Lauf wie auf GitHub ($(CI_SCRIPT))"
 	@echo ""
 	@echo "  Release (macOS)"
-	@echo "    make driver         Treiberbaum nach $(DEV_ROOT) (Filter, PPDs, Symbol, VERSION)"
+	@echo "    make driver         Treiberbaum nach $(DEV_ROOT) (Filter, Backend, PPDs, Symbol, VERSION)"
 	@echo "    make app            build/LabelWerk.app (Universal Binary, signiert)"
 	@echo "    make pkg            dist/LabelWerk-<Version>.pkg"
 	@echo "    make notarize       Paket notarisieren und Ticket anheften"
@@ -116,7 +116,8 @@ test-driver:
 		echo "Hinweis: libcups-Header fehlen – Filtertests übersprungen" \
 		     "(sudo apt install libcups2-dev libcupsimage2-dev zlib1g-dev cups-client)."; \
 	else \
-		$(MAKE) -C Driver/filter $(MAKE_JOBS) tests && $(MAKE) -C Driver/filter test; \
+		$(MAKE) -C Driver/filter $(MAKE_JOBS) tests && $(MAKE) -C Driver/filter test && \
+		$(MAKE) -C Driver/backend $(MAKE_JOBS) tests && $(MAKE) -C Driver/backend test; \
 	fi
 
 test-ppd:
@@ -166,6 +167,7 @@ install-dev:
 	sudo ditto $(DEV_ROOT)/Library/Printers/LabelWerk /Library/Printers/LabelWerk
 	sudo cp $(DEV_ROOT)/Library/Printers/PPDs/Contents/Resources/LabelWerk-*.ppd.gz \
 		/Library/Printers/PPDs/Contents/Resources/
+	sudo install -m 0755 $(DEV_ROOT)/usr/libexec/cups/backend/labelwerk /usr/libexec/cups/backend/labelwerk
 	sudo Installer/pkg/scripts/driver/postinstall "" / /
 	@echo "Treiber $$(cat /Library/Printers/LabelWerk/VERSION) installiert – Protokoll: log stream --predicate 'process == \"cupsd\"'"
 
@@ -179,6 +181,7 @@ uninstall-dev:
 clean:
 	rm -rf build dist Driver/ppd/out
 	@if [ -f Driver/filter/Makefile ]; then $(MAKE) -C Driver/filter clean; fi
+	@if [ -f Driver/backend/Makefile ]; then $(MAKE) -C Driver/backend clean; fi
 	find Scripts Driver Catalog -name __pycache__ -type d -prune -exec rm -rf {} +
 
 distclean: clean

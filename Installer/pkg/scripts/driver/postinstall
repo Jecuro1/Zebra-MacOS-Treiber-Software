@@ -5,8 +5,11 @@
 #
 # Wird vom macOS-Installer als root aufgerufen: $1 = Paketpfad, $2 = Zielort, $3 = Zielvolume.
 #
-#  1. Besitzer und Rechte festziehen: CUPS führt Filter nur aus, wenn sie root:wheel gehören und
-#     weder für Gruppe noch für andere schreibbar sind (sonst „Filter … has insecure permissions“).
+#  1. Besitzer und Rechte festziehen: CUPS führt Filter und Backends nur aus, wenn sie root:wheel
+#     gehören und weder für Gruppe noch für andere schreibbar sind (sonst „… has insecure
+#     permissions“). Das Backend /usr/libexec/cups/backend/labelwerk erhält 0755: cupsd startet es
+#     dann als unprivilegierten Benutzer _lp (0700 hieße root – nicht nötig, es öffnet nur eine
+#     TCP-Verbindung zum Drucker).
 #  2. Quarantäne-Attribute entfernen.
 #  3. Nur auf dem Startvolume: cupsd neu starten, damit Filter und PPDs sofort bekannt sind, und
 #     vorhandene LabelWerk-Warteschlangen auf die neuen PPDs aktualisieren. „lpadmin -P“ übernimmt
@@ -18,6 +21,11 @@
 #     der Warteschlange lwLabelWidth/lwLabelHeight (ältere Versionen), werden sie aus ihrer
 #     Standard-Seitengröße gesetzt, damit „An Etikett anpassen“ (lwFitToLabel) greift
 #     (ARCHITECTURE.md §9 „Etikettengröße der Warteschlange“).
+#     Danach stellt es LabelWerk-Warteschlangen (PPD mit *lwModel) mit der Geräte-URI
+#     socket://host:port auf labelwerk://host:port um – das Backend, mit dem ein Auftrag nach
+#     Papier- oder Farbbandende weiterläuft (ARCHITECTURE.md §10 „Backend labelwerk“). Ausgenommen
+#     sind Warteschlangen, für die der Benutzer das abgeschaltet hat (Warteschlangen-Standard
+#     lwResumeOnError=False), und alle übrigen (USB, IPP, fremde Treiber).
 #  4. Nur auf dem Startvolume, nur bei einer Installation mit dem Installationsprogramm
 #     (Doppelklick auf das Paket) und nur, solange noch kein LabelWerk-Drucker eingerichtet ist
 #     (also nicht bei einem Update): LabelWerk für den angemeldeten Benutzer mit „--setup“ öffnen –
@@ -37,6 +45,7 @@ TARGET="${TARGET%/}"
 DRIVER_DIR="${TARGET}/Library/Printers/LabelWerk"
 PPD_DIR="${TARGET}/Library/Printers/PPDs/Contents/Resources"
 CUPS_PPD_DIR="${TARGET}/etc/cups/ppd"
+BACKEND="${TARGET}/usr/libexec/cups/backend/labelwerk"
 LPADMIN="/usr/sbin/lpadmin"
 LPSTAT="/usr/bin/lpstat"
 LPOPTIONS="/usr/bin/lpoptions"
@@ -66,11 +75,20 @@ for ppd in "${PPD_DIR}"/LabelWerk-*.ppd.gz "${PPD_DIR}"/LabelWerk-*.ppd; do
     chmod 644 "${ppd}"
     ppd_count=$((ppd_count + 1))
 done
-log "Rechte gesetzt: $(find "${DRIVER_DIR}/Filter" -type f | wc -l | tr -d ' ') Filter, ${ppd_count} PPD-Dateien."
+backend_note="kein Backend"
+if [[ -f "${BACKEND}" ]]; then
+    chown 0:0 "${BACKEND}"
+    chmod 755 "${BACKEND}"
+    backend_note="Backend labelwerk"
+fi
+log "Rechte gesetzt: $(find "${DRIVER_DIR}/Filter" -type f | wc -l | tr -d ' ') Filter, ${backend_note}, ${ppd_count} PPD-Dateien."
 
 # --- 2. Quarantäne ---------------------------------------------------------------------------
 if command -v xattr >/dev/null 2>&1; then
     xattr -dr com.apple.quarantine "${DRIVER_DIR}" 2>/dev/null || true
+    if [[ -f "${BACKEND}" ]]; then
+        xattr -d com.apple.quarantine "${BACKEND}" 2>/dev/null || true
+    fi
 fi
 
 # --- 3. CUPS ---------------------------------------------------------------------------------
@@ -335,6 +353,57 @@ refresh_queues() {
     log "${updated} Warteschlangen aktualisiert, ${skipped} unverändert."
 }
 
+# Geräte-URI einer Warteschlange laut „lpstat -v <queue>“ („device for <queue>: <uri>“).
+queue_device_uri() {
+    LANG=C LC_ALL=C "${LPSTAT}" -v "$1" 2>/dev/null | awk -v prefix="device for $1: " '
+        index($0, prefix) == 1 { print substr($0, length(prefix) + 1); exit }
+    '
+}
+
+# Hat der Benutzer „Bei Papier- oder Farbbandende anhalten und fortsetzen“ für die Warteschlange
+# abgeschaltet (Warteschlangen-Standard lwResumeOnError=False, von App bzw. lwctl gesetzt)?
+resume_disabled() {
+    "${LPOPTIONS}" -p "$1" 2>/dev/null | grep -Eiq '(^|[[:space:]])lwResumeOnError=(false|no|off|0)([[:space:]]|$)'
+}
+
+# Stellt LabelWerk-Warteschlangen von socket://host:port auf labelwerk://host:port um (nur
+# Warteschlangen mit LabelWerk-PPD, nur socket://, nie bei abgeschaltetem Fortsetzen). Pfad und
+# Optionen der socket-URI (?waiteof=…) entfallen; der Port bleibt (ohne Angabe 9100).
+migrate_device_uris() {
+    local queue_ppd queue uri rest authority migrated=0 kept=0
+    if [[ ! -x "${BACKEND}" ]]; then
+        log "Backend ${BACKEND} fehlt – Warteschlangen bleiben bei socket://."
+        return 0
+    fi
+    [[ -d "${CUPS_PPD_DIR}" ]] || return 0
+    for queue_ppd in "${CUPS_PPD_DIR}"/*.ppd; do
+        [[ -f "${queue_ppd}" ]] || continue
+        grep -q '^\*lwModel:' "${queue_ppd}" || continue
+        queue="$(basename "${queue_ppd}" .ppd)"
+        uri="$(queue_device_uri "${queue}")"
+        case "${uri}" in
+            socket://*) ;;
+            *) continue ;;
+        esac
+        if resume_disabled "${queue}"; then
+            kept=$((kept + 1))
+            continue
+        fi
+        rest="${uri#socket://}"
+        authority="${rest%%[/?#]*}"
+        if [[ -z "${authority}" ]]; then
+            continue
+        fi
+        if "${LPADMIN}" -p "${queue}" -v "labelwerk://${authority}" >/dev/null 2>&1; then
+            log "Warteschlange „${queue}“: labelwerk://${authority} (Druck geht nach Papier- oder Farbbandende weiter)."
+            migrated=$((migrated + 1))
+        else
+            log "Warteschlange „${queue}“ konnte nicht auf labelwerk:// umgestellt werden – bleibt bei ${uri}."
+        fi
+    done
+    log "${migrated} Warteschlangen auf das Backend labelwerk umgestellt, ${kept} auf Wunsch bei socket://."
+}
+
 # --- 4. Einrichtungsassistent ----------------------------------------------------------------
 SETUP_APP="/Applications/@APP_NAME@.app"  # wird von Scripts/make_pkg.sh aus Installer/config.env eingesetzt
 
@@ -405,6 +474,7 @@ open_setup_assistant() {
 if restart_cups; then
     if wait_for_scheduler; then
         refresh_queues
+        migrate_device_uris
     else
         log "CUPS antwortet nicht – vorhandene Warteschlangen werden nicht aktualisiert."
     fi

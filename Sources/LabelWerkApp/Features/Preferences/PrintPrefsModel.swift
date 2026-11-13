@@ -111,7 +111,7 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
     case template, size, tracking, rotation, markOffset, mirror, negative, stopAtLast, stopOffset, fitToLabel
     // Druckoptionen
     case speed, darkness, mediaType, labelTop, labelLeft, backfeed, pauseEvery, controlCharacters, rtcUpdate
-    case calibrateBeforeJob, saveToPrinter, language, cancelJobs, cancelDelay
+    case calibrateBeforeJob, saveToPrinter, language, cancelJobs, cancelDelay, resumeAfterError
     // Bedienermodus
     case printMode, tearOff, cutEvery
     // Grafik Optionen
@@ -150,6 +150,7 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         case .language: return tr("Druckersprache")
         case .cancelJobs: return tr("Alle aktuellen und nächsten Druckjobs löschen")
         case .cancelDelay: return tr("Verzögerung")
+        case .resumeAfterError: return tr("Bei Papier- oder Farbbandende anhalten und fortsetzen")
         case .printMode: return tr("Modus")
         case .tearOff: return tr("Versatz")
         case .cutEvery: return tr("Abschneider")
@@ -186,7 +187,8 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
              .fitToLabel:
             return .page
         case .speed, .darkness, .mediaType, .labelTop, .labelLeft, .backfeed, .pauseEvery, .controlCharacters,
-             .rtcUpdate, .calibrateBeforeJob, .saveToPrinter, .language, .cancelJobs, .cancelDelay:
+             .rtcUpdate, .calibrateBeforeJob, .saveToPrinter, .language, .cancelJobs, .cancelDelay,
+             .resumeAfterError:
             return .options
         case .printMode, .tearOff, .cutEvery:
             return .operation
@@ -327,6 +329,7 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         case .saveToPrinter: d.settings.saveToPrinter = base.saveToPrinter
         case .cancelJobs: d.settings.cancelJobsBeforePrint = base.cancelJobsBeforePrint
         case .cancelDelay: d.settings.cancelDelayMs = base.cancelDelayMs
+        case .resumeAfterError: d.settings.resumeAfterError = base.resumeAfterError
         case .cutEvery: d.settings.cutEvery = base.cutEvery
         case .dither: d.settings.dither = base.dither
         case .threshold: d.settings.threshold = base.threshold
@@ -405,6 +408,7 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         case .language: return a.language == b.language
         case .cancelJobs: return x.cancelJobsBeforePrint == y.cancelJobsBeforePrint
         case .cancelDelay: return x.cancelDelayMs == y.cancelDelayMs
+        case .resumeAfterError: return x.resumeAfterError == y.resumeAfterError
         case .printMode: return x.printMode == y.printMode
         case .tearOff: return x.tearOffAdjust == y.tearOffAdjust
         case .cutEvery: return x.cutEvery == y.cutEvery
@@ -454,6 +458,7 @@ enum PrintPrefsSetting: String, CaseIterable, Hashable, Identifiable {
         case .language: t.language = s.language
         case .cancelJobs: t.settings.cancelJobsBeforePrint = s.settings.cancelJobsBeforePrint
         case .cancelDelay: t.settings.cancelDelayMs = s.settings.cancelDelayMs
+        case .resumeAfterError: t.settings.resumeAfterError = s.settings.resumeAfterError
         case .printMode: t.settings.printMode = s.settings.printMode
         case .tearOff: t.settings.tearOffAdjust = s.settings.tearOffAdjust
         case .cutEvery: t.settings.cutEvery = s.settings.cutEvery

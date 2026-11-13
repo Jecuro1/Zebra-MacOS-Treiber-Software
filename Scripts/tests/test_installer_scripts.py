@@ -509,6 +509,16 @@ class DriverTreeTests(unittest.TestCase):
         self.assertEqual(mode(driver / "uninstall.sh"), 0o755)
         self.assertEqual(mode(driver), 0o755)
         self.assertEqual(mode(self.root / "Library" / "Printers"), 0o775)
+        # CUPS-Backend labelwerk: 0755 (cupsd startet es als _lp, nicht als root).
+        backend = self.root / "usr" / "libexec" / "cups" / "backend" / "labelwerk"
+        self.assertTrue(backend.is_file(), backend)
+        self.assertEqual(mode(backend), 0o755)
+        for directory in ("usr", "usr/libexec", "usr/libexec/cups", "usr/libexec/cups/backend"):
+            self.assertEqual(mode(self.root / directory), 0o755, directory)
+        self.assertEqual(sorted(p.name for p in backend.parent.iterdir()), ["labelwerk"])
+        listing = run([str(backend)])
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertTrue(listing.stdout.startswith("network labelwerk "), listing.stdout)
 
     def test_ppds_are_gzipped_and_reference_filter(self):
         self.assertEqual(self.result.returncode, 0)
@@ -570,6 +580,10 @@ class UninstallTests(unittest.TestCase):
         (driver / "Filter").mkdir(parents=True)
         (driver / "Filter" / "rastertolabelwerk").write_text("x", encoding="utf-8")
         (driver / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+        backends = self.root / "usr" / "libexec" / "cups" / "backend"
+        backends.mkdir(parents=True)
+        for name in ("labelwerk", "socket"):
+            (backends / name).write_text("x", encoding="utf-8")
         self.ppds = self.root / "Library" / "Printers" / "PPDs" / "Contents" / "Resources"
         self.ppds.mkdir(parents=True)
         for name in ("LabelWerk-zd421t-203dpi.ppd.gz", "LabelWerk-zt411-300dpi.ppd.gz", "Fremd.ppd.gz"):
@@ -612,6 +626,9 @@ class UninstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.root / "Library" / "Printers" / "LabelWerk").exists())
         self.assertEqual(sorted(p.name for p in self.ppds.iterdir()), ["Fremd.ppd.gz"])
+        # Nur das eigene Backend, nie die von CUPS.
+        backends = self.root / "usr" / "libexec" / "cups" / "backend"
+        self.assertEqual(sorted(p.name for p in backends.iterdir()), ["socket"])
         self.assertFalse((self.root / "Applications" / "LabelWerk.app").exists())
         self.assertFalse((self.root / "usr" / "local" / "bin" / "lwctl").is_symlink())
         self.assertTrue((self.root / "usr" / "local" / "bin" / "fremd").is_symlink())
@@ -1024,9 +1041,16 @@ class PackageScriptTests(unittest.TestCase):
         self.ppds.mkdir(parents=True)
         (self.ppds / "LabelWerk-zd421t-203dpi.ppd.gz").write_bytes(b"x")
         os.chmod(self.ppds / "LabelWerk-zd421t-203dpi.ppd.gz", 0o600)
+        backend = self.volume / "usr" / "libexec" / "cups" / "backend" / "labelwerk"
+        backend.parent.mkdir(parents=True)
+        backend.write_text("#!/bin/sh\n", encoding="utf-8")
+        os.chmod(backend, 0o700)
         script = render_package_script("driver", "postinstall", self.volume / "driver-postinstall")
         result = run([str(script), "pkg", "/", str(self.volume)])
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(mode(backend), 0o755)
+        self.assertEqual(backend.stat().st_uid, 0)
+        self.assertIn("Backend labelwerk", result.stdout)
         self.assertEqual(mode(self.driver / "Filter" / "rastertolabelwerk"), 0o755)
         self.assertEqual(mode(self.driver / "uninstall.sh"), 0o755)
         self.assertEqual(mode(self.driver / "VERSION"), 0o644)
@@ -1312,6 +1336,102 @@ def with_added_size(text: str) -> str:
             if line.startswith("*lwModel:"):
                 out += ADDED_MARKER
     return "\n".join(out) + "\n"
+
+
+def run_migrate_device_uris(cups_ppd_dir: Path, backend: Path, lpadmin: str, lpstat: str,
+                            lpoptions: str) -> subprocess.CompletedProcess:
+    """Führt migrate_device_uris() aus dem driver-postinstall mit eigenen Pfaden aus."""
+    script = "set -euo pipefail\n" \
+             "log() { printf 'LabelWerk postinstall: %s\\n' \"$*\"; }\n" \
+             f"LPADMIN={shlex.quote(lpadmin)}\n" \
+             f"LPSTAT={shlex.quote(lpstat)}\n" \
+             f"LPOPTIONS={shlex.quote(lpoptions)}\n" \
+             f"CUPS_PPD_DIR={shlex.quote(str(cups_ppd_dir))}\n" \
+             f"BACKEND={shlex.quote(str(backend))}\n" \
+             + shell_functions(DRIVER_POSTINSTALL, "queue_device_uri", "resume_disabled", "migrate_device_uris") \
+             + "\nmigrate_device_uris\n"
+    return run([SYSTEM_BASH, "-c", script])
+
+
+class DeviceURIMigrationTests(unittest.TestCase):
+    """migrate_device_uris(): LabelWerk-Warteschlangen socket:// → labelwerk:// (Backend, §10)."""
+
+    URIS = {
+        "Versand": "socket://10.62.13.19:9100",
+        "Brille": "socket://[fe80::1%25en0]:6101/?waiteof=false",
+        "OhnePort": "socket://zd421.local",
+        "Aus": "socket://10.62.13.20:9100",
+        "Schon": "labelwerk://10.62.13.21:9100",
+        "Usb": "usb://Zebra%20Technologies/ZTC%20ZD421-203dpi%20ZPL?serial=D2J",
+        "Fremd": "socket://10.62.13.22:9100",
+        "Mit Raum": "socket://10.62.13.23:9100",
+    }
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="lw-migrate-"))
+        self.cups_ppd = self.tmp / "ppd"
+        self.cups_ppd.mkdir()
+        for queue in self.URIS:
+            text = '*PPD-Adobe: "4.3"\n*cupsFilter: "x 0 foo"\n' if queue == "Fremd" else PPD_SNIPPET
+            (self.cups_ppd / f"{queue}.ppd").write_text(text, encoding="utf-8")
+        self.backend = write_executable(self.tmp / "labelwerk", "#!/bin/sh\n")
+        self.calls = self.tmp / "lpadmin.log"
+        self.lpadmin = write_executable(self.tmp / "lpadmin", f'''#!/bin/sh
+printf '%s\\n' "$*" >> "{self.calls}"
+''')
+        cases = "\n".join(f'    "{queue}") printf \'device for %s: %s\\n\' "$2" "{uri}" ;;'
+                          for queue, uri in self.URIS.items())
+        self.lpstat = write_executable(self.tmp / "lpstat", f'''#!/bin/sh
+[ "$1" = "-v" ] || exit 1
+case "$2" in
+{cases}
+    *) exit 1 ;;
+esac
+''')
+        self.lpoptions = write_executable(self.tmp / "lpoptions", '''#!/bin/sh
+case "$2" in
+    Aus) echo "device-uri=socket://10.62.13.20:9100 lwResumeOnError=False lwLabelWidth=10400" ;;
+    *) echo "device-uri=x lwLabelWidth=10400" ;;
+esac
+''')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def migrate(self) -> subprocess.CompletedProcess:
+        return run_migrate_device_uris(self.cups_ppd, self.backend, str(self.lpadmin), str(self.lpstat),
+                                       str(self.lpoptions))
+
+    def test_only_labelwerk_socket_queues_are_switched(self):
+        result = self.migrate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = sorted(self.calls.read_text(encoding="utf-8").splitlines())
+        self.assertEqual(calls, sorted([
+            "-p Versand -v labelwerk://10.62.13.19:9100",
+            "-p Brille -v labelwerk://[fe80::1%25en0]:6101",
+            "-p OhnePort -v labelwerk://zd421.local",
+            "-p Mit Raum -v labelwerk://10.62.13.23:9100",
+        ]))
+        self.assertIn("4 Warteschlangen auf das Backend labelwerk umgestellt, 1 auf Wunsch bei socket://.",
+                      result.stdout)
+
+    def test_without_backend_nothing_changes(self):
+        self.backend.unlink()
+        result = self.migrate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.calls.exists())
+        self.assertIn("bleiben bei socket://", result.stdout)
+
+    def test_failing_lpadmin_is_not_fatal(self):
+        write_executable(self.lpadmin, "#!/bin/sh\nexit 1\n")
+        result = self.migrate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("konnte nicht auf labelwerk:// umgestellt werden", result.stdout)
+        self.assertIn("0 Warteschlangen auf das Backend labelwerk umgestellt", result.stdout)
+
+    def test_postinstall_runs_migration_after_refresh(self):
+        text = DRIVER_POSTINSTALL.read_text(encoding="utf-8")
+        self.assertRegex(text, r"refresh_queues\n\s+migrate_device_uris\n")
 
 
 class AddedLabelSizeRefreshTests(unittest.TestCase):

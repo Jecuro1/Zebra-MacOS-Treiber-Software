@@ -1,8 +1,9 @@
 /*
  * test_backend.c – C-Unit-Tests des Backend-Kerns (lwb_core): Zerlegung in Auftragskopf und Formate
  * (Standard- und eigene Steuerzeichen, Präfixwechsel im Datenstrom, ^GFB-Binärdaten, stückweise
- * Eingabe), Etikettenzählung (^PQ, ^DF, Formate ohne Druck), Mengenänderung, ~HS-Auswertung
- * (wie LabelWerkStatus.HostStatusParser, auch zwischen fremden Antworten und stückweise) und URIs.
+ * Eingabe), Erkennung von Downloads und Binärdaten, Etikettenzählung (^PQ, ^DF, Formate ohne Druck), Mengenänderung, ~HS-Auswertung
+ * (wie LabelWerkStatus.HostStatusParser, auch zwischen fremden Antworten und stückweise), ^HW-Antworten
+ * (Neustart-Merker R:LWJOB.GRF) und URIs.
  *
  * Aufruf: test_backend [Namensfilter …]; Exitcode 0, wenn alle Prüfungen bestehen.
  */
@@ -285,6 +286,34 @@ static void test_split_edge_cases(void)
     CHECK_INT(seg, strlen(e));
 }
 
+static void test_download_detection(void)
+{
+    lwb_prefixes p = lwb_prefixes_standard();
+    const char *label = "^XA^FO0,0^GFA,2,2,1,0F0F^FS^PQ1^XZ\n";
+    CHECK(!lwb_segment_is_download((const uint8_t *)label, strlen(label), p));
+    const char *prologue = "~SD15\n~TA010\n! U1 setvar \"media.printmode\" \"L\"\r\n";
+    CHECK(!lwb_segment_is_download((const uint8_t *)prologue, strlen(prologue), p));
+    const char *download = "~DYE:LOGO.PNG,B,P,4,0,";
+    CHECK(lwb_segment_is_download((const uint8_t *)download, strlen(download), p));
+    const char *graphic = "~DGR:LOGO.GRF,2,1,FFFF\n";
+    CHECK(lwb_segment_is_download((const uint8_t *)graphic, strlen(graphic), p));
+    /* Eigenes Steuerzeichen */
+    const char *custom = "#DYE:X.TTF,B,T,3,0,abc";
+    CHECK(lwb_segment_is_download((const uint8_t *)custom, strlen(custom), custom_prefixes('!', '#', ';')));
+    CHECK(!lwb_segment_is_download((const uint8_t *)custom, strlen(custom), p));
+    /* Binärdaten (Firmware) */
+    const uint8_t binary[] = { 'Z', 'E', 'B', 0x00, 0x01, '^', 'X', 'A' };
+    CHECK(lwb_segment_is_download(binary, sizeof(binary), p));
+    /* ^GFB-Binärdaten sind erlaubt. */
+    char gfb[64];
+    const char head[] = "^XA^GFB,4,4,1,";
+    memcpy(gfb, head, strlen(head));
+    const char bytes[4] = { 0x00, 0x01, 0x02, 0x03 };
+    memcpy(gfb + strlen(head), bytes, 4);
+    memcpy(gfb + strlen(head) + 4, "^FS^XZ", 6);
+    CHECK(!lwb_segment_is_download((const uint8_t *)gfb, strlen(head) + 10, p));
+}
+
 /* --- Formate ----------------------------------------------------------------------------- */
 
 static void test_format_analyze(void)
@@ -369,6 +398,18 @@ static void test_host_status(void)
     CHECK(!lwb_status_idle(&st));
     CHECK_INT(lwb_status_reasons(&st), LWB_REASON_MEDIA_EMPTY | LWB_REASON_RIBBON_EMPTY |
                                            LWB_REASON_COVER_OPEN | LWB_REASON_PAUSED);
+    CHECK(st.thermal_transfer);
+
+    /* Thermo-Direkt (q = 0): „Farbband leer“ zählt nicht. */
+    const char direct[] =
+        "\x02" "030,0,0,0609,000,0,0,0,000,0,0,0" "\x03\r\n"
+        "\x02" "000,0,0,1,0,2,6,0,00000000,1,000" "\x03\r\n"
+        "\x02" "1234,0" "\x03\r\n";
+    CHECK(lwb_parse_host_status((const uint8_t *)direct, strlen(direct), &st, &consumed));
+    CHECK(st.ribbon_out);
+    CHECK(!st.thermal_transfer);
+    CHECK_INT(lwb_status_reasons(&st), 0);
+    CHECK(lwb_status_idle(&st));
 }
 
 static void test_host_status_noise(void)
@@ -401,6 +442,46 @@ static void test_host_status_noise(void)
     const char other[] = "\x02" "ZD421-203dpi,V84.20.18Z,8,8192KB" "\x03\r\n";
     CHECK(!lwb_parse_host_status((const uint8_t *)other, strlen(other), &st, &consumed));
     CHECK(consumed >= strlen(other) - 2);
+}
+
+/* --- ^HW (Neustart-Merker) -------------------------------------------------------------- */
+
+static void test_directory(void)
+{
+    size_t consumed = 0;
+    const char present[] = "\x02\r\n- DIR R:LWJOB.GRF\r\n*R:LWJOB.GRF        1\r\n\r\n"
+                           "-     794292 bytes free R:RAM\r\n\x03\r\n";
+    CHECK_INT(lwb_parse_directory((const uint8_t *)present, strlen(present), "R:LWJOB.GRF", &consumed), 1);
+    CHECK_INT(consumed, strlen(present));
+    CHECK_INT(lwb_parse_directory((const uint8_t *)present, strlen(present), "r:lwjob.grf", &consumed), 1);
+
+    /* Nur die Kopfzeile nennt den Namen: nicht vorhanden. */
+    const char absent[] = "\x02\r\n- DIR R:LWJOB.GRF\r\n\r\n-     794293 bytes free R:RAM\r\n\x03\r\n";
+    CHECK_INT(lwb_parse_directory((const uint8_t *)absent, strlen(absent), "R:LWJOB.GRF", &consumed), 0);
+    CHECK_INT(consumed, strlen(absent));
+
+    /* Ähnlicher Name zählt nicht; Leerzeichen nach „*“ schon. */
+    const char other[] = "\x02- DIR R:*.*\r\n*R:LWJOB.GRF2  1\r\n* R:LWJOB.GRF 1\r\n-1 bytes free\x03";
+    CHECK_INT(lwb_parse_directory((const uint8_t *)other, strlen(other), "R:LWJOB.GRF", &consumed), 1);
+    const char similar[] = "\x02- DIR R:*.*\r\n*R:LWJOB.GRF2  1\r\n-1 bytes free\x03";
+    CHECK_INT(lwb_parse_directory((const uint8_t *)similar, strlen(similar), "R:LWJOB.GRF", &consumed), 0);
+
+    /* Eine ~HS-Antwort davor wird übersprungen, keine Verwechslung mit „nicht vorhanden“. */
+    char mixed[512];
+    snprintf(mixed, sizeof(mixed), "%s%s", HS_IDLE, present);
+    CHECK_INT(lwb_parse_directory((const uint8_t *)mixed, strlen(mixed), "R:LWJOB.GRF", &consumed), 1);
+    CHECK_INT(lwb_parse_directory((const uint8_t *)HS_IDLE, strlen(HS_IDLE), "R:LWJOB.GRF", &consumed), -1);
+    CHECK_INT(consumed, strlen(HS_IDLE));
+
+    /* Stückweise: erst mit ETX ein Ergebnis, vorher nichts von der Antwort verwerfen. */
+    size_t full = strlen(present);
+    size_t etx = (size_t)(strchr(present, '\x03') - present);
+    for (size_t cut = 0; cut < full; cut++) {
+        int r = lwb_parse_directory((const uint8_t *)present, cut, "R:LWJOB.GRF", &consumed);
+        CHECK_INT(r, cut > etx ? 1 : -1);
+        if (r == -1)
+            CHECK_INT(consumed, 0);
+    }
 }
 
 /* --- URI --------------------------------------------------------------------------------- */
@@ -451,10 +532,12 @@ static const test_case TESTS[] = {
     { "split_prefix_change", test_split_prefix_change },
     { "split_binary_graphic", test_split_binary_graphic },
     { "split_edge_cases", test_split_edge_cases },
+    { "download_detection", test_download_detection },
     { "format_analyze", test_format_analyze },
     { "format_quantity", test_format_quantity },
     { "host_status", test_host_status },
     { "host_status_noise", test_host_status_noise },
+    { "directory", test_directory },
     { "uri", test_uri },
 };
 

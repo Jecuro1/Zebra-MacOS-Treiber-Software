@@ -114,7 +114,7 @@ enum CUPSQueues {
     }
 
     /// Druckt eine Warteschlange mit `queueURI` auf dasselbe Gerät wie `deviceURI`? Gleiche URI
-    /// (ohne Rücksicht auf Groß-/Kleinschreibung) oder bei `socket://` gleicher Host und Port
+    /// (ohne Rücksicht auf Groß-/Kleinschreibung) oder bei `socket://`/`labelwerk://` gleicher Host und Port
     /// (Standard 9100) – wie der exakte Treffer der App (`PrinterSetupPlanning.queueMatch`).
     static func isSameDevice(_ queueURI: String, _ deviceURI: String) -> Bool {
         func normalized(_ text: String) -> String {
@@ -126,7 +126,7 @@ enum CUPSQueues {
         guard !lhs.isEmpty else { return false }
         if lhs == normalized(deviceURI) { return true }
         guard let a = endpoint(ofDeviceURI: queueURI), let b = endpoint(ofDeviceURI: deviceURI),
-              a.scheme == "socket", b.scheme == "socket", a.host == b.host
+              QueueAdoption.rawSchemes.contains(a.scheme), QueueAdoption.rawSchemes.contains(b.scheme), a.host == b.host
         else { return false }
         return (a.port ?? ZebraIdentifiers.rawPort) == (b.port ?? ZebraIdentifiers.rawPort)
     }

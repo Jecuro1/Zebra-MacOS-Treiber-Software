@@ -54,6 +54,8 @@ enum CLIRunner {
                     process.arguments = arguments
                     var env = ProcessInfo.processInfo.environment
                     env.removeValue(forKey: "LWCTL_PRINTER")
+                    // Ohne Angabe kein Backend labelwerk (Ergebnis unabhängig von einem installierten Treiber).
+                    env["LWCTL_CUPS_BACKEND"] = "/nonexistent/cups/backend/labelwerk"
                     for (key, value) in environment { env[key] = value }
                     process.environment = env
                     if let workingDirectory { process.currentDirectoryURL = workingDirectory }

@@ -261,7 +261,7 @@ extension ConnectionDescriptor {
         let decoded = body.removingPercentEncoding ?? body
 
         switch scheme {
-        case "tcp", "socket", "raw":
+        case "tcp", "socket", "raw", "labelwerk":
             guard let (host, port) = Self.splitHostPort(body) else { return nil }
             self = .tcp(host: host, port: port ?? ZebraIdentifiers.rawPort)
         case "usb":

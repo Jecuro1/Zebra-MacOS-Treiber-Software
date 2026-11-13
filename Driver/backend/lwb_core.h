@@ -66,6 +66,14 @@ typedef struct lwb_format_info {
     bool has_quantity;  /* ^PQ vorhanden */
 } lwb_format_info;
 
+/**
+ * Enthält der Abschnitt Daten, in die das Backend keine ~HS-Abfrage einschieben darf? Das sind
+ * Downloads (~DG, ~DY, ~DB, ~DS, ~DT, ~DU, ~DN: deren Daten können Binärdaten mit „^XA“ enthalten)
+ * und Binärdaten außerhalb von ^GFB (Bytes < 0x09 bzw. 0x0E…0x1F, z. B. eine Firmware). Solche
+ * Aufträge sendet das Backend ab dieser Stelle am Stück.
+ */
+bool lwb_segment_is_download(const uint8_t *data, size_t len, lwb_prefixes prefixes);
+
 /** Wertet ein Format aus (Steuerzeichen am Formatanfang in `prefixes`). */
 void lwb_format_analyze(const uint8_t *data, size_t len, lwb_prefixes prefixes, lwb_format_info *info);
 
@@ -90,6 +98,7 @@ typedef struct lwb_host_status {
     /* Zeile 2: mmm,n,o,p,q,r,s,t,uuuuuuuu,v,www */
     bool head_open;
     bool ribbon_out;
+    bool thermal_transfer;  /* Thermotransfer gewählt: nur dann zählt „Farbband leer“ */
     bool label_waiting;     /* Etikett wartet auf Entnahme (Spendemodus) */
     long labels_remaining;
 } lwb_host_status;
@@ -102,10 +111,19 @@ typedef struct lwb_host_status {
  */
 bool lwb_parse_host_status(const uint8_t *data, size_t len, lwb_host_status *status, size_t *consumed);
 
+/**
+ * Sucht in data[0, len) die erste vollständige ^HW-Antwort (STX … ETX mit „DIR“- bzw.
+ * „bytes free“-Zeile; andere Rahmen wie ~HS-Antworten werden übersprungen) und prüft, ob sie die
+ * Datei `name` (z. B. „R:LWJOB.GRF“) als Eintrag („*R:LWJOB.GRF  1“) enthält. Liefert 1 =
+ * vorhanden, 0 = nicht vorhanden, -1 = noch keine vollständige Antwort. `consumed` nennt die Bytes,
+ * die verworfen werden können (bei -1 nur die sicher fremden).
+ */
+int lwb_parse_directory(const uint8_t *data, size_t len, const char *name, size_t *consumed);
+
 /** Gründe, aus denen der Drucker nicht druckt (CUPS printer-state-reasons). */
 enum {
     LWB_REASON_MEDIA_EMPTY = 1u << 0,   /* Papier/Etiketten leer   → media-empty-error */
-    LWB_REASON_RIBBON_EMPTY = 1u << 1,  /* Farbband leer           → marker-supply-empty-error */
+    LWB_REASON_RIBBON_EMPTY = 1u << 1,  /* Farbband leer (nur Thermotransfer) → marker-supply-empty-error */
     LWB_REASON_COVER_OPEN = 1u << 2,    /* Druckkopf offen         → cover-open-error */
     LWB_REASON_PAUSED = 1u << 3         /* Pause am Drucker        → other-warning (siehe labelwerk.c) */
 };

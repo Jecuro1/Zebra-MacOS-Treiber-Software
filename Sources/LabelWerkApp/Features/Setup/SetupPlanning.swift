@@ -350,9 +350,11 @@ enum PrinterSetupPlanning {
         }
         guard let a = endpoint(ofDeviceURI: lhs), let b = endpoint(ofDeviceURI: rhs) else { return nil }
         // USB-URIs nennen Hersteller/Modell statt eines Hosts; dort zählt nur die exakte URI.
-        let networkSchemes: Set<String> = ["socket", "lpd", "ipp", "ipps", "http", "https"]
+        let networkSchemes: Set<String> = ["socket", "labelwerk", "lpd", "ipp", "ipps", "http", "https"]
         guard networkSchemes.contains(a.scheme), networkSchemes.contains(b.scheme), a.host == b.host else { return nil }
-        if a.scheme == "socket" && b.scheme == "socket" {
+        // `labelwerk://` (Backend, Druck geht nach Papierende weiter) nutzt denselben Rohdatenport wie `socket://`.
+        let raw: Set<String> = ["socket", "labelwerk"]
+        if raw.contains(a.scheme) && raw.contains(b.scheme) {
             return (a.port ?? ZebraIdentifiers.rawPort) == (b.port ?? ZebraIdentifiers.rawPort) ? .exact : .sameHost
         }
         return .sameHost

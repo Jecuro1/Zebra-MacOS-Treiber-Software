@@ -207,6 +207,7 @@ final class DriverInstaller {
         }
         successCount += 1
         setPhase(.succeeded(operation))
+        NotificationCenter.default.post(name: CUPSService.driverDidChangeNotification, object: nil)
         return true
     }
 
@@ -352,6 +353,14 @@ final class DriverInstaller {
             detail: hasCommand ? "commandtolabelwerk" : tr("commandtolabelwerk fehlt (Reinigen, Kalibrieren, Selbsttest)"),
             outcome: hasCommand ? .passed : .failed
         ))
+        let hasBackend = CUPSService.isBackendInstalled
+        checks.append(DriverCheck(
+            id: "backend",
+            title: tr("Backend „labelwerk“"),
+            detail: hasBackend ? tr("Druck geht nach Papier- oder Farbbandende automatisch weiter")
+                : tr("labelwerk fehlt – Warteschlangen drucken über socket:// (ohne Fortsetzen nach Papierende)"),
+            outcome: hasBackend ? .passed : .failed
+        ))
         checks.append(DriverCheck(
             id: "ppd",
             title: tr("PPD-Dateien"),
@@ -400,6 +409,11 @@ final class DriverInstaller {
         let sourcePPDs = payload.appendingPathComponent("Library/Printers/PPDs/Contents/Resources", isDirectory: true).path
         let root = CUPSService.driverRoot.path
         let ppdDirectory = CUPSService.ppdDirectory.path
+        // CUPS-Backend labelwerk (Druck geht nach Papier- oder Farbbandende weiter, ARCHITECTURE.md §10):
+        // root:wheel 0755 – cupsd startet es dann als _lp, nicht als root.
+        let sourceBackend = payload.appendingPathComponent("usr/libexec/cups/backend/labelwerk").path
+        let backend = CUPSService.backendPath
+        let backendDirectory = (backend as NSString).deletingLastPathComponent
         let commands = [
             "set -e",
             "/bin/mkdir -p \(q(ppdDirectory))",
@@ -417,6 +431,7 @@ final class DriverInstaller {
             "/bin/rm -f \(q(ppdDirectory))/LabelWerk-*.ppd.gz \(q(ppdDirectory))/LabelWerk-*.ppd",
             "for f in \(q(sourcePPDs))/LabelWerk-*.ppd*; do if [ -e \"$f\" ]; then /bin/cp -f \"$f\" \(q(ppdDirectory))/; fi; done",
             "for f in \(q(ppdDirectory))/LabelWerk-*.ppd*; do if [ -e \"$f\" ]; then /usr/sbin/chown root:wheel \"$f\"; /bin/chmod 644 \"$f\"; /usr/bin/xattr -d com.apple.quarantine \"$f\" 2>/dev/null || true; fi; done",
+            "if [ -f \(q(sourceBackend)) ]; then /bin/mkdir -p \(q(backendDirectory)) && /bin/cp -f \(q(sourceBackend)) \(q(backend)) && /usr/sbin/chown root:wheel \(q(backend)) && /bin/chmod 755 \(q(backend)) && { /usr/bin/xattr -d com.apple.quarantine \(q(backend)) 2>/dev/null || true; }; fi",
             restartCUPSCommand,
         ]
         return commands.joined(separator: "; ")
@@ -432,6 +447,7 @@ final class DriverInstaller {
             commands.append("\(q(CUPSService.lpadmin)) -x \(q(queue)) || true")
         }
         commands.append("/bin/rm -rf \(q(root))")
+        commands.append("/bin/rm -f \(q(CUPSService.backendPath))")
         commands.append("/bin/rm -f \(q(ppdDirectory))/LabelWerk-*.ppd.gz \(q(ppdDirectory))/LabelWerk-*.ppd")
         commands.append(restartCUPSCommand)
         return commands.joined(separator: "; ")

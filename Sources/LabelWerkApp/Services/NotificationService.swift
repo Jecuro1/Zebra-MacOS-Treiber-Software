@@ -3,7 +3,8 @@ import Foundation
 import UserNotifications
 import LabelWerkKit
 
-/// Systembenachrichtigungen bei Druckerfehlern (z. B. „Etiketten leer“, „Druckkopf offen“).
+/// Systembenachrichtigungen bei Druckerfehlern (z. B. „Etiketten leer“, „Druckkopf offen“) und angehaltenen
+/// Druckaufträgen.
 @MainActor
 final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationService()
@@ -40,6 +41,25 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         content.userInfo = ["printerID": printerID.uuidString]
         content.threadIdentifier = printerID.uuidString
         let request = UNNotificationRequest(identifier: key + "-\(Date().timeIntervalSince1970)",
+                                            content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Mitteilung zu einem laufenden Druckauftrag (z. B. „Druck angehalten – Papier leer …“, wenn
+    /// LabelWerk im Hintergrund ist). Gleiche Meldung desselben Druckers höchstens jede Minute.
+    func notifyPrintJob(title: String, body: String, printerID: UUID, key: String) {
+        guard isAvailable, isAuthorized else { return }
+        let fullKey = "\(printerID.uuidString)-\(key)"
+        if let last = lastSent[fullKey], Date().timeIntervalSince(last) < 60 { return }
+        lastSent[fullKey] = Date()
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .defaultCritical
+        content.userInfo = ["printerID": printerID.uuidString]
+        content.threadIdentifier = printerID.uuidString
+        let request = UNNotificationRequest(identifier: fullKey + "-\(Date().timeIntervalSince1970)",
                                             content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }

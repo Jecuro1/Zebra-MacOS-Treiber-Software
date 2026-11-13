@@ -25,6 +25,9 @@ import LabelWerkKit
 /// läuft nur bei Abweichungen laut `lpoptions`. Automatische Abgleiche fragen nie nach einem Passwort
 /// (Administratoren gehören auf macOS zur Gruppe `_lpadmin`), sind bei Erfolg still und melden Fehler
 /// mit einem Hinweis „Erneut versuchen“. Eine in macOS entfernte Warteschlange wird nicht neu angelegt.
+/// Die Geräte-URI folgt „Bei Papier- oder Farbbandende anhalten und fortsetzen“ (`PrintSettings.resumeAfterError`):
+/// `labelwerk://` bzw. `socket://` (``CUPSService/apply(_:to:force:allowAdminPrompt:deviceURI:)``); nach einer
+/// Treiberinstallation aus der App (`CUPSService.driverDidChangeNotification`) prüft der Dienst alle Drucker.
 /// Alle `lpadmin`-Aufrufe laufen nacheinander.
 ///
 /// **Übernahme fremder Warteschlangen** (ARCHITECTURE.md §9 „Übernahme von macOS-Warteschlangen“):
@@ -37,7 +40,8 @@ import LabelWerkKit
 ///
 /// **Etikettentypen** (ARCHITECTURE.md §9 „Etikettentypen“): Jeder Typ eines Druckers (`SavedPrinter.labelTypes`)
 /// erhält eine eigene Warteschlange „<Drucker> – <Typ>“ mit derselben Geräte-URI wie die Warteschlange des
-/// Druckers (ohne sie `socket://host:port` bzw. die USB-URI), dem Format des Typs als benannter Standardgröße
+/// Druckers (ohne sie `labelwerk://host:port` bzw. `socket://host:port` oder die USB-URI), dem Format des
+/// Typs als benannter Standardgröße
 /// und den Einstellungen des Druckers mit den Abweichungen des Typs. Sie folgt denselben Auslösern (Änderung,
 /// Start, „OK“/„Übernehmen“) und wird – anders als die Warteschlange des Druckers – neu angelegt, wenn sie
 /// fehlt: Ein Etikettentyp *ist* ein macOS-Drucker. Den Namen vergibt der erste Abgleich
@@ -106,6 +110,7 @@ final class QueueSyncService {
     /// Fehlgeschlagene automatische Übernahmen je Warteschlange.
     private var failedAdoptions: [String: AdoptionAttempt] = [:]
     private var activationObserver: NSObjectProtocol?
+    private var driverObserver: NSObjectProtocol?
 
     /// Zustand der Warteschlange je Etikettentyp (für „Druckeinstellungen › Etikettentypen“).
     let labelTypeStatus = LabelTypeQueueStatusStore()
@@ -612,6 +617,18 @@ final class QueueSyncService {
                 forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in self?.scheduleAdoption() }
+            }
+        }
+        if driverObserver == nil {
+            // Treiber aus der App installiert bzw. aktualisiert: Warteschlangen mit socket:// erhalten
+            // jetzt das Backend labelwerk:// (bzw. zurück, wenn es fehlt) – wie das postinstall des Pakets.
+            driverObserver = NotificationCenter.default.addObserver(
+                forName: CUPSService.driverDidChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, let model = self.model else { return }
+                    await self.syncInBackground(model.sessions, reason: .launch)
+                }
             }
         }
         observeSessions()

@@ -9,7 +9,7 @@ import Foundation
 /// um. Diese reine Entscheidung (ohne CUPS-Aufrufe) ist unter Linux getestet.
 ///
 /// Regel:
-/// * Nur Netzwerk-URIs (`socket`, `ipp`, `ipps`, `lpd`, `http`, `https`); `usb://`, `dnssd://`,
+/// * Nur Netzwerk-URIs (`socket`, `labelwerk`, `ipp`, `ipps`, `lpd`, `http`, `https`); `usb://`, `dnssd://`,
 ///   `file:` und Hüllen wie `beh:/…` gehören zu keinem Host und bleiben unberührt.
 /// * Nur URIs, die das Gerät selbst nennen (``deviceEndpoint(ofDeviceURI:)``): kein Loopback-Host
 ///   (`localhost`, `127.x.x.x`, `::1`), bei IPP/HTTP nur die Endpunkte eines Druckers (Pfad leer, `/`,
@@ -18,20 +18,26 @@ import Foundation
 ///   LPD-Warteschlangen eines Druckservers mit mehreren Anschlüssen) gehören zu einem anderen Gerät.
 /// * Host gleich (ohne Groß-/Kleinschreibung, ohne Port, Pfad, Benutzerangabe, eckige Klammern und
 ///   abschließenden Punkt) dem Host eines eingerichteten Druckers.
-/// * `socket://` nennt mit dem Port das Gerät (Druckserver mit mehreren Anschlüssen): Der Port muss dem
-///   des Druckers entsprechen (ohne Angabe 9100). Bei den übrigen Protokollen bezeichnet der Port nur
-///   den Dienst.
+/// * `socket://` (und `labelwerk://`, das Backend von LabelWerk auf demselben Rohdatenport) nennt mit dem
+///   Port das Gerät (Druckserver mit mehreren Anschlüssen): Der Port muss dem des Druckers entsprechen
+///   (ohne Angabe 9100). Bei den übrigen Protokollen bezeichnet der Port nur den Dienst.
 /// * Mit LabelWerk-Treiber (PPD mit `*lwModel`, sonst „LabelWerk“ in `printer-make-and-model`): nichts
 ///   umzustellen (``Decision/labelWerk(printerID:)``).
 /// * Sonst umstellen: Geräte-URI `socket://<host>:<port>` des Druckers (Rohdatenport, den jeder
-///   Zebra-Netzwerkdrucker bietet); eine `socket://`-URI bleibt unverändert.
+///   Zebra-Netzwerkdrucker bietet); eine `socket://`- bzw. `labelwerk://`-URI bleibt unverändert. Ob
+///   daraus `labelwerk://` wird, entscheidet beim Umstellen ``QueueDeviceURI`` (Einstellung
+///   „Bei Papier- oder Farbbandende anhalten und fortsetzen“).
 public enum QueueAdoption {
 
     /// Rohdatenport der Zebra-Netzwerkdrucker.
     public static let rawPort = 9100
 
     /// Schemata, deren URI einen Host nennt.
-    public static let networkSchemes: Set<String> = ["socket", "ipp", "ipps", "lpd", "http", "https"]
+    public static let networkSchemes: Set<String> = ["socket", QueueDeviceURI.backendScheme, "ipp", "ipps", "lpd",
+                                                     "http", "https"]
+
+    /// Schemata des Rohdatenports, deren Port das Gerät nennt (`socket://`, `labelwerk://`).
+    public static let rawSchemes: Set<String> = ["socket", QueueDeviceURI.backendScheme]
 
     /// Ein in LabelWerk eingerichteter Netzwerkdrucker.
     public struct RegisteredPrinter: Equatable, Sendable {
@@ -96,7 +102,7 @@ public enum QueueAdoption {
         if isLabelWerk || makeAndModel?.range(of: "LabelWerk", options: .caseInsensitive) != nil {
             return .labelWerk(printerID: printer.id)
         }
-        let uri = endpoint.scheme == "socket"
+        let uri = rawSchemes.contains(endpoint.scheme)
             ? deviceURI.trimmingCharacters(in: .whitespacesAndNewlines)
             : socketURI(host: printer.host, port: printer.port)
         return .adopt(printerID: printer.id, deviceURI: uri)
@@ -105,18 +111,18 @@ public enum QueueAdoption {
     /// Führt die Geräte-URI zu diesem Drucker?
     static func matches(_ endpoint: Endpoint, _ printer: RegisteredPrinter) -> Bool {
         guard let host = normalizedHost(printer.host), host == endpoint.host else { return false }
-        guard endpoint.scheme == "socket" else { return true }
+        guard rawSchemes.contains(endpoint.scheme) else { return true }
         return (endpoint.port ?? rawPort) == printer.port
     }
 
     /// Eingerichteter Drucker, dessen LabelWerk-Verbindung selbst eine macOS-Warteschlange ist
-    /// (`ConnectionDescriptor.cupsQueue`): Host und Port stammen aus deren Geräte-URI (`socket://` mit
-    /// ihrem Port, sonst ``rawPort``). `nil`, wenn die URI nicht das Gerät selbst nennt
+    /// (`ConnectionDescriptor.cupsQueue`): Host und Port stammen aus deren Geräte-URI (`socket://` bzw.
+    /// `labelwerk://` mit ihrem Port, sonst ``rawPort``). `nil`, wenn die URI nicht das Gerät selbst nennt
     /// (``deviceEndpoint(ofDeviceURI:)``: USB, Bonjour, Datei, Loopback, die Warteschlange eines
     /// Druckservers wie `ipp://server/printers/Zebra` – dessen Host ist nicht der Drucker).
     public static func registeredPrinter(id: String, queueDeviceURI uri: String) -> RegisteredPrinter? {
         guard let endpoint = deviceEndpoint(ofDeviceURI: uri) else { return nil }
-        let port = endpoint.scheme == "socket" ? (endpoint.port ?? rawPort) : rawPort
+        let port = rawSchemes.contains(endpoint.scheme) ? (endpoint.port ?? rawPort) : rawPort
         return RegisteredPrinter(id: id, host: endpoint.host, port: port)
     }
 
@@ -125,7 +131,7 @@ public enum QueueAdoption {
     /// Schema, Host und Port einer Geräte-URI, die das Gerät **selbst** nennt – sonst `nil`:
     /// * Schema aus ``networkSchemes``, Host kein Loopback (``isLoopbackHost(_:)``: über `localhost`
     ///   erreichte Ziele sind Tunnel, Proxys oder ein lokaler Druckserver, nie das Gerät selbst);
-    /// * `socket`: jeder Pfad (der Port nennt das Gerät);
+    /// * `socket`, `labelwerk`: jeder Pfad (der Port nennt das Gerät);
     /// * `ipp`, `ipps`, `http`, `https`: nur die IPP-Endpunkte eines Druckers – Pfad leer, `/`, `/ipp`
     ///   oder `/ipp/…` (`/ipp/print` von AirPrint/IPP Everywhere). Freigaben eines CUPS-, macOS- oder
     ///   Windows-Druckservers (`/printers/<name>`, `/classes/<name>`, `/printers/<name>/.printer`) und
@@ -139,7 +145,7 @@ public enum QueueAdoption {
         else { return nil }
         let path = self.path(ofDeviceURI: uri).lowercased()
         switch endpoint.scheme {
-        case "socket":
+        case "socket", QueueDeviceURI.backendScheme:
             return endpoint
         case "lpd":
             return path.isEmpty || path == "/" ? endpoint : nil

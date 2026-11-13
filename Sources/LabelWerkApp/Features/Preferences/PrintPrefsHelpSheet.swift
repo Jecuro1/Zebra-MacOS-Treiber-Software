@@ -55,6 +55,8 @@ extension PrintPrefsSetting {
             return tr("Löscht vor jedem Auftrag alle aktuellen und wartenden Aufträge im Drucker (~JA, ganz am Anfang des Auftrags vor den Startbefehlen), damit nur der neue gedruckt wird. Wirkt bei ZPL und EPL.")
         case .cancelDelay:
             return tr("Wartezeit nach dem Abbrechen, bevor der neue Auftrag folgt (0 bis 10 000 ms, Standard 1000 ms).")
+        case .resumeAfterError:
+            return tr("Wie bei einem normalen Drucker: Der Auftrag bleibt in der macOS-Warteschlange, bis jedes Etikett gedruckt ist. Gehen Etiketten oder Farbband aus oder ist der Druckkopf offen, zeigt macOS „Kein Papier“ bzw. „Farbband leer“; nach dem Einlegen geht der Druck genau dort weiter – das unterbrochene Etikett druckt der Drucker erneut, nichts muss nachgezählt werden. Gilt für Netzwerkdrucker mit ZPL (macOS-Geräte-URI labelwerk:// statt socket://) und für Drucke aus LabelWerk. Aus: Der Auftrag gilt als erledigt, sobald die Daten beim Drucker sind.")
         case .printMode:
             return tr("Was nach dem Druck geschieht (^MM): Abreißen, Spendemodus, Abschneider, verzögerter Abschneider, Aufwickeln, Applikator oder Kiosk. Linerless-Modi (Etiketten ohne Trägermaterial) setzt der Treiber per SGD „media.printmode“.")
         case .tearOff:

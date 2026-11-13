@@ -251,6 +251,13 @@ struct DiscoveryNetworksTests {
         #expect(DiscoveryNetworks.host(ofDeviceURI: "ipp://10.62.13.19:631/printers/zebra") == "10.62.13.19")
         #expect(DiscoveryNetworks.host(ofDeviceURI: "socket://Zebra-Lager.Firma.local.:9100") == "zebra-lager.firma.local")
         #expect(DiscoveryNetworks.host(ofDeviceURI: "socket://[fe80::1%25en0]:9100") == "fe80::1%en0")
+        // Backend labelwerk (Druck geht nach Papierende weiter): wie socket:// – derselbe Drucker.
+        #expect(DiscoveryNetworks.host(ofDeviceURI: "labelwerk://10.62.13.19:9100") == "10.62.13.19")
+        #expect(DiscoveryFilter.keys(ofDeviceURI: "labelwerk://10.62.13.19").endpoints
+                == [AddedPrinterIdentity.Endpoint(host: "10.62.13.19", port: 9100)])
+        #expect(DiscoveryFilter.keys(ofDeviceURI: "labelwerk://10.62.13.19:6101").endpoints
+                == DiscoveryFilter.keys(ofDeviceURI: "socket://10.62.13.19:6101").endpoints)
+        #expect(ConnectionDescriptor(uriString: "labelwerk://10.62.13.19:6101") == .tcp(host: "10.62.13.19", port: 6101))
         #expect(DiscoveryNetworks.host(ofDeviceURI: "ipp://127.0.0.1:631/printers/zebra") == nil)
         #expect(DiscoveryNetworks.host(ofDeviceURI: "file:///dev/null") == nil)
 

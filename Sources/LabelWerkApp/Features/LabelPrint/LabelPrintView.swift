@@ -45,6 +45,12 @@ struct LabelPrintView: View {
             ToastOverlay()
                 .padding(Theme.Metrics.paddingLarge)
         }
+        .overlay(alignment: .top) {
+            // Laufende Druckaufträge („Etikett 37 von 50“, „Papier leer – …“) mit „Abbrechen“.
+            PrintJobBannerStack()
+                .padding(.top, 12)
+                .padding(.horizontal, Theme.Metrics.paddingLarge)
+        }
         .animation(reduceMotion ? nil : Motion.snappy, value: isDropTargeted)
         .animation(reduceMotion ? nil : Motion.snappy, value: store.isLoading)
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in

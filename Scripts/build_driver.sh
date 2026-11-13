@@ -12,6 +12,7 @@
 #   <ausgabe>/Library/Printers/LabelWerk/ppd-index.json               (Modellübersicht der PPDs)
 #   <ausgabe>/Library/Printers/LabelWerk/uninstall.sh                 (Deinstallation, 0755)
 #   <ausgabe>/Library/Printers/PPDs/Contents/Resources/LabelWerk-<modell>-<dpi>dpi.ppd.gz
+#   <ausgabe>/usr/libexec/cups/backend/labelwerk                      (CUPS-Backend, Universal, 0755)
 #
 # Der Baum ist Nutzlast des Installationspakets (Scripts/make_pkg.sh) und wird von
 # Scripts/build_app.sh als Contents/Resources/Driver in die App gelegt (Treiberinstallation aus
@@ -31,13 +32,13 @@ usage() {
     cat <<EOF
 Aufruf: Scripts/build_driver.sh [Optionen]
 
-Baut Filter (Universal Binary), PPD-Dateien, Symbol und Versionsdatei des LabelWerk-Treibers
+Baut Filter und Backend (Universal Binary), PPD-Dateien, Symbol und Versionsdatei des LabelWerk-Treibers
 in einen Installationsbaum (Standard: build/driver-root).
 
 Optionen:
   --output VERZ   Zielverzeichnis des Installationsbaums (wird geleert und neu angelegt; muss
                   neu, leer oder ein früherer Treiberbaum dieses Skripts sein)
-  --host          Filter für das aktuelle System statt Universal Binary (Testaufbau, z. B. Linux)
+  --host          Filter und Backend für das aktuelle System statt Universal Binary (Testaufbau, z. B. Linux)
   --no-sign       Filter nicht signieren (nur macOS relevant)
   --dry-run       Schritte nur anzeigen, nichts ausführen
   -h, --help      diese Hilfe
@@ -78,7 +79,11 @@ lw_load_config
 # Erlaubte Einträge je Ordner eines Treiberbaums: „relativer Ordner|Muster …“. Unterhalb von
 # Library/Printers/LabelWerk ist alles erlaubt (das ist der Treiber selbst).
 TREE_LAYOUT=(
-    "|Library"
+    "|Library usr"
+    "usr|libexec"
+    "usr/libexec|cups"
+    "usr/libexec/cups|backend"
+    "usr/libexec/cups/backend|labelwerk"
     "Library|Printers"
     "Library/Printers|LabelWerk PPDs"
     "Library/Printers/PPDs|Contents"
@@ -208,6 +213,7 @@ elif [[ -d "${OUTPUT}" ]] && ! is_driver_tree_or_empty "${OUTPUT}"; then
 fi
 
 FILTER_DIR_SRC="${LW_REPO_ROOT}/Driver/filter"
+BACKEND_DIR_SRC="${LW_REPO_ROOT}/Driver/backend"
 PPD_GENERATOR="${LW_REPO_ROOT}/Driver/ppd/generate_ppds.py"
 PRINTER_ICON="${LW_REPO_ROOT}/Installer/Resources/LabelWerk.icns"
 UNINSTALLER="${LW_REPO_ROOT}/Scripts/uninstall.sh"
@@ -217,6 +223,11 @@ MAKE="${MAKE:-make}"
 DRIVER_ROOT="${OUTPUT}/Library/Printers/LabelWerk"
 PPD_DEST="${OUTPUT}/Library/Printers/PPDs/Contents/Resources"
 FILTERS=(rastertolabelwerk commandtolabelwerk)
+# CUPS-Backend labelwerk:// (Druck geht nach Papier- oder Farbbandende weiter, ARCHITECTURE.md §10).
+# CUPS sucht Backends nur in /usr/libexec/cups/backend (ServerBin); 0755 statt 0700, damit cupsd es
+# als unprivilegierten Benutzer (_lp) startet – es braucht nur TCP, keine root-Rechte.
+BACKEND_DEST="${OUTPUT}/usr/libexec/cups/backend"
+BACKEND_NAME="labelwerk"
 
 if [[ "${HOST_BUILD}" == "1" ]]; then
     MODE="Testaufbau für $(uname -s)/$(uname -m)"
@@ -237,6 +248,7 @@ lw_require_tool "${MAKE}" "Xcode-Befehlszeilenwerkzeuge bzw. build-essential ins
 lw_require_tool "${PYTHON}" "Python 3 installieren."
 lw_require_tool gzip
 lw_require_file "${FILTER_DIR_SRC}/Makefile" "Makefile der Filter"
+lw_require_file "${BACKEND_DIR_SRC}/Makefile" "Makefile des Backends"
 lw_require_file "${PPD_GENERATOR}" "PPD-Generator"
 lw_require_file "${PRINTER_ICON}" "Druckersymbol" "„make icons“ ausführen."
 lw_require_file "${UNINSTALLER}" "Deinstallationsskript"
@@ -244,7 +256,7 @@ lw_require_file "${UNINSTALLER}" "Deinstallationsskript"
 # --- Filter --------------------------------------------------------------------------------
 lw_step "Filter bauen"
 lw_run rm -rf "${OUTPUT}"
-lw_run mkdir -p "${DRIVER_ROOT}/Filter" "${DRIVER_ROOT}/Icons" "${PPD_DEST}"
+lw_run mkdir -p "${DRIVER_ROOT}/Filter" "${DRIVER_ROOT}/Icons" "${PPD_DEST}" "${BACKEND_DEST}"
 
 if [[ "${HOST_BUILD}" == "1" ]]; then
     lw_run "${MAKE}" -C "${FILTER_DIR_SRC}" all
@@ -261,6 +273,33 @@ if [[ "${HOST_BUILD}" == "1" ]] && lw_is_macos; then
     done
 else
     lw_run "${MAKE}" -C "${FILTER_DIR_SRC}" install DESTDIR="${OUTPUT}" FILTERDIR=/Library/Printers/LabelWerk/Filter
+fi
+
+# --- Backend -------------------------------------------------------------------------------
+lw_step "Backend bauen"
+if [[ "${HOST_BUILD}" == "1" ]]; then
+    lw_run "${MAKE}" -C "${BACKEND_DIR_SRC}" all
+    if lw_is_macos; then
+        # Das install-Ziel installiert auf macOS immer das Universal Binary.
+        lw_run install -m 0755 "${BACKEND_DIR_SRC}/build/${BACKEND_NAME}" "${BACKEND_DEST}/${BACKEND_NAME}"
+    else
+        lw_run "${MAKE}" -C "${BACKEND_DIR_SRC}" install DESTDIR="${OUTPUT}" BACKENDDIR=/usr/libexec/cups/backend
+    fi
+else
+    lw_run "${MAKE}" -C "${BACKEND_DIR_SRC}" universal
+    lw_run "${MAKE}" -C "${BACKEND_DIR_SRC}" install DESTDIR="${OUTPUT}" BACKENDDIR=/usr/libexec/cups/backend
+fi
+
+if [[ "${LW_DRY_RUN}" != "1" ]]; then
+    [[ -x "${BACKEND_DEST}/${BACKEND_NAME}" ]] || lw_die "Backend fehlt nach dem Bauen: ${BACKEND_DEST}/${BACKEND_NAME}"
+    if [[ "${HOST_BUILD}" != "1" ]] && lw_is_macos; then
+        archs="$(lipo -archs "${BACKEND_DEST}/${BACKEND_NAME}")"
+        [[ "${archs}" == *arm64* && "${archs}" == *x86_64* ]] \
+            || lw_die "${BACKEND_NAME} ist kein Universal Binary (Architekturen: ${archs})."
+        lw_ok "Backend ${BACKEND_NAME}: ${archs}"
+    else
+        lw_ok "Backend ${BACKEND_NAME}"
+    fi
 fi
 
 if [[ "${LW_DRY_RUN}" != "1" ]]; then
@@ -340,14 +379,14 @@ if [[ "${LW_DRY_RUN}" != "1" ]]; then
     find "${OUTPUT}" -name .DS_Store -delete
     find "${OUTPUT}" -type d -exec chmod 755 {} +
     find "${OUTPUT}" -type f -exec chmod 644 {} +
-    chmod 755 "${DRIVER_ROOT}/Filter/"* "${DRIVER_ROOT}/uninstall.sh"
+    chmod 755 "${DRIVER_ROOT}/Filter/"* "${DRIVER_ROOT}/uninstall.sh" "${BACKEND_DEST}/${BACKEND_NAME}"
     # /Library/Printers und der PPD-Ordner gehören auf macOS root:admin mit 0775; die Nutzlast
     # bildet das nach, damit der Installer bestehende Systemordner nicht verändert.
     chmod 775 "${OUTPUT}/Library/Printers" "${OUTPUT}/Library/Printers/PPDs" \
         "${OUTPUT}/Library/Printers/PPDs/Contents" "${PPD_DEST}"
-    lw_ok "Ordner 0755 (Systemordner 0775), Dateien 0644, Filter 0755"
+    lw_ok "Ordner 0755 (Systemordner 0775), Dateien 0644, Filter und Backend 0755"
 else
-    lw_info "würde setzen: Ordner 0755 (Systemordner 0775), Dateien 0644, Filter und uninstall.sh 0755"
+    lw_info "würde setzen: Ordner 0755 (Systemordner 0775), Dateien 0644, Filter, Backend und uninstall.sh 0755"
 fi
 
 # --- Signieren -----------------------------------------------------------------------------
@@ -356,17 +395,20 @@ if [[ -n "${DEVELOPER_ID_APP}" ]]; then
     SIGN_LABEL="${DEVELOPER_ID_APP}"
 fi
 if lw_is_macos && [[ "${SIGN}" == "1" ]]; then
-    lw_step "Filter signieren (${SIGN_LABEL})"
+    lw_step "Filter und Backend signieren (${SIGN_LABEL})"
     for filter in "${FILTERS[@]}"; do
         lw_codesign "${DRIVER_ROOT}/Filter/${filter}" "${BUNDLE_ID}.${filter}"
         lw_run codesign --verify --strict "${DRIVER_ROOT}/Filter/${filter}"
     done
-    lw_ok "Filter signiert"
+    lw_codesign "${BACKEND_DEST}/${BACKEND_NAME}" "${BUNDLE_ID}.backend.${BACKEND_NAME}"
+    lw_run codesign --verify --strict "${BACKEND_DEST}/${BACKEND_NAME}"
+    lw_ok "Filter und Backend signiert"
 elif [[ "${SIGN}" == "1" && "${LW_DRY_RUN}" == "1" ]]; then
-    lw_step "Filter signieren"
+    lw_step "Filter und Backend signieren"
     for filter in "${FILTERS[@]}"; do
         lw_codesign "${DRIVER_ROOT}/Filter/${filter}" "${BUNDLE_ID}.${filter}"
     done
+    lw_codesign "${BACKEND_DEST}/${BACKEND_NAME}" "${BUNDLE_ID}.backend.${BACKEND_NAME}"
 fi
 
 # --- Zusammenfassung -----------------------------------------------------------------------

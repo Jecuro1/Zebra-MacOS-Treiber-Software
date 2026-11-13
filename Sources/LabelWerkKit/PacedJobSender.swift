@@ -130,6 +130,10 @@ public enum PacedJobEvent: Sendable, Hashable {
     case reconnected
     /// Ein Teil wird nach einem Verbindungsabbruch erneut gesendet (`labels` Etiketten).
     case resending(labels: Int)
+    /// Nach einem Verbindungsabbruch lässt sich nicht prüfen, ob der Drucker neu gestartet wurde (er
+    /// meldet den Neustart-Merker nicht): Nichts wird automatisch wiederholt; bis zu `labels`
+    /// Etiketten fehlen möglicherweise.
+    case uncertain(labels: Int)
     /// Abgebrochen (`~JA` gesendet).
     case cancelled(printed: Int, total: Int)
     /// Alle Etiketten gedruckt (bzw. bei Versand in einem Stück: übergeben).
@@ -143,11 +147,15 @@ public struct PacedJobResult: Sendable, Hashable {
     public var total: Int
     /// Etikett für Etikett gesendet und überwacht.
     public var paced: Bool
+    /// Etiketten, die nach einem nicht prüfbaren Verbindungsabbruch möglicherweise fehlen
+    /// (``PacedJobEvent/uncertain(labels:)``).
+    public var uncertain: Int
 
-    public init(printed: Int, total: Int, paced: Bool) {
+    public init(printed: Int, total: Int, paced: Bool, uncertain: Int = 0) {
         self.printed = printed
         self.total = total
         self.paced = paced
+        self.uncertain = uncertain
     }
 }
 
@@ -169,10 +177,15 @@ public struct PacedJobResult: Sendable, Hashable {
 ///    prüfen; danach ``PacedJobEvent/resumed(printed:total:)``. Das unterbrochene Etikett druckt der
 ///    Drucker wegen `^JZY` selbst erneut. Pausiert er nach dem Fehler, folgt `~PS`.
 /// 5. Abbruch (Task-Abbruch): `~JA` leert den Drucker, dann `CancellationError`.
-/// 6. Verbindungsabbruch: neu verbinden (mit wachsendem Abstand). War das Format schon im Drucker und
-///    meldet er danach weder Formate noch Restetiketten, gilt es als gedruckt – außer der Drucker stand
-///    zuletzt wegen eines Fehlers (dann wurde er vermutlich aus- und eingeschaltet): Dann werden die
-///    restlichen Exemplare erneut gesendet. Ein nur teilweise gesendetes Format verwirft `~JX`.
+/// 6. Vor dem ersten Etikett (Drucker bereit) speichert `~DG` den Neustart-Merker `R:LWAPP.GRF`
+///    (1 Byte im RAM, beim Aus- und Einschalten weg); `^HW` prüft einmal, ob der Drucker ihn meldet.
+/// 7. Verbindungsabbruch: neu verbinden (mit wachsendem Abstand). Meldet der Drucker danach Formate
+///    oder Restetiketten, hat er seinen Puffer behalten: weiter warten. Ist er leer, entscheidet der
+///    Merker (sobald der Drucker bereit ist): vorhanden → er hat inzwischen fertig gedruckt, nichts
+///    wiederholen; fehlt → er wurde neu gestartet: Kopf samt `^JZY` und die zuletzt gemeldeten
+///    restlichen Exemplare erneut senden (auch ohne vorherigen Fehler). Meldet er den Merker nicht,
+///    wird nichts automatisch wiederholt (``PacedJobEvent/uncertain(labels:)``). Ein nur teilweise
+///    gesendetes Format verwirft `~JX`, dann geht es erneut hinaus.
 public struct PacedJobSender: Sendable {
     public let client: PrinterClient
     public var options: PacedJobOptions
@@ -257,6 +270,21 @@ private final class PacedJobRun {
     private var faultSeen = false
     /// Letzter verstandener Status.
     private var lastStatus: HostStatus?
+    /// Zuletzt gemeldete Restexemplare des Segments im Drucker.
+    private var seenRemaining = 0
+
+    /// Neustart-Merker dieses Senders (das CUPS-Backend nutzt `R:LWJOB.GRF`).
+    static let markerPath = "R:LWAPP.GRF"
+    /// Merker gespeichert (vor dem ersten Etikett).
+    private var sessionArmed = false
+    /// Der Drucker meldet den Merker per `^HW` (geprüft beim ersten Speichern).
+    private var markerSupported = false
+    /// Etiketten, deren Druck nach einem Verbindungsabbruch nicht prüfbar war.
+    private var uncertain = 0
+    /// Kopf (Prolog + `^JZY`) samt Aufteilung nach `~JA` – für einen Neustart des Druckers.
+    private var head = Data()
+    private var headSplit: Int?
+    private var headDelay = 0
 
     init(client: PrinterClient, options: PacedJobOptions, plan: PacedJobPlan,
          onEvent: @escaping @Sendable (PacedJobEvent) -> Void) {
@@ -289,6 +317,9 @@ private final class PacedJobRun {
                 head += Data("\n".utf8)
             }
             let split = cancelPrefixLength.flatMap { $0 > 0 && $0 <= plan.prologue.count ? $0 : nil }
+            self.head = head
+            self.headSplit = split
+            self.headDelay = delayMilliseconds
             try await withReconnect { [client] in
                 try await client.sendJob(head, cancelPrefixLength: split, delayMilliseconds: delayMilliseconds)
             }
@@ -302,6 +333,9 @@ private final class PacedJobRun {
                 let epilogue = plan.epilogue
                 try await withReconnect { [client] in try await client.send(epilogue) }
             }
+            if sessionArmed {
+                await client.deleteVolatileMarker(Self.markerPath, characters: characters)
+            }
         } catch {
             if error is CancellationError || Task.isCancelled {
                 await cancelOnPrinter()
@@ -311,7 +345,7 @@ private final class PacedJobRun {
             throw error
         }
         onEvent(.finished(printed: total, total: total))
-        return PacedJobResult(printed: total, total: total, paced: true)
+        return PacedJobResult(printed: total, total: total, paced: true, uncertain: uncertain)
     }
 
     /// Zuletzt gemeldeter Stand (für den Abbruch).
@@ -329,27 +363,35 @@ private final class PacedJobRun {
     private func printSegment(_ segment: PacedJobPlan.Segment) async throws {
         // Erst senden, wenn der Drucker nichts anderes mehr druckt (auch keinen fremden Auftrag).
         try await awaitIdleBeforeSending()
+        try await armIfNeeded()
         var pending: PacedJobPlan.Segment? = segment
         var inPrinter = segment
         var alreadyPrinted = 0
+        seenRemaining = segment.quantity
         while true {
             if let toSend = pending {
                 do {
                     try await client.send(toSend.data)
                     pending = nil
                     inPrinter = toSend
+                    seenRemaining = toSend.quantity
                 } catch where Self.isConnectionError(error) {
                     try await reconnect(after: error)
                     // Was ist angekommen? Teilformat verwerfen und neu senden; liegt das Format
-                    // vollständig im Drucker, nicht doppelt senden.
+                    // vollständig im Drucker, nicht doppelt senden. Wurde der Drucker neu gestartet,
+                    // vorher den Kopf (Einstellungen, ^JZY, Merker) erneut senden.
                     let status = try await statusAfterReconnect()
                     if status?.partialFormatInProgress == true {
                         try await client.send(command(ZPLCommand(.tilde, "JX")))
                     } else if let status, status.formatsInReceiveBuffer > 0 || status.labelsRemainingInBatch > 0 {
                         pending = nil
                         inPrinter = toSend
+                        seenRemaining = toSend.quantity
+                        continue
+                    } else if try await restartVerdict() == .restarted {
+                        try await resendHead()
                     }
-                    if pending != nil { onEvent(.resending(labels: toSend.quantity)) }
+                    onEvent(.resending(labels: toSend.quantity))
                     continue
                 }
             }
@@ -357,25 +399,97 @@ private final class PacedJobRun {
             case .done:
                 return
             case .connectionLost(let error):
-                let before = lastStatus
                 try await reconnect(after: error)
                 let status = try await statusAfterReconnect()
                 if let status, status.formatsInReceiveBuffer > 0 || status.labelsRemainingInBatch > 0
                     || status.partialFormatInProgress {
                     continue   // Format noch im Drucker: weiter warten.
                 }
-                // Drucker leer. Stand er zuletzt wegen eines Fehlers, wurde er vermutlich aus- und
-                // eingeschaltet – das Format ist verloren: die restlichen Exemplare erneut senden.
-                guard let before, PacedJobWaitReason.reason(for: before) != nil,
-                      before.formatsInReceiveBuffer > 0 || before.labelsRemainingInBatch > 0 else { return }
-                let remaining = before.formatsInReceiveBuffer > 0
-                    ? inPrinter.quantity
-                    : min(inPrinter.quantity, max(1, before.labelsRemainingInBatch))
-                alreadyPrinted += inPrinter.quantity - remaining
-                let resend = inPrinter.withQuantity(remaining)
-                pending = resend
-                onEvent(.resending(labels: resend.quantity))
+                // Drucker leer: fertig gedruckt oder neu gestartet? Der Merker entscheidet, nicht der
+                // letzte Wartegrund (eine Verbindung kann auch bei „Papier leer“ oder im Spendemodus
+                // abbrechen, während der Drucker seinen Puffer behält und danach allein weiterdruckt).
+                let remaining = min(inPrinter.quantity, max(1, seenRemaining))
+                switch try await restartVerdict() {
+                case .kept:
+                    return
+                case .unknown:
+                    uncertain += remaining
+                    onEvent(.uncertain(labels: remaining))
+                    return
+                case .restarted:
+                    try await resendHead()
+                    alreadyPrinted += inPrinter.quantity - remaining
+                    let resend = inPrinter.withQuantity(remaining)
+                    pending = resend
+                    onEvent(.resending(labels: resend.quantity))
+                }
             }
+        }
+    }
+
+    // MARK: Neustart-Merker
+
+    private enum RestartVerdict {
+        /// Der Drucker hat seinen Puffer behalten.
+        case kept
+        /// Der Drucker wurde neu gestartet (Puffer und Einstellungen weg).
+        case restarted
+        /// Nicht prüfbar (der Drucker meldet den Merker nicht).
+        case unknown
+    }
+
+    /// Vor dem ersten Etikett (der Drucker ist bereit): Merker speichern und einmal prüfen, ob der
+    /// Drucker ihn per `^HW` meldet.
+    private func armIfNeeded() async throws {
+        guard !sessionArmed else { return }
+        while true {
+            do {
+                try await client.storeVolatileMarker(Self.markerPath, characters: characters)
+                let listed = try await client.volatileMarkerExists(Self.markerPath, characters: characters,
+                                                                   timeout: options.statusTimeout)
+                markerSupported = listed == true
+                sessionArmed = true
+                return
+            } catch where Self.isConnectionError(error) {
+                try await reconnect(after: error)
+            }
+        }
+    }
+
+    /// Nach dem Wiederverbinden mit leerem Drucker: neu gestartet? `^HW` bearbeitet der Drucker erst,
+    /// wenn er bereit ist – Fehler und Pausen werden dafür abgewartet (mit Wartegründen wie sonst).
+    private func restartVerdict() async throws -> RestartVerdict {
+        guard markerSupported else { return .unknown }
+        while true {
+            switch try await awaitSegment(nil, alreadyPrinted: 0) {
+            case .done:
+                break
+            case .connectionLost(let error):
+                try await reconnect(after: error)
+                continue
+            }
+            do {
+                guard let listed = try await client.volatileMarkerExists(Self.markerPath, characters: characters,
+                                                                         timeout: options.statusTimeout) else {
+                    return .unknown
+                }
+                return listed ? .kept : .restarted
+            } catch where Self.isConnectionError(error) {
+                try await reconnect(after: error)
+            }
+        }
+    }
+
+    /// Nach einem Neustart des Druckers: Kopf (mit `~JA`-Pause) samt `^JZY` und den Merker erneut senden.
+    private func resendHead() async throws {
+        let head = self.head
+        let split = headSplit
+        let delay = headDelay
+        let marker = Self.markerPath
+        let characters = self.characters
+        try await withReconnect { [client] in
+            try await client.sendJob(head, cancelPrefixLength: split, delayMilliseconds: delay)
+            try await client.storeVolatileMarker(marker, characters: characters)
         }
     }
 
@@ -414,6 +528,11 @@ private final class PacedJobRun {
             let busy = status.formatsInReceiveBuffer > 0 || status.labelsRemainingInBatch > 0
                 || status.partialFormatInProgress
             if let segment {
+                if status.formatsInReceiveBuffer > 0 {
+                    seenRemaining = segment.quantity
+                } else if status.labelsRemainingInBatch > 0 {
+                    seenRemaining = min(segment.quantity, status.labelsRemainingInBatch)
+                }
                 let started = status.formatsInReceiveBuffer == 0 && !status.partialFormatInProgress
                 let printedHere = started
                     ? max(0, segment.quantity - min(segment.quantity, status.labelsRemainingInBatch)) : 0

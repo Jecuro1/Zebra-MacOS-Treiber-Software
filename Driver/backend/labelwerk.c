@@ -8,24 +8,39 @@
  * Drucker sind, schickt dieses Backend einen ZPL-Auftrag Etikett für Etikett:
  *
  *   1. Verbinden (TCP), ~HS abfragen (antwortet der Drucker nicht: wie `socket` am Stück senden).
- *   2. ^XA^JZY^XZ – der Drucker druckt das Etikett, bei dem ein Fehler auftrat, danach erneut.
- *   3. Auftragskopf (alles vor dem ersten ^XA) senden, dann je Format ^XA…^XZ: vorher per ~HS
- *      warten, bis der Drucker nichts mehr im Puffer hat (keine Formate, keine Restetiketten, kein
- *      Fehler). So liegt nie mehr als ein Format im Drucker; der Auftrag bleibt in der
- *      macOS-Warteschlange, bis das letzte Etikett gedruckt ist.
- *   4. Papier leer, Farbband leer, Druckkopf offen, Pause: CUPS erfährt es über
- *      „STATE: +media-empty-error“ usw. und eine deutsche INFO-Meldung; das Backend fragt alle 2 s
- *      nach und setzt fort, sobald der Fehler behoben ist (der Drucker wiederholt das
- *      unterbrochene Etikett wegen ^JZY selbst).
- *   5. Verbindungsabbruch: neu verbinden (1 s, 2 s, 4 s … höchstens 30 s, unbegrenzt oft). War der
- *      Drucker beim Abbruch im Fehlerzustand und meldet danach einen leeren Puffer (aus- und
- *      eingeschaltet, um Etiketten einzulegen), gehen Auftragskopf und das offene Format mit den
- *      restlichen Etiketten erneut hinaus. Ein unvollständig gesendetes Format verwirft ~JA vor dem
- *      erneuten Senden.
- *   6. Abbrechen (SIGTERM): ~JA leert den Druckerpuffer, dann Ende.
+ *   2. Auftragskopf (alles vor dem ersten ^XA) senden. Beginnt er mit ~JA („Aufträge vor dem
+ *      Drucken abbrechen“), folgt nach der ~JA-Zeile die Pause lwCancelDelay wie im Filter – ~JA
+ *      löscht die Daten vor sich im Empfangspuffer.
+ *   3. Vor dem ersten druckenden Format, sobald der Drucker bereit ist: ^XA^JZY^XZ (der Drucker
+ *      druckt das Etikett, bei dem ein Fehler auftrat, danach erneut) und der Neustart-Merker
+ *      R:LWJOB.GRF (~DG, 1 Byte im RAM, verschwindet beim Aus- und Einschalten); ^HW prüft einmal,
+ *      ob der Drucker ihn meldet.
+ *   4. Je Format ^XA…^XZ: vorher per ~HS warten, bis der Drucker nichts mehr im Puffer hat (keine
+ *      Formate, keine Restetiketten, kein Fehler). So liegt nie mehr als ein Format im Drucker; der
+ *      Auftrag bleibt in der macOS-Warteschlange, bis das letzte Etikett gedruckt ist. Das erste
+ *      Etikett geht los, sobald es vom Filter vollständig da ist; während des Wartens liest das
+ *      Backend weiter (Gesamtzahl „Etikett 3 von 50“, sobald das Auftragsende gelesen ist).
+ *   5. Papier leer, Farbband leer (nur Thermotransfer), Druckkopf offen, Pause: CUPS erfährt es
+ *      über „STATE: +media-empty-error“ usw. und eine deutsche INFO-Meldung; das Backend fragt alle
+ *      2 s nach und setzt fort, sobald der Fehler behoben ist (der Drucker wiederholt das
+ *      unterbrochene Etikett wegen ^JZY selbst). Bleibt der Drucker nach einem solchen Fehler
+ *      angehalten (viele Modelle nach dem Einlegen), setzt ~PS ihn fort; eine Pause ohne
+ *      vorherigen Fehler bleibt dem Benutzer überlassen.
+ *   6. Verbindungsabbruch: neu verbinden (1 s, 2 s, 4 s … höchstens 30 s, unbegrenzt oft). Ob der
+ *      Drucker dabei neu gestartet wurde, entscheidet sein Zustand, nicht eine Vermutung: Daten im
+ *      Puffer → behalten; Antwort nur mit den gespeicherten Steuerzeichen → neu gestartet; sonst
+ *      (sobald er bereit ist) der Neustart-Merker per ^HW. Behalten: nichts erneut senden – was er
+ *      inzwischen gedruckt hat, zählt. Neu gestartet: Auftragskopf, ^JZY, Merker und das offene
+ *      Format mit den zuletzt gemeldeten Restetiketten erneut (auch ohne vorherigen Fehler).
+ *      Meldet der Drucker den Merker nicht: nichts automatisch wiederholen, WARNING mit der Zahl
+ *      der möglicherweise fehlenden Etiketten. Beim Senden abgebrochen: ein Teilformat verwirft
+ *      ~JX, dann geht das Format erneut hinaus; liegt es vollständig im Drucker, nicht.
+ *   7. Downloads (~DG, ~DY …) und Binärdaten: ab dort am Stück, ohne ~HS dazwischen.
+ *   8. Abbrechen (SIGTERM): ~JA leert den Druckerpuffer, dann Ende.
  *
- * EPL/CPCL (lwLanguage), lwResumeOnError=False in den Auftragsoptionen und ?mode=stream senden wie
- * `socket` am Stück.
+ * Am Stück gesendet (EPL/CPCL, lwResumeOnError=False, ?mode=stream, Drucker ohne ~HS, Rest nach
+ * einem Download) gilt wie bei `socket`: Bricht die Verbindung ab, nachdem Auftragsdaten gesendet
+ * wurden, endet der Auftrag mit einem Fehler statt alles erneut (doppelt) zu senden.
  *
  * Rechte: root:wheel 0755 – CUPS startet Backends, die für „andere“ ausführbar sind, als
  * unprivilegierter Benutzer (lp/_lp); 0700 hieße Ausführung als root, die dieses Backend nicht
@@ -33,7 +48,8 @@
  *
  * Umgebung nur für Tests: LW_BACKEND_POLL_MS, LW_BACKEND_ERROR_POLL_MS, LW_BACKEND_REPLY_TIMEOUT_MS,
  * LW_BACKEND_STALL_MS, LW_BACKEND_RECONNECT_MS, LW_BACKEND_RECONNECT_MAX_MS,
- * LW_BACKEND_RECONNECT_LIMIT, LW_BACKEND_CONNECT_TIMEOUT_MS, LW_BACKEND_CANCEL_DELAY_MS.
+ * LW_BACKEND_RECONNECT_LIMIT, LW_BACKEND_CONNECT_TIMEOUT_MS, LW_BACKEND_CANCEL_DELAY_MS (Pause nach
+ * ~JX bzw. dem ~JA beim Abbruch), LW_BACKEND_SNDBUF (Sendepuffer des Sockets in Byte).
  *
  * Copyright (c) LabelWerk-Projekt. Zebra ist eine Marke der Zebra Technologies Corp.
  */
@@ -71,7 +87,7 @@ enum {
     BACKEND_RETRY = 6
 };
 
-/* Höchstmenge, die vor dem ersten Etikett gelesen wird, um die Gesamtzahl zu kennen. */
+/* Höchstmenge der Eingabe, die im Speicher vorausgelesen wird (Gesamtzahl der Etiketten). */
 #define READ_AHEAD_LIMIT (64u * 1024u * 1024u)
 /* Auftragskopf, der nach einem Neustart des Druckers erneut gesendet wird (höchstens). */
 #define PROLOGUE_LIMIT (256u * 1024u)
@@ -142,20 +158,89 @@ static long env_ms(const char *name, long fallback, long minimum)
 }
 
 /* ------------------------------------------------------------------------------------------ */
+/* Eingabe                                                                                    */
+/* ------------------------------------------------------------------------------------------ */
+
+typedef struct input {
+    int fd;
+    lw_buf data;
+    size_t pos;
+    bool eof;
+    bool failed;      /* Lesefehler beim Vorauslesen (pump_input) */
+} input;
+
+/* Eingabe des Auftrags; pump_input liest während des Wartens auf den Drucker weiter. */
+static input *g_input = NULL;
+
+/* Liest weitere Daten (blockierend). 0 = gelesen bzw. Ende, -1 = Fehler, -2 = Abbruch. */
+static int read_more(input *in)
+{
+    if (in->pos > 0 && in->pos >= in->data.len / 2) {
+        memmove(in->data.data, in->data.data + in->pos, in->data.len - in->pos);
+        in->data.len -= in->pos;
+        in->pos = 0;
+    }
+    uint8_t chunk[65536];
+    for (;;) {
+        if (g_cancel)
+            return -2;
+        ssize_t got = read(in->fd, chunk, sizeof(chunk));
+        if (got < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        if (got == 0) {
+            in->eof = true;
+            return 0;
+        }
+        lw_buf_append(&in->data, chunk, (size_t)got);
+        return in->data.failed ? -1 : 0;
+    }
+}
+
+/*
+ * Liest, was der Filter schon geliefert hat, ohne zu warten (höchstens READ_AHEAD_LIMIT im
+ * Speicher). So kennt das Backend früh das Auftragsende (Gesamtzahl der Etiketten), und der Filter
+ * rendert weiter, während der Drucker druckt. Darf Daten im Puffer verschieben: Aufrufer halten
+ * keine Zeiger in den Eingabepuffer über diesen Aufruf hinweg.
+ */
+static void pump_input(void)
+{
+    input *in = g_input;
+    if (in == NULL)
+        return;
+    while (!in->eof && !in->failed && !g_cancel && in->data.len - in->pos < READ_AHEAD_LIMIT) {
+        struct pollfd pfd = { in->fd, POLLIN, 0 };
+        if (poll(&pfd, 1, 0) <= 0 || (pfd.revents & (POLLIN | POLLHUP | POLLERR)) == 0)
+            return;
+        if (read_more(in) == -1)
+            in->failed = true;
+    }
+}
+
+/* ------------------------------------------------------------------------------------------ */
 /* Auftrag                                                                                    */
 /* ------------------------------------------------------------------------------------------ */
 
 typedef struct timing {
     long poll;            /* Abfrage während des Drucks */
     long error_poll;      /* Abfrage im Fehlerzustand (2 s) */
-    long reply_timeout;   /* Wartezeit auf eine ~HS-Antwort */
+    long reply_timeout;   /* Wartezeit auf eine ~HS- bzw. ^HW-Antwort */
     long stall;           /* so lange ohne Antwort → Verbindung gilt als verloren */
     long reconnect;       /* erste Wartezeit vor einem neuen Verbindungsversuch */
     long reconnect_max;
     long reconnect_limit; /* 0 = unbegrenzt */
     long connect_timeout;
-    long cancel_delay;    /* Wartezeit nach ~JA vor dem erneuten Senden */
+    long cancel_delay;    /* Wartezeit nach ~JX vor dem erneuten Senden */
+    long ja_delay;        /* Wartezeit nach ~JA am Auftragsanfang (lwCancelDelay) */
 } timing;
+
+/*
+ * Neustart-Merker: eine 1-Byte-Grafik im RAM-Laufwerk R:, das der Drucker beim Ausschalten bzw.
+ * Neustart verliert. Fehlt sie nach einem Verbindungsabbruch, hat der Drucker seinen Puffer verloren.
+ */
+#define MARKER_NAME "R:LWJOB.GRF"
 
 typedef struct job {
     char host[512];
@@ -166,27 +251,42 @@ typedef struct job {
     lw_buf rx;
 
     lwb_prefixes start_prefixes;   /* Steuerzeichen am Auftragsanfang */
-    lwb_prefixes prefixes;         /* aktuelle Steuerzeichen (für ~HS, ~JA) */
+    /* Steuerzeichen, die der Drucker gerade hat (für ~HS, ~JA): immer die am Ende der zuletzt
+     * vollständig gesendeten Daten. */
+    lwb_prefixes prefixes;
 
     lw_buf prologue;               /* Rohdaten vor dem ersten Format (für einen Neustart) */
+    lwb_prefixes prologue_prefixes;/* Steuerzeichen am Ende des Auftragskopfs */
     bool prologue_closed;
+
+    /* ^JZY und Neustart-Merker gesendet (vor dem ersten druckenden Format). */
+    bool session_armed;
+    bool marker_checked;
+    bool marker_ok;                /* der Drucker meldet den Merker per ^HW */
+
+    /* Nächstes Format (Kopie aus der Eingabe, solange auf den Drucker gewartet wird). */
+    lw_buf next;
 
     /* Offenes Format: gesendet, aber noch nicht vollständig gedruckt. */
     lw_buf outstanding;
-    lwb_prefixes outstanding_prefixes;
+    lwb_prefixes outstanding_prefixes;   /* am Formatanfang */
+    lwb_prefixes outstanding_after;      /* am Formatende */
     bool outstanding_active;
     bool outstanding_written;
     long outstanding_quantity;
     long outstanding_remaining;   /* zuletzt gemeldete Restetiketten (> 0) */
-    bool outstanding_error;       /* Fehlerzustand seit dem Senden gesehen */
     bool outstanding_seen;        /* Drucker hat das Format schon gemeldet (Puffer/Rest) */
 
     long labels_done;
     long labels_total;            /* 0 = unbekannt */
+    long labels_uncertain;        /* nach Verbindungsabbruch nicht prüfbar */
     long reported_label;
     unsigned reported_reasons;
     bool reported_connecting;
     bool anything_sent;
+    bool data_sent;               /* Auftragsdaten (nicht nur Abfragen) gesendet */
+    bool fault_seen;      /* Papier/Farbband/Kopf seit dem letzten fehlerfreien Stand */
+    bool resume_sent;     /* ~PS nach diesem Fehler schon gesendet */
 } job;
 
 /* ------------------------------------------------------------------------------------------ */
@@ -335,6 +435,9 @@ static int open_connection(job *j)
             int one = 1;
             setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+            int sndbuf = (int)env_ms("LW_BACKEND_SNDBUF", 0, 0);
+            if (sndbuf > 0)
+                setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 #ifdef SO_NOSIGPIPE
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
 #endif
@@ -348,45 +451,76 @@ static int open_connection(job *j)
     return result;
 }
 
-/* Sendet alles. 0 = gesendet, -1 = Verbindungsfehler, -2 = Abbruch. `allow_cancel` = false für ~JA. */
-static int send_all(job *j, const void *data, size_t len, bool allow_cancel)
+/*
+ * Sendet alles. 0 = gesendet, -1 = Verbindungsfehler, -2 = Abbruch. `allow_cancel` = false für ~JA.
+ * `written` (optional) erhält die Zahl der Bytes, die tatsächlich an das System übergeben wurden.
+ */
+static int send_all(job *j, const void *data, size_t len, bool allow_cancel, size_t *written)
 {
     const uint8_t *p = data;
+    size_t total = 0;
     long long last_progress = now_ms();
     long stall = j->t.stall > 300000 ? j->t.stall : 300000;
+    int rc = 0;
     while (len > 0) {
-        if (allow_cancel && g_cancel)
-            return -2;
-        if (j->fd < 0)
-            return -1;
+        if (allow_cancel && g_cancel) {
+            rc = -2;
+            break;
+        }
+        if (j->fd < 0) {
+            rc = -1;
+            break;
+        }
         struct pollfd pfd = { j->fd, POLLOUT, 0 };
         int n = poll(&pfd, 1, 250);
-        if (n < 0 && errno != EINTR)
-            return -1;
+        if (n < 0 && errno != EINTR) {
+            rc = -1;
+            break;
+        }
         if (n <= 0) {
-            if (now_ms() - last_progress > stall)
-                return -1;
+            if (now_ms() - last_progress > stall) {
+                rc = -1;
+                break;
+            }
             continue;
         }
-        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
-            return -1;
+        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            rc = -1;
+            break;
+        }
         ssize_t sent = send(j->fd, p, len, 0);
         if (sent < 0) {
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                 continue;
-            return -1;
+            rc = -1;
+            break;
         }
         p += sent;
         len -= (size_t)sent;
+        total += (size_t)sent;
         last_progress = now_ms();
         j->anything_sent = true;
     }
-    return 0;
+    if (written != NULL)
+        *written = total;
+    return rc;
 }
 
 static int send_text(job *j, const char *text, bool allow_cancel)
 {
-    return send_all(j, text, strlen(text), allow_cancel);
+    return send_all(j, text, strlen(text), allow_cancel, NULL);
+}
+
+/* Auftragsdaten senden (zählt für „Auftragsdaten gesendet“). */
+static int send_data(job *j, const uint8_t *data, size_t len, size_t *written)
+{
+    size_t local = 0;
+    int rc = send_all(j, data, len, true, &local);
+    if (local > 0)
+        j->data_sent = true;
+    if (written != NULL)
+        *written = local;
+    return rc;
 }
 
 /* Liest verfügbare Daten in j->rx. 1 = Daten, 0 = keine (Zeitablauf), -1 = Verbindung beendet. */
@@ -418,13 +552,18 @@ static void consume_rx(job *j, size_t count)
     j->rx.len -= count;
 }
 
-/* ~HS abfragen. 1 = Antwort, 0 = keine Antwort, -1 = Verbindungsfehler, -2 = Abbruch. */
-static int query_status(job *j, lwb_host_status *status)
+/* Ältere, noch nicht gelesene Antworten verwerfen. */
+static void drain_rx(job *j)
 {
-    /* Ältere Antworten verwerfen. */
     while (receive(j, 0) > 0) {
     }
     lw_buf_reset(&j->rx);
+}
+
+/* ~HS abfragen. 1 = Antwort, 0 = keine Antwort, -1 = Verbindungsfehler, -2 = Abbruch. */
+static int query_status(job *j, lwb_host_status *status)
+{
+    drain_rx(j);
     char query[4] = { (char)j->prefixes.control, 'H', 'S', '\0' };
     int rc = send_text(j, query, true);
     if (rc != 0)
@@ -448,8 +587,41 @@ static int query_status(job *j, lwb_host_status *status)
     }
 }
 
+/*
+ * ~HS mit anderen Steuerzeichen, wenn der Drucker auf die aktuellen nicht antwortet: Nach einem
+ * Neustart hat er wieder seine gespeicherten (die des Auftragsanfangs bzw. ~ ^ ,), auch wenn der
+ * Auftrag sie per ~CC/^CC/~CT gewechselt hatte. Antwortet er so, steht `*reset` auf true und
+ * j->prefixes auf den Zeichen, mit denen er geantwortet hat. Rückgabe wie query_status.
+ */
+static int query_status_any_prefix(job *j, lwb_host_status *status, bool *reset)
+{
+    int q = query_status(j, status);
+    if (q != 0)
+        return q;
+    lwb_prefixes current = j->prefixes;
+    lwb_prefixes candidates[2] = { j->start_prefixes, lwb_prefixes_standard() };
+    for (int k = 0; k < 2; k++) {
+        if (candidates[k].control == current.control || (k == 1 && candidates[1].control == candidates[0].control))
+            continue;
+        j->prefixes = candidates[k];
+        q = query_status(j, status);
+        if (q == 1) {
+            *reset = true;
+            message("DEBUG", "Drucker antwortet mit Steuerzeichen „%c“ statt „%c“ – er wurde neu gestartet.",
+                    (char)candidates[k].control, (char)current.control);
+            return 1;
+        }
+        if (q != 0) {
+            j->prefixes = current;
+            return q;
+        }
+    }
+    j->prefixes = current;
+    return 0;
+}
+
 /* ------------------------------------------------------------------------------------------ */
-/* Verbindungsaufbau und Wiederaufnahme                                                       */
+/* Druckerbefehle des Backends                                                                */
 /* ------------------------------------------------------------------------------------------ */
 
 /* ^XA^JZY^XZ mit den aktuellen Steuerzeichen. */
@@ -460,11 +632,116 @@ static int send_reprint_setting(job *j)
     return send_text(j, text, true);
 }
 
+/* Neustart-Merker speichern: ~DGR:LWJOB.GRF,1,1,00 (1 Byte, verschwindet beim Neustart). */
+static int store_marker(job *j)
+{
+    char text[64];
+    char d = (char)j->prefixes.delimiter;
+    snprintf(text, sizeof(text), "%cDG%s%c1%c1%c00\n", (char)j->prefixes.control, MARKER_NAME, d, d, d);
+    return send_text(j, text, true);
+}
+
+/* Merker am Auftragsende löschen (ohne Fehlerbehandlung). */
+static void delete_marker(job *j)
+{
+    char text[64];
+    char f = (char)j->prefixes.format;
+    snprintf(text, sizeof(text), "%cXA%cID%s%cXZ\n", f, f, MARKER_NAME, f);
+    (void)send_text(j, text, true);
+}
+
+/*
+ * Merker per ^HW abfragen. Der Drucker bearbeitet ^HW als Format – nur fragen, wenn er bereit ist
+ * (kein Fehler, keine Pause). 1 = vorhanden, 0 = fehlt, 2 = keine Antwort, -1 = Verbindungsfehler,
+ * -2 = Abbruch.
+ */
+static int check_marker(job *j)
+{
+    drain_rx(j);
+    char query[64];
+    char f = (char)j->prefixes.format;
+    snprintf(query, sizeof(query), "%cXA%cHW%s%cXZ\n", f, f, MARKER_NAME, f);
+    int rc = send_text(j, query, true);
+    if (rc != 0)
+        return rc;
+    long long deadline = now_ms() + j->t.reply_timeout;
+    for (;;) {
+        size_t consumed = 0;
+        int found = lwb_parse_directory(j->rx.data, j->rx.len, MARKER_NAME, &consumed);
+        consume_rx(j, consumed);
+        if (found >= 0)
+            return found;
+        if (g_cancel)
+            return -2;
+        long long left = deadline - now_ms();
+        if (left <= 0)
+            return 2;
+        int got = receive(j, left > 250 ? 250 : left);
+        if (got < 0)
+            return -1;
+    }
+}
+
+/* Steuerzeichen des Druckers von j->prefixes auf `to` umstellen (~CC, ~CD, ~CT). */
+static int switch_prefixes(job *j, lwb_prefixes to)
+{
+    lwb_prefixes from = j->prefixes;
+    char text[16];
+    size_t n = 0;
+    if (from.format != to.format)
+        n += (size_t)snprintf(text + n, sizeof(text) - n, "%cCC%c", (char)from.control, (char)to.format);
+    if (from.delimiter != to.delimiter)
+        n += (size_t)snprintf(text + n, sizeof(text) - n, "%cCD%c", (char)from.control, (char)to.delimiter);
+    if (from.control != to.control)
+        n += (size_t)snprintf(text + n, sizeof(text) - n, "%cCT%c", (char)from.control, (char)to.control);
+    if (n == 0)
+        return 0;
+    int rc = send_text(j, text, true);
+    if (rc == 0)
+        j->prefixes = to;
+    return rc;
+}
+
+/*
+ * Rohdaten senden; beginnen sie mit ~JA (Filteroption „Aufträge vor dem Drucken abbrechen“),
+ * zuerst nur die ~JA-Zeile, dann lwCancelDelay warten (~JA löscht die Daten vor sich im
+ * Empfangspuffer; ohne Pause träfe es auch die folgenden Befehle), dann den Rest.
+ */
+static int send_raw_split(job *j, const uint8_t *data, size_t len)
+{
+    size_t i = 0;
+    while (i < len && (data[i] == ' ' || data[i] == '\t' || data[i] == '\r' || data[i] == '\n'))
+        i++;
+    if (i + 3 <= len && data[i] == j->prefixes.control && (data[i + 1] == 'J' || data[i + 1] == 'j') &&
+        (data[i + 2] == 'A' || data[i + 2] == 'a')) {
+        size_t end = i + 3;
+        if (end < len && data[end] == '\r')
+            end++;
+        if (end < len && data[end] == '\n')
+            end++;
+        int rc = send_data(j, data, end, NULL);
+        if (rc != 0)
+            return rc;
+        message("DEBUG", "~JA gesendet – %ld ms Pause vor den weiteren Befehlen.", j->t.ja_delay);
+        sleep_ms(j->t.ja_delay);
+        if (g_cancel)
+            return -2;
+        data += end;
+        len -= end;
+    }
+    return len > 0 ? send_data(j, data, len, NULL) : 0;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Verbindungsaufbau und Wiederaufnahme                                                       */
+/* ------------------------------------------------------------------------------------------ */
+
 /*
  * Verbindet (erneut), bis der Drucker antwortet. Im getakteten Modus muss er auch ~HS
- * beantworten (`status` erhält die Antwort). 0 = verbunden, -2 = Abbruch, -3 = Versuche erschöpft.
+ * beantworten (`status` erhält die Antwort; mit `any_prefix` auch mit anderen Steuerzeichen, siehe
+ * query_status_any_prefix). 0 = verbunden, -2 = Abbruch, -3 = Versuche erschöpft.
  */
-static int connect_with_retry(job *j, lwb_host_status *status, bool *answered)
+static int connect_with_retry(job *j, lwb_host_status *status, bool *answered, bool any_prefix, bool *reset)
 {
     long delay = j->t.reconnect;
     long attempts = 0;
@@ -481,7 +758,7 @@ static int connect_with_retry(job *j, lwb_host_status *status, bool *answered)
                 report_connecting(j, false);
                 return 0;
             }
-            int q = query_status(j, status);
+            int q = any_prefix ? query_status_any_prefix(j, status, reset) : query_status(j, status);
             if (q == -2)
                 return -2;
             if (q == 1) {
@@ -490,7 +767,7 @@ static int connect_with_retry(job *j, lwb_host_status *status, bool *answered)
                 return 0;
             }
             if (q == 0) {
-                /* Verbunden, aber keine Antwort: Entscheidung beim Aufrufer (erste Verbindung). */
+                /* Verbunden, aber keine Antwort: Entscheidung beim Aufrufer. */
                 report_connecting(j, false);
                 return 0;
             }
@@ -507,6 +784,34 @@ static int connect_with_retry(job *j, lwb_host_status *status, bool *answered)
     }
 }
 
+/*
+ * Statusgründe melden; nach einem behobenen Fehler einen angehaltenen Drucker fortsetzen (~PS).
+ * Liefert die Gründe; -2 bei Abbruch (in *reasons unverändert).
+ */
+static int handle_reasons(job *j, const lwb_host_status *status, unsigned *reasons_out)
+{
+    unsigned reasons = lwb_status_reasons(status);
+    report_reasons(j, reasons);
+    if (reasons & (LWB_REASON_MEDIA_EMPTY | LWB_REASON_RIBBON_EMPTY | LWB_REASON_COVER_OPEN)) {
+        j->fault_seen = true;
+    } else if (reasons == LWB_REASON_PAUSED && j->fault_seen && !j->resume_sent) {
+        /* Viele Modelle bleiben nach dem Einlegen angehalten: nach einem Fehler dieses Auftrags
+         * selbst fortsetzen (~PS) – eine Pause ohne vorherigen Fehler hat der Benutzer gewollt. */
+        char resume[4] = { (char)j->prefixes.control, 'P', 'S', '\0' };
+        message("DEBUG", "Fehler behoben, Drucker angehalten – ~PS setzt den Druck fort.");
+        if (send_text(j, resume, true) == -2)
+            return -2;
+        j->resume_sent = true;
+    } else if (reasons == 0) {
+        j->fault_seen = false;
+        j->resume_sent = false;
+    }
+    if (status->under_temperature || status->over_temperature)
+        message("DEBUG", "Druckkopftemperatur außerhalb des Betriebsbereichs.");
+    *reasons_out = reasons;
+    return 0;
+}
+
 /* Sendet das offene Format (mit der Restmenge, falls kleiner). */
 static int send_outstanding(job *j)
 {
@@ -518,76 +823,200 @@ static int send_outstanding(job *j)
         lw_buf_reset(&data);
         lw_buf_append(&data, j->outstanding.data, j->outstanding.len);
     }
-    rc = send_all(j, data.data, data.len, true);
+    rc = send_data(j, data.data, data.len, NULL);
     lw_buf_free(&data);
-    if (rc == 0)
+    if (rc == 0) {
         j->outstanding_written = true;
+        j->prefixes = j->outstanding_after;
+    }
     return rc;
 }
 
+/* Ergebnis der Neustart-Prüfung nach einem Wiederverbinden. */
+enum {
+    PRINTER_KEPT = 0,      /* Drucker hat seinen Puffer behalten */
+    PRINTER_RESTARTED = 1, /* Drucker wurde neu gestartet: Puffer und Einstellungen weg */
+    PRINTER_UNKNOWN = 2    /* nicht prüfbar (Drucker meldet den Merker nicht) */
+};
+
 /*
- * Nach einem Verbindungsabbruch: neu verbinden und entscheiden, ob das offene Format erneut
- * gesendet werden muss. 0 = weiter, -2 = Abbruch, -3 = aufgegeben.
+ * Wurde der Drucker während der Unterbrechung neu gestartet? Entscheidet nach dem Druckerzustand,
+ * nicht nach Vermutungen: Daten im Puffer bzw. ein Teilformat → behalten; Antwort nur mit den
+ * gespeicherten Steuerzeichen → neu gestartet; sonst der Neustart-Merker im RAM (^HW). Weil der
+ * Drucker ^HW als Format erst bearbeitet, wenn er bereit ist, wird bei Papier leer usw. zuerst
+ * gewartet (mit STATE-Meldungen wie beim Drucken). -1 = Verbindungsfehler, -2 = Abbruch.
+ */
+static int restart_verdict(job *j, lwb_host_status *status, bool prefixes_reset, bool had_partial)
+{
+    if (prefixes_reset)
+        return PRINTER_RESTARTED;
+    if (had_partial)
+        return PRINTER_KEPT;
+    long long last_answer = now_ms();
+    for (;;) {
+        if (status->formats_in_buffer > 0 || status->labels_remaining > 0)
+            return PRINTER_KEPT;
+        if (!j->marker_ok)
+            return PRINTER_UNKNOWN;
+        unsigned reasons = 0;
+        if (handle_reasons(j, status, &reasons) == -2)
+            return -2;
+        if (reasons == 0) {
+            int m = check_marker(j);
+            if (m < 0)
+                return m;
+            if (m == 2) {
+                message("DEBUG", "Keine Antwort auf ^HW nach dem Wiederverbinden.");
+                return PRINTER_UNKNOWN;
+            }
+            return m == 1 ? PRINTER_KEPT : PRINTER_RESTARTED;
+        }
+        sleep_ms(j->t.error_poll);
+        int q = query_status(j, status);
+        if (q == -2)
+            return -2;
+        if (q == 1) {
+            last_answer = now_ms();
+            continue;
+        }
+        if (q == 0 && now_ms() - last_answer < j->t.stall)
+            continue;
+        return -1;
+    }
+}
+
+/*
+ * Nach einem Neustart des Druckers: Auftragskopf (mit den Steuerzeichen des Auftragsanfangs),
+ * danach ^JZY und Neustart-Merker erneut senden; zuletzt die Steuerzeichen `target` einstellen.
+ */
+static int resend_session(job *j, lwb_prefixes target)
+{
+    int rc = switch_prefixes(j, j->start_prefixes);
+    if (rc != 0)
+        return rc;
+    if (j->prologue.len > 0) {
+        rc = send_raw_split(j, j->prologue.data, j->prologue.len);
+        if (rc != 0)
+            return rc;
+        j->prefixes = j->prologue_prefixes;
+    }
+    rc = switch_prefixes(j, target);
+    if (rc != 0)
+        return rc;
+    if (j->session_armed) {
+        rc = send_reprint_setting(j);
+        if (rc == 0)
+            rc = store_marker(j);
+    }
+    return rc;
+}
+
+/* Nach dem Wiederverbinden je nach Neustart-Prüfung fortsetzen. 0 = weiter, -1/-2 wie send_all. */
+static int resume_after_reconnect(job *j, int verdict, bool busy, lwb_prefixes expected)
+{
+    int rc;
+    if (j->outstanding_active && !j->outstanding_written) {
+        /* Beim Senden des Formats abgebrochen. */
+        if (busy && verdict == PRINTER_KEPT) {
+            j->outstanding_written = true;   /* vollständig angekommen */
+            j->prefixes = j->outstanding_after;
+            return 0;
+        }
+        if (verdict == PRINTER_RESTARTED) {
+            message("INFO", "Drucker wurde neu gestartet – Auftragseinstellungen werden erneut gesendet.");
+            rc = resend_session(j, j->outstanding_prefixes);
+            if (rc != 0)
+                return rc;
+        }
+        /* Das Format kam nicht vollständig an (ein Teilformat hat ~JX verworfen): erneut senden. */
+        j->outstanding_seen = false;
+        return send_outstanding(j);
+    }
+    if (j->outstanding_active) {
+        if (verdict == PRINTER_KEPT)
+            return 0;   /* liegt noch im Drucker bzw. ist gedruckt – wait_until_idle zählt es */
+        long remaining = j->outstanding_seen && j->outstanding_remaining > 0 ? j->outstanding_remaining
+                                                                             : j->outstanding_quantity;
+        if (verdict == PRINTER_UNKNOWN) {
+            /* Nicht raten: erneut senden könnte doppelt drucken, nicht senden Etiketten auslassen. */
+            message("WARNING", "Verbindung zum Drucker unterbrochen – ob er neu gestartet wurde, lässt sich "
+                               "nicht prüfen. Möglicherweise fehlen bis zu %ld Etikett(en); bitte nachzählen.",
+                    remaining);
+            j->labels_uncertain += remaining;
+            return 0;
+        }
+        /* Neu gestartet: Kopf, ^JZY, Merker und die restlichen Etiketten erneut senden. */
+        if (remaining < j->outstanding_quantity) {
+            j->labels_done += j->outstanding_quantity - remaining;
+            j->outstanding_quantity = remaining;
+        }
+        message("INFO", "Drucker wurde neu gestartet – %ld Etikett(en) werden erneut gesendet.", remaining);
+        rc = resend_session(j, j->outstanding_prefixes);
+        if (rc != 0)
+            return rc;
+        j->outstanding_written = false;
+        j->outstanding_seen = false;
+        j->outstanding_remaining = remaining;
+        return send_outstanding(j);
+    }
+    if (verdict == PRINTER_RESTARTED && (j->session_armed || j->prologue.len > 0)) {
+        message("INFO", "Drucker wurde neu gestartet – Auftragseinstellungen werden erneut gesendet.");
+        return resend_session(j, expected);
+    }
+    return 0;
+}
+
+/*
+ * Nach einem Verbindungsabbruch (nur getaktet): neu verbinden, prüfen, ob der Drucker neu
+ * gestartet wurde, und das Nötige erneut senden. 0 = weiter, -2 = Abbruch, -3 = aufgegeben.
  */
 static int recover(job *j)
 {
-    bool was_error = j->outstanding_error;
+    lwb_prefixes expected = j->prefixes;
     close_connection(j);
     message("INFO", "Verbindung zum Drucker %s:%d unterbrochen – wird neu aufgebaut.", j->host, j->port);
     for (;;) {
         lwb_host_status status;
         bool answered = false;
+        bool reset = false;
+        j->prefixes = expected;
         report_connecting(j, true);
-        int rc = connect_with_retry(j, &status, &answered);
+        int rc = connect_with_retry(j, &status, &answered, true, &reset);
         if (rc != 0)
             return rc;
         if (!answered) {
-            /* Verbunden, aber stumm: wie ein Abbruch behandeln. */
+            /* Verbunden, aber stumm (auch mit den gespeicherten Steuerzeichen): erneut versuchen. */
+            message("DEBUG", "Drucker antwortet nicht auf ~HS – neue Verbindung.");
             close_connection(j);
             sleep_ms(j->t.reconnect);
             continue;
         }
         report_connecting(j, false);
-        if (!j->paced)
-            return 0;
-        if (send_reprint_setting(j) != 0) {
-            close_connection(j);
-            continue;
-        }
-        if (!j->outstanding_active)
-            return 0;
-        bool power_cycled = j->outstanding_written && was_error && lwb_status_idle(&status);
-        if (j->outstanding_written && !power_cycled)
-            return 0;   /* Das Format liegt noch im Drucker bzw. ist gedruckt. */
-        if (power_cycled) {
-            /* Der Drucker hat seinen Puffer verloren: Kopf und Rest des Formats erneut senden. */
-            long remaining = j->outstanding_seen && j->outstanding_remaining > 0
-                                 ? j->outstanding_remaining : j->outstanding_quantity;
-            if (remaining < j->outstanding_quantity) {
-                j->labels_done += j->outstanding_quantity - remaining;
-                j->outstanding_quantity = remaining;
-            }
-            message("INFO", "Drucker wurde neu gestartet – %ld Etikett(en) werden erneut gesendet.", remaining);
-            if (j->prologue.len > 0 && send_all(j, j->prologue.data, j->prologue.len, true) != 0) {
-                close_connection(j);
-                continue;
-            }
-        } else {
-            /* Teilweise gesendet: Rest im Drucker verwerfen. */
-            char cancel[4] = { (char)j->prefixes.control, 'J', 'A', '\0' };
-            if (send_text(j, cancel, true) != 0) {
+        bool had_partial = status.partial_format;
+        if (had_partial) {
+            /* Teilformat im Drucker (beim Senden abgebrochen): nur dieses verwerfen (~JX). */
+            char cancel[4] = { (char)j->prefixes.control, 'J', 'X', '\0' };
+            rc = send_text(j, cancel, true);
+            if (rc == -2)
+                return -2;
+            if (rc != 0) {
                 close_connection(j);
                 continue;
             }
             sleep_ms(j->t.cancel_delay);
         }
-        j->outstanding_written = false;
-        j->outstanding_error = false;
-        j->outstanding_seen = false;
-        int sent = send_outstanding(j);
-        if (sent == -2)
+        bool busy = status.formats_in_buffer > 0 || status.labels_remaining > 0;
+        int verdict = restart_verdict(j, &status, reset, had_partial);
+        if (verdict == -2)
             return -2;
-        if (sent != 0) {
+        if (verdict == -1) {
+            close_connection(j);
+            continue;
+        }
+        rc = resume_after_reconnect(j, verdict, busy, expected);
+        if (rc == -2)
+            return -2;
+        if (rc != 0) {
             close_connection(j);
             continue;
         }
@@ -597,7 +1026,8 @@ static int recover(job *j)
 
 /*
  * Wartet, bis der Drucker nichts mehr zu tun hat (offenes Format vollständig gedruckt, kein
- * Fehler). 0 = bereit, -2 = Abbruch, -3 = aufgegeben.
+ * Fehler). Liest währenddessen die Eingabe weiter (pump_input). 0 = bereit, -2 = Abbruch,
+ * -3 = aufgegeben.
  */
 static int wait_until_idle(job *j)
 {
@@ -623,13 +1053,10 @@ static int wait_until_idle(job *j)
             continue;
         }
         last_answer = now_ms();
-        unsigned reasons = lwb_status_reasons(&status);
-        report_reasons(j, reasons);
-        if (status.under_temperature || status.over_temperature)
-            message("DEBUG", "Druckkopftemperatur außerhalb des Betriebsbereichs.");
+        unsigned reasons = 0;
+        if (handle_reasons(j, &status, &reasons) == -2)
+            return -2;
         if (j->outstanding_active) {
-            if (reasons != 0)
-                j->outstanding_error = true;
             if (status.formats_in_buffer > 0 || status.labels_remaining > 0) {
                 j->outstanding_seen = true;
                 if (status.formats_in_buffer == 0 && status.labels_remaining > 0)
@@ -656,42 +1083,82 @@ static int wait_until_idle(job *j)
         } else {
             idle_streak = 0;
         }
+        pump_input();
         sleep_ms(reasons != 0 ? j->t.error_poll : j->t.poll);
     }
 }
 
-/* Sendet Daten; bei einem Verbindungsfehler neu verbinden und erneut senden (nur Rohdaten). */
-static int send_raw_resilient(job *j, const uint8_t *data, size_t len)
+/*
+ * Vor dem ersten druckenden Format (der Drucker ist bereit): ^XA^JZY^XZ – nach dem Auftragskopf,
+ * damit ein ~JA darin es nicht verwirft – und den Neustart-Merker speichern; beim ersten Mal prüfen,
+ * ob der Drucker ihn per ^HW meldet. 0 = erledigt, -1 = Verbindungsfehler, -2 = Abbruch.
+ */
+static int arm_session(job *j)
+{
+    int rc = send_reprint_setting(j);
+    if (rc != 0)
+        return rc;
+    rc = store_marker(j);
+    if (rc != 0)
+        return rc;
+    if (!j->marker_checked) {
+        int m = check_marker(j);
+        if (m < 0)
+            return m;
+        j->marker_checked = true;
+        j->marker_ok = m == 1;
+        if (!j->marker_ok)
+            message("DEBUG", "Drucker meldet den Neustart-Merker %s nicht – nach einem Verbindungsabbruch "
+                             "wird nichts automatisch wiederholt.", MARKER_NAME);
+    }
+    j->session_armed = true;
+    return 0;
+}
+
+/* Rohdaten (Auftragskopf, nicht druckende Formate) senden; nach einem Verbindungsabbruch vollständig
+ * erneut (kurz und wiederholbar; ein Teilformat verwirft recover() per ~JX). */
+static int send_raw_paced(job *j, const uint8_t *data, size_t len, lwb_prefixes after)
 {
     for (;;) {
-        int rc = send_all(j, data, len, true);
+        int rc = send_raw_split(j, data, len);
+        if (rc == 0) {
+            j->prefixes = after;
+            return 0;
+        }
         if (rc != -1)
             return rc;
         rc = recover(j);
         if (rc != 0)
             return rc;
-        /* Rohdaten (Kopf, Steuerbefehle) sind kurz: vollständig erneut senden. */
     }
 }
 
-/* Ein druckendes Format getaktet senden. */
-static int send_format_paced(job *j, const uint8_t *data, size_t len, lwb_prefixes prefixes, long quantity)
+/* Ein druckendes Format (in j->next) getaktet senden. */
+static int send_format_paced(job *j, lwb_prefixes start, lwb_prefixes after, long quantity)
 {
     int rc = wait_until_idle(j);
     if (rc != 0)
         return rc;
-    lw_buf_reset(&j->outstanding);
-    lw_buf_append(&j->outstanding, data, len);
-    if (j->outstanding.failed) {
-        message("ERROR", "Zu wenig Speicher für ein Etikett.");
-        return -3;
+    while (!j->session_armed) {
+        rc = arm_session(j);
+        if (rc == 0)
+            break;
+        if (rc != -1)
+            return rc;
+        rc = recover(j);
+        if (rc != 0)
+            return rc;
     }
-    j->outstanding_prefixes = prefixes;
+    lw_buf swap = j->outstanding;
+    j->outstanding = j->next;
+    j->next = swap;
+    lw_buf_reset(&j->next);
+    j->outstanding_prefixes = start;
+    j->outstanding_after = after;
     j->outstanding_active = true;
     j->outstanding_written = false;
     j->outstanding_quantity = quantity;
     j->outstanding_remaining = quantity;
-    j->outstanding_error = false;
     j->outstanding_seen = false;
     report_progress(j, false);
     for (;;) {
@@ -706,43 +1173,38 @@ static int send_format_paced(job *j, const uint8_t *data, size_t len, lwb_prefix
     }
 }
 
-/* ------------------------------------------------------------------------------------------ */
-/* Eingabe                                                                                    */
-/* ------------------------------------------------------------------------------------------ */
-
-typedef struct input {
-    int fd;
-    lw_buf data;
-    size_t pos;
-    bool eof;
-} input;
-
-/* Liest weitere Daten. 0 = gelesen bzw. Ende, -1 = Fehler, -2 = Abbruch. */
-static int read_more(input *in)
+/*
+ * Ungetaktet (wie socket://) senden. Bricht die Verbindung ab, nachdem schon Auftragsdaten beim
+ * Drucker sind, endet der Auftrag mit einem Fehler: Was davon angekommen ist, lässt sich nicht
+ * feststellen; erneut senden könnte doppelt drucken. Nur ohne gesendete Daten wird neu verbunden.
+ * `written` erhält die gesendeten Bytes. 0 = gesendet, -2 = Abbruch, -3 = Fehler.
+ */
+static int send_unpaced(job *j, const uint8_t *data, size_t len, size_t *written)
 {
-    if (in->pos > 0 && in->pos >= in->data.len / 2) {
-        memmove(in->data.data, in->data.data + in->pos, in->data.len - in->pos);
-        in->data.len -= in->pos;
-        in->pos = 0;
-    }
-    uint8_t chunk[65536];
+    *written = 0;
     for (;;) {
-        if (g_cancel)
-            return -2;
-        ssize_t got = read(in->fd, chunk, sizeof(chunk));
-        if (got < 0) {
-            if (errno == EINTR)
-                continue;
-            return -1;
+        bool before = j->data_sent;
+        size_t now = 0;
+        int rc = send_data(j, data, len, &now);
+        *written += now;
+        if (rc != -1)
+            return rc;
+        if (before || now > 0) {
+            message("ERROR", "Verbindung zum Drucker %s:%d beim Senden unterbrochen – der Auftrag wird nicht "
+                             "erneut gesendet, damit nichts doppelt gedruckt wird.", j->host, j->port);
+            return -3;
         }
-        if (got == 0) {
-            in->eof = true;
-            return 0;
-        }
-        lw_buf_append(&in->data, chunk, (size_t)got);
-        return in->data.failed ? -1 : 0;
+        close_connection(j);
+        bool answered = false;
+        rc = connect_with_retry(j, NULL, &answered, false, NULL);
+        if (rc != 0)
+            return rc;
     }
 }
+
+/* ------------------------------------------------------------------------------------------ */
+/* Etiketten zählen                                                                           */
+/* ------------------------------------------------------------------------------------------ */
 
 /* Zählt die Etiketten aller Formate in data[0, len). */
 static long count_labels(const uint8_t *data, size_t len, lwb_prefixes prefixes)
@@ -820,6 +1282,7 @@ int main(int argc, char *argv[])
     j.fd = -1;
     lw_buf_init(&j.rx);
     lw_buf_init(&j.prologue);
+    lw_buf_init(&j.next);
     lw_buf_init(&j.outstanding);
     j.t.poll = env_ms("LW_BACKEND_POLL_MS", 200, 1);
     j.t.error_poll = env_ms("LW_BACKEND_ERROR_POLL_MS", 2000, 1);
@@ -841,7 +1304,7 @@ int main(int argc, char *argv[])
         return BACKEND_FAILED;
     }
 
-    /* --- Auftragsoptionen (Steuerzeichen, Sprache) --------------------------------------- */
+    /* --- Auftragsoptionen (Steuerzeichen, Sprache, Wartezeit nach ~JA) -------------------- */
     lw_cups_options opts;
     lw_cups_options_open(&opts, argv[5], NULL);
     lw_settings settings;
@@ -854,6 +1317,8 @@ int main(int argc, char *argv[])
         j.start_prefixes.delimiter = (uint8_t)settings.delimiter;
     }
     j.prefixes = j.start_prefixes;
+    j.prologue_prefixes = j.start_prefixes;
+    j.t.ja_delay = settings.cancel_delay;
     const char *resume_option = lw_cups_lookup(&opts, "lwResumeOnError", LW_LEVEL_ARGV);
     char mode[32] = "";
     bool stream_requested = lwb_uri_option(options, "mode", mode, sizeof(mode)) && lw_str_ieq(mode, "stream");
@@ -885,51 +1350,51 @@ int main(int argc, char *argv[])
         in.fd = 0;
     }
 
+    int result = BACKEND_OK;
+    size_t written = 0;
+
     /* --- Verbinden ----------------------------------------------------------------------- */
     message("INFO", "Verbinde mit Drucker %s:%d …", j.host, j.port);
     lwb_host_status status;
     bool answered = false;
-    int rc = connect_with_retry(&j, &status, &answered);
+    int rc = connect_with_retry(&j, &status, &answered, false, NULL);
     if (rc == -2)
-        return finish_cancelled(&j);
+        { result = finish_cancelled(&j); goto done; }
     if (rc != 0) {
         message("ERROR", "Drucker %s:%d nicht erreichbar.", j.host, j.port);
-        return BACKEND_RETRY;
+        clear_states(&j);
+        result = BACKEND_RETRY;
+        goto done;
     }
     if (j.paced && !answered) {
         message("WARNING", "Der Drucker beantwortet ~HS nicht – der Auftrag wird ohne Fortsetzen nach "
                            "Papier- oder Farbbandende gesendet.");
         j.paced = false;
     }
-    if (j.paced) {
+    if (j.paced)
         report_reasons(&j, lwb_status_reasons(&status));
-        if (send_reprint_setting(&j) != 0 && !g_cancel) {
-            rc = recover(&j);
-            if (rc == -2)
-                return finish_cancelled(&j);
-        }
-    }
 
     /* --- Daten --------------------------------------------------------------------------- */
-    if (j.paced) {
-        /* Vorauslesen, um die Etiketten zu zählen („Etikett 3 von 50“). */
+    /* Eine Druckdatei (Kopien) ganz einlesen; vom Filter (stdin) nur, was schon da ist – das erste
+     * Etikett geht los, sobald es vollständig ist; die Gesamtzahl folgt, sobald das Ende gelesen ist. */
+    if (j.paced && argc == 7) {
         while (!in.eof && in.data.len < READ_AHEAD_LIMIT) {
             rc = read_more(&in);
             if (rc == -2)
-                return finish_cancelled(&j);
+                { result = finish_cancelled(&j); goto done; }
             if (rc != 0) {
                 message("ERROR", "Druckdaten nicht lesbar: %s", strerror(errno));
                 clear_states(&j);
-                return BACKEND_FAILED;
+                result = BACKEND_FAILED;
+                goto done;
             }
         }
-        if (in.eof) {
-            whole_input = true;
-            j.labels_total = count_labels(in.data.data, in.data.len, j.start_prefixes) * copies;
-        }
+        whole_input = in.eof;
     }
+    g_input = j.paced ? &in : NULL;
+    long labels_seen = 0;         /* Etiketten der schon gesendeten Formate (erste Kopie) */
+    bool total_known = false;
 
-    int result = BACKEND_OK;
     for (int copy = 0; copy < copies && result == BACKEND_OK; copy++) {
         if (copy > 0) {
             if (!whole_input) {
@@ -946,14 +1411,25 @@ int main(int argc, char *argv[])
         }
         for (;;) {
             if (g_cancel)
-                return finish_cancelled(&j);
+                { result = finish_cancelled(&j); goto done; }
+            if (j.paced)
+                pump_input();
+            if (in.failed) {
+                message("ERROR", "Druckdaten nicht lesbar.");
+                result = BACKEND_FAILED;
+                break;
+            }
             const uint8_t *data = in.data.data + in.pos;
             size_t len = in.data.len - in.pos;
+            if (j.paced && copy == 0 && in.eof && !total_known) {
+                total_known = true;
+                j.labels_total = (labels_seen + count_labels(data, len, j.prefixes)) * copies;
+            }
             if (!j.paced) {
                 if (len > 0) {
-                    rc = send_raw_resilient(&j, data, len);
+                    rc = send_unpaced(&j, data, len, &written);
                     if (rc == -2)
-                        return finish_cancelled(&j);
+                        { result = finish_cancelled(&j); goto done; }
                     if (rc != 0) {
                         result = BACKEND_FAILED;
                         break;
@@ -965,7 +1441,25 @@ int main(int argc, char *argv[])
             } else {
                 size_t seg = 0;
                 lwb_prefixes start = j.prefixes;
-                lwb_segment_kind kind = lwb_next_segment(data, len, in.eof, &j.prefixes, &seg);
+                lwb_prefixes after = j.prefixes;
+                lwb_segment_kind kind = lwb_next_segment(data, len, in.eof, &after, &seg);
+                if (kind != LWB_SEGMENT_NONE && lwb_segment_is_download(data, seg, start)) {
+                    /* Download (Grafik, Schrift, Firmware) bzw. Binärdaten: keine ~HS-Abfragen mehr
+                     * einschieben, der Rest geht am Stück wie bei socket://. */
+                    message("DEBUG", "Download- bzw. Binärdaten im Auftrag – Rest wird am Stück gesendet.");
+                    rc = wait_until_idle(&j);
+                    if (rc == -2) {
+                        result = finish_cancelled(&j);
+                        goto done;
+                    }
+                    if (rc != 0) {
+                        result = BACKEND_FAILED;
+                        break;
+                    }
+                    j.paced = false;
+                    g_input = NULL;
+                    continue;
+                }
                 if (kind == LWB_SEGMENT_NONE) {
                     if (in.eof)
                         break;
@@ -974,19 +1468,32 @@ int main(int argc, char *argv[])
                         lwb_format_info info;
                         lwb_format_analyze(data, seg, start, &info);
                         j.prologue_closed = true;
-                        if (info.prints)
-                            rc = send_format_paced(&j, data, seg, start, info.quantity);
-                        else
-                            rc = send_raw_resilient(&j, data, seg);
+                        if (info.prints) {
+                            /* Kopie: während des Wartens liest pump_input weiter (Puffer kann wandern). */
+                            lw_buf_reset(&j.next);
+                            lw_buf_append(&j.next, data, seg);
+                            if (j.next.failed) {
+                                message("ERROR", "Zu wenig Speicher für ein Etikett.");
+                                result = BACKEND_FAILED;
+                                break;
+                            }
+                            rc = send_format_paced(&j, start, after, info.quantity);
+                            if (rc == 0 && copy == 0)
+                                labels_seen += info.quantity;
+                        } else {
+                            rc = send_raw_paced(&j, data, seg, after);
+                        }
                     } else {
                         if (!j.prologue_closed && copy == 0) {
-                            if (j.prologue.len + seg <= PROLOGUE_LIMIT)
+                            if (j.prologue.len + seg <= PROLOGUE_LIMIT) {
                                 lw_buf_append(&j.prologue, data, seg);
+                                j.prologue_prefixes = after;
+                            }
                         }
-                        rc = send_raw_resilient(&j, data, seg);
+                        rc = send_raw_paced(&j, data, seg, after);
                     }
                     if (rc == -2)
-                        return finish_cancelled(&j);
+                        { result = finish_cancelled(&j); goto done; }
                     if (rc != 0) {
                         result = BACKEND_FAILED;
                         break;
@@ -997,7 +1504,7 @@ int main(int argc, char *argv[])
             }
             rc = read_more(&in);
             if (rc == -2)
-                return finish_cancelled(&j);
+                { result = finish_cancelled(&j); goto done; }
             if (rc != 0) {
                 message("ERROR", "Druckdaten nicht lesbar: %s", strerror(errno));
                 result = BACKEND_FAILED;
@@ -1009,24 +1516,35 @@ int main(int argc, char *argv[])
     if (result == BACKEND_OK && j.paced) {
         rc = wait_until_idle(&j);
         if (rc == -2)
-            return finish_cancelled(&j);
-        if (rc != 0)
+            { result = finish_cancelled(&j); goto done; }
+        if (rc != 0) {
             result = BACKEND_FAILED;
-        else if (j.labels_done > 0)
-            message("INFO", "Alle %ld Etiketten gedruckt.", j.labels_done);
+        } else {
+            if (j.session_armed)
+                delete_marker(&j);
+            if (j.labels_uncertain > 0)
+                message("WARNING", "%ld Etiketten gesendet – bis zu %ld davon nach einem Verbindungsabbruch "
+                                   "möglicherweise nicht gedruckt; bitte nachzählen.",
+                        j.labels_done, j.labels_uncertain);
+            else if (j.labels_done > 0)
+                message("INFO", "Alle %ld Etiketten gedruckt.", j.labels_done);
+        }
     }
     if (result != BACKEND_OK && j.labels_done > 0)
         message("ERROR", "Verbindung zum Drucker verloren – %ld Etiketten wurden gedruckt.", j.labels_done);
     clear_states(&j);
-    if (j.fd >= 0) {
+    if (j.fd >= 0)
         shutdown(j.fd, SHUT_WR);
-        close_connection(&j);
-    }
+
+done:
+    g_input = NULL;
+    close_connection(&j);
     if (in.fd > 0)
         close(in.fd);
     lw_buf_free(&in.data);
     lw_buf_free(&j.rx);
     lw_buf_free(&j.prologue);
+    lw_buf_free(&j.next);
     lw_buf_free(&j.outstanding);
     return result;
 }

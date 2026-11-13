@@ -10,6 +10,7 @@ veröffentlicht wird. Die verbindlichen Schnittstellen stehen in [ARCHITECTURE.m
 | Module, öffentliche APIs, Auftragsformat (§8), Rasterung (§4.1), CUPS-Optionen (§9), Installationspfade (§10) | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 | App-Aufbau, Design-System, UI-Regeln | [docs/APP_ARCHITECTURE.md](APP_ARCHITECTURE.md) |
 | CUPS-Filter (C): Optionen, Rasterformate, Tests | [Driver/filter/README.md](../Driver/filter/README.md) |
+| CUPS-Backend `labelwerk` (C): Druck geht nach Papier-/Farbbandende weiter | [ARCHITECTURE.md §10 „Backend labelwerk“](../ARCHITECTURE.md) |
 | PPD-Generator | [Driver/ppd/README.md](../Driver/ppd/README.md) |
 | Installation, Einrichtung, Fehlersuche für Anwender | [docs/INSTALLATION.md](INSTALLATION.md) |
 
@@ -46,7 +47,7 @@ Das `Makefile` im Wurzelverzeichnis fasst alle Befehle zusammen (`make` zeigt di
 | `make build` | `swift build` – Kernmodule, `lwctl`; auf macOS zusätzlich die App |
 | `make test` | Katalogprüfung, `swift test`, Filtertests, PPD-Tests, Werkzeug-Tests |
 | `make test-swift` | `swift test` (Swift Testing) – alle Testziele in einem Lauf; die CI startet jedes Testziel einzeln (siehe unten) |
-| `make test-driver` | `make -C Driver/filter test`: C-Unit-Tests und End-to-End-Tests gegen den Python-Referenz-Encoder |
+| `make test-driver` | `make -C Driver/filter test`: C-Unit-Tests und End-to-End-Tests gegen den Python-Referenz-Encoder; `make -C Driver/backend test`: Unit-Tests des Backends und End-to-End-Tests gegen einen nachgebildeten Zebra-Drucker (`Driver/backend/tests/fake_zebra.py`) |
 | `make test-ppd` | alle PPDs erzeugen, mit `cupstestppd` prüfen, Generator-Tests |
 | `make test-scripts` | Tests von `extract_strings.py`, den Build-/Installationsskripten und der Auftragsformat-Konformität (Swift `lwctl encode` = Python-Referenz = C-Filter, byte-genau) (`Scripts/tests`) |
 | `make lint` | Shell-/Python-Syntax, ShellCheck, Workflow-YAML, Property-Listen, Lokalisierung, Katalog |
@@ -79,7 +80,7 @@ System-Druckdienst bleibt unberührt) – nur unter Linux mit installiertem `/us
 (Paket `cups-daemon`) oder mit `LW_TEST_CUPSD=/pfad/zu/cupsd`, sonst übersprungen.
 
 Speicherfehler im Filter findet `make -C Driver/filter asan` (AddressSanitizer + UBSan) bzw.
-`make -C Driver/filter valgrind`.
+`make -C Driver/filter valgrind`, im Backend `make -C Driver/backend asan` bzw. `valgrind`.
 
 ### App starten
 
@@ -355,7 +356,7 @@ Weg:
 
 | Skript | Aufgabe | Wichtige Optionen |
 |---|---|---|
-| `Scripts/build_driver.sh` | Universal-Filter (`make -C Driver/filter universal`), PPDs (`generate_ppds.py --gzip`), Symbol, `VERSION`, `uninstall.sh` in den Aufbau von ARCHITECTURE.md §10; Rechte setzen; Filter signieren | `--output` (wird vorher gelöscht und muss deshalb neu, leer oder ein früherer Treiberbaum sein; System-, Benutzer- und Repository-Ordner werden abgelehnt), `--host` (Testaufbau für das eigene System, auch Linux), `--no-sign`, `--dry-run` |
+| `Scripts/build_driver.sh` | Universal-Filter (`make -C Driver/filter universal`), Universal-Backend nach `usr/libexec/cups/backend/labelwerk` (`make -C Driver/backend universal`, 0755), PPDs (`generate_ppds.py --gzip`), Symbol, `VERSION`, `uninstall.sh` in den Aufbau von ARCHITECTURE.md §10; Rechte setzen; Filter signieren | `--output` (wird vorher gelöscht und muss deshalb neu, leer oder ein früherer Treiberbaum sein; System-, Benutzer- und Repository-Ordner werden abgelehnt), `--host` (Testaufbau für das eigene System, auch Linux), `--no-sign`, `--dry-run` |
 | `Scripts/build_app.sh` | `swift build -c release --arch arm64 --arch x86_64` für `LabelWerk` und `lwctl`; Bundle mit `Info.plist`, `AppIcon.icns`, `*.lproj`, `Helpers/lwctl`, `Resources/Driver`; dSYM sichern, Symbole entfernen; von innen nach außen signieren | `--debug`, `--skip-driver`, `--skip-build`, `--output`, `--dry-run` |
 | `Scripts/make_pkg.sh` | Komponenten App (`/Applications`, nicht verschiebbar, `upgrade`, Versionsprüfung), Treiber (`/`, mit pre-/postinstall), lwctl (ohne Nutzlast); `productbuild` mit `Installer/pkg/distribution.xml` und deutsch/englischer Oberfläche; Inhalt prüfen; SHA-256 | `--skip-build`, `--unsigned`, `--output`, `--dry-run` |
 | `Scripts/notarize.sh` | `xcrun notarytool submit --wait`, bei Ablehnung Prüfprotokoll, `stapler staple`, Gatekeeper-Prüfung (`spctl --type install`/`execute`, bei `.dmg` `--type open --context context:primary-signature` – Disk-Images müssen dafür selbst signiert sein) | `--no-staple`, `--timeout`, `--dry-run`; Dateien `.pkg`, `.dmg`, `.zip`, `.app` |

@@ -1001,6 +1001,100 @@ public enum VirtualPrinterServer {
 Antwortverhalten: `~HS` → 3 Zeilen `STX…ETX\r\n`; `~HI` → `STX…ETX`; `~HQES` → Block mit `PRINTER STATUS`, `ERRORS:`, `WARNINGS:`;
 SGD `getvar` → `"wert"`; JSON `{}{…}` → JSON-Objekt; `^HH` → Konfigurationstext; `^WD` → Dateiliste.
 
+### Etikett für Etikett drucken (`PacedJobSender`)
+
+Druck aus der App bei „Bei Papier- oder Farbbandende anhalten und fortsetzen“ (`PrintSettings.resumeAfterError`,
+Standard an) – dieselbe Logik wie das CUPS-Backend `labelwerk` (§10): Der Auftrag bleibt bestehen, bis
+jedes Etikett gedruckt ist, wartet bei Papier/Farbband leer, offenem Kopf oder Pause und geht danach
+genau dort weiter (das unterbrochene Etikett druckt der Drucker wegen `^JZY` selbst erneut).
+
+```swift
+public struct PacedJobPlan: Sendable, Hashable {          // Zerlegung eines ZPL-Auftrags
+    public struct Segment { public var data: Data; public var quantity: Int    // ein druckendes Format (^PQ)
+                            public func withQuantity(_ n: Int) -> Segment }   // ^PQ-Menge ersetzen
+    public var prologue: Data          // alles vor dem ersten ^XA (~JA, Startbefehle, ~SD, ~TA, ~JS, ~JC, SGD)
+    public var segments: [Segment]     // je druckendes Format samt allem seit dem vorigen Segment
+    public var epilogue: Data          // Rest (Endbefehle, abschließende nicht druckende Formate)
+    public var characters: ControlCharacters
+    public var totalLabels: Int
+    public static func split(_ data: Data, characters: ControlCharacters? = nil) -> PacedJobPlan
+    public static func detectCharacters(in data: Data) -> ControlCharacters
+}
+public struct PacedJobOptions: Sendable, Hashable {        // .standard
+    pollInterval 250 ms, waitPollInterval 2 s, statusTimeout 3 s, reprintAfterError true (^XA^JZY^XZ),
+    resumeAfterRecovery true (~PS nach behobenem Fehler), maxReconnectAttempts 6, reconnectDelay 2 s
+    (verdoppelt bis 30 s), maxSilentPolls 5
+}
+public enum PacedJobWaitReason: String { case mediaOut, ribbonOut, headOpen, paused, labelWaitingToBePeeled,
+                                         headTemperature
+    public var title: String; public var message: String; public var isFault: Bool
+    public static func reason(for status: HostStatus) -> PacedJobWaitReason? }
+public enum PacedJobEvent { case started(total:paced:), progress(printed:total:), waiting(_:printed:total:),
+    resumed(printed:total:), resumeSent, unpaced(String), connectionLost(attempt:message:), reconnected,
+    resending(labels:), cancelled(printed:total:), finished(printed:total:) }
+public struct PacedJobResult { public var printed: Int; public var total: Int; public var paced: Bool }
+public struct PacedJobSender: Sendable {
+    public init(client: PrinterClient, options: PacedJobOptions = .standard)
+    @discardableResult
+    public func send(_ data: Data, characters: ControlCharacters? = nil, cancelPrefixLength: Int? = nil,
+                     delayMilliseconds: Int = 0,
+                     onEvent: @escaping @Sendable (PacedJobEvent) -> Void = { _ in }) async throws -> PacedJobResult
+}
+extension PrinterClient {
+    public func hostStatus(characters: ControlCharacters = .standard, timeout: Duration? = nil) async throws -> HostStatus?
+}
+```
+
+* **Zerlegen:** Formatpräfix/Steuerpräfix/Trennzeichen übergeben (`effectiveControlCharacters`) oder erkannt
+  (`^XA` vorhanden → `^`, sonst das Zeichen vor `XA`, das auch vor `XZ` steht; Steuerpräfix aus `<c>JA` am
+  Anfang bzw. `<c>HS|JA|SD|TA|JS|JC|DG|DY` am Zeilenanfang). Binärdaten von `^GFB`/`^GFC` und `~DY` (B/C)
+  werden exakt übersprungen; in `^FD … ^FS` zählt nur `^FS`/`^XZ`. Druckend ist ein Format mit
+  `^FD ^FV ^GF ^GB ^GC ^GD ^GE ^GS ^XG ^IM ^XF` und ohne `^DF`; Menge aus `^PQ` (ohne: 1). Nicht druckende
+  Formate (`^XA^MF…^XZ`, `^XA^ST…^XZ`) gehören zum folgenden Segment. Die Teile ergeben aneinandergehängt
+  genau den Auftrag.
+* **Ablauf:** `~HS` (mit den Steuerzeichen des Auftrags) prüft den Rückkanal – ohne Antwort, ohne Rückkanal
+  (CUPS-Warteschlange), bei EPL/CPCL oder ohne druckendes Format: Versand in einem Stück wie
+  `sendJob` (`unpaced`). Sonst: Kopf + `^XA^JZY^XZ` (mit `~JA`-Teilung und `cancelDelayMs` wie `sendJob`),
+  dann je Segment: warten, bis `formats in receive buffer` = 0, `labels remaining` = 0, kein Teilformat
+  und kein Wartegrund → Segment senden → abfragen (250 ms), Fortschritt = fertige Segmente +
+  (Menge − `labels remaining`), sobald das Format begonnen hat. So liegt nie mehr als ein Format im Drucker.
+  Wartegründe (Reihenfolge): Kopf offen, Papier leer, Farbband leer (nur Thermotransfer), Pause,
+  Übertemperatur, Etikett im Spendemodus (nur bei ausstehenden Etiketten); Abfrage dann alle 2 s.
+  Pause nach einem Fehler dieses Auftrags → `~PS`; Pause ohne vorherigen Fehler → warten.
+* **Abbruch** (Task-Abbruch): `~JA` in einem eigenen Task, Ereignis `cancelled`, dann `CancellationError`.
+* **Neustart-Merker:** vor dem ersten Segment (Drucker bereit) `~DGR:LWAPP.GRF,1,1,00` (1 Byte im RAM,
+  beim Aus- und Einschalten weg; das CUPS-Backend nutzt `R:LWJOB.GRF`) und einmal `^XA^HWR:LWAPP.GRF^XZ`
+  (`PrinterClient.storeVolatileMarker`/`volatileMarkerExists`, Auswertung `VolatileMarker.listed` wie
+  `lwb_parse_directory`); am Ende `^ID`.
+* **Verbindungsabbruch** (`TransportError`, `PrinterClientError.transport`, 5 × keine `~HS`-Antwort):
+  `disconnect()` + `connect()` mit wachsendem Abstand. Meldet der Drucker danach Formate/Restetiketten →
+  Puffer behalten, weiter warten. Ist er leer, entscheidet der Merker (erst wenn der Drucker bereit ist –
+  Fehler und Pausen werden mit den üblichen Ereignissen abgewartet), nie der letzte Wartegrund: vorhanden
+  → er hat inzwischen fertig gedruckt, nichts wiederholen; fehlt → neu gestartet: Kopf (Prolog + `^JZY`,
+  mit `~JA`-Pause) und Merker erneut, dann die zuletzt gemeldeten restlichen Exemplare (`withQuantity`) –
+  auch ohne vorherigen Fehler; meldet der Drucker den Merker nicht → nichts wiederholen, Ereignis
+  `uncertain(labels:)` und `PacedJobResult.uncertain`. Beim Senden abgebrochen: Teilformat → `~JX`; liegt
+  das Format vollständig im Drucker → nicht erneut senden; sonst erneut (nach einem Neustart samt Kopf).
+* **App:** `PrinterSession.transmitPrintJob` (für `printImages`, `printZPL`, `reprint`, Etikettendruck
+  direkt) – Aufträge eines Druckers nacheinander, `printJob: PrintJobProgress?` für den Hinweis
+  `PrintJobBanner` („Etikett 37 von 50“, „Papier leer – neue Etikettenrolle einlegen. Der Druck geht danach
+  automatisch weiter.“, „Abbrechen“ → `cancelPrintJob()`, wirkt auch während des Verbindens; „Wartende
+  verwerfen“ → `cancelWaitingPrintJobs()`), Mitteilung im Hintergrund, Verlauf mit den tatsächlich
+  gedruckten Etiketten (bei `uncertain` mit Hinweis „bitte nachzählen“). Während eines Auftrags hält
+  `ProcessInfo.beginActivity(.userInitiated, .idleSystemSleepDisabled)` den Mac wach (kein App Nap), damit
+  die Statusabfrage beim Warten auf eine neue Rolle nicht einschläft. Ausgeschaltet bzw. ohne Rückkanal:
+  `PrinterClient.sendJob` wie bisher.
+
+`VirtualPrinter` simuliert dafür einen echten Drucker: `setPrintTime(_:)` (bzw. SGD
+`labelwerk.simulation.print_time_ms`) druckt Exemplar für Exemplar mit Druckzeit – `~HS` meldet dann noch
+nicht begonnene Formate (`formats in receive buffer`) und alle ausstehenden Exemplare (`labels remaining`);
+ohne Druckzeit wird wie bisher sofort gedruckt. `scheduleFault(_:afterLabels:clearAfter:pauseAfterRecovery:)`
+(`Fault`: `mediaOut`, `ribbonOut`, `headOpen`, `paused`) unterbricht nach N Exemplaren das nächste mitten im
+Druck; `^JZY` (Standard der Firmware, `setReprintAfterError(_:)`, `reprintsAfterError`) druckt es danach
+erneut, `^JZN` verliert es (`spoiledLabels`). Eine Pause lässt das laufende Exemplar fertig drucken.
+`printLog` hat je gedrucktem Exemplar einen Eintrag (`^FD`-Inhalt bzw. Prüfsumme), `~JA` und Neustart
+verwerfen alle wartenden Formate; ein Neustart (`restartDevice`, `~JR`) leert auch das RAM-Laufwerk `R:`.
+
 ## 7c. lwctl (CLI)
 
 `lwctl <befehl> [optionen]`, globale Option `--printer <uri>` mit `tcp://host[:port]`, `usb://vid:pid[/serial]`,
@@ -1493,7 +1587,7 @@ frühere „fremde Warteschlangen nie ändern“).
 **Entscheidung** (`QueueAdoption.decide` in LabelWerkCore, unter Linux getestet) aus Name, Geräte-URI
 (`lpstat -v`), `printer-make-and-model`, „hat LabelWerk-PPD“ (`*lwModel`, `DriverQueueClassifier`) und
 den Netzwerkdruckern der App (`RegisteredPrinter`: Kennung, Host, Rohdatenport):
-* Nur Netzwerk-URIs `socket`, `ipp`, `ipps`, `lpd`, `http`, `https`; `usb://`, `dnssd://` (nennt nur
+* Nur Netzwerk-URIs `socket`, `labelwerk`, `ipp`, `ipps`, `lpd`, `http`, `https`; `usb://`, `dnssd://` (nennt nur
   den Bonjour-Dienstnamen), `file:` und Backend-Hüllen wie `beh:/…` → `ignore`. Leerer Name → `ignore`.
 * Nur URIs, die das **Gerät selbst** nennen (`QueueAdoption.deviceEndpoint`), sonst `ignore`: kein
   Loopback-Host (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`, `::ffff:127.x.x.x` – Tunnel, Proxy
@@ -1509,7 +1603,8 @@ den Netzwerkdruckern der App (`RegisteredPrinter`: Kennung, Host, Rohdatenport):
   Klammern (IPv6; Zone `%25` dekodiert) und abschließende Punkte (`ZD421.local.`). Hostnamen werden
   nicht aufgelöst: Ein per Hostname eingerichteter Drucker passt nicht zu einer URI mit seiner
   IP-Adresse und umgekehrt.
-* `socket://` nennt mit dem Port das Gerät (Druckserver mit mehreren Anschlüssen): Der Port muss dem
+* `socket://` (ebenso `labelwerk://`, das Backend auf demselben Rohdatenport, §10) nennt mit dem Port das
+  Gerät (Druckserver mit mehreren Anschlüssen): Der Port muss dem
   des Druckers entsprechen (ohne Angabe 9100). Bei den übrigen Protokollen bezeichnet der Port nur den
   Dienst.
 * Drucker der App: TCP-Verbindungen mit Host und Port; Verbindungen über eine macOS-Warteschlange
@@ -1520,7 +1615,9 @@ den Netzwerkdruckern der App (`RegisteredPrinter`: Kennung, Host, Rohdatenport):
   erste in der Reihenfolge der Seitenleiste.
 * LabelWerk-Treiber (oder „LabelWerk“ in `printer-make-and-model`) → `labelWerk` (nichts zu tun);
   sonst `adopt` mit der Geräte-URI `socket://<host>:<port>` des Druckers (`QueueAdoption.socketURI`,
-  IPv6 in eckigen Klammern) – eine passende `socket://`-URI bleibt unverändert. Den Rohdatenport, über
+  IPv6 in eckigen Klammern) – eine passende `socket://`- bzw. `labelwerk://`-URI bleibt unverändert; beim
+  Umstellen wird daraus `labelwerk://`, wenn „Bei Papier- oder Farbbandende anhalten und fortsetzen“ an ist
+  (§10 „Backend labelwerk“). Den Rohdatenport, über
   den auch LabelWerk selbst druckt, bietet jeder Zebra-Netzwerkdrucker.
 
 **Umstellen** (`CUPSService.adoptQueue`, ein Aufruf):
@@ -1600,11 +1697,12 @@ Format und Einstellungen kommen aus LabelWerk.
   Druckers bzw. die ergänzte Kopie mit dem Format des Typs als benannter Standardgröße (`QueuePPD`),
   `lwLabelWidth`/`lwLabelHeight`, `lwFitToLabel` und alle Einstellungen mit den Abweichungen. Geräte-URI:
   die der Warteschlange des Druckers (verknüpfte, Verbindung über eine Warteschlange, übernommene – laut
-  `lpstat -v`), sonst die der Verbindung (`socket://host:port`, USB-URI); Bluetooth und der Demo-Drucker
+  `lpstat -v`), sonst die der Verbindung (`labelwerk://host:port` bzw. `socket://host:port`, USB-URI) –
+  `socket://` ↔ `labelwerk://` nach der Einstellung des Druckers (§10); Bluetooth und der Demo-Drucker
   erhalten keine.
-* **Abgleich** (besteht sie, mit LabelWerk-Treiber): `CUPSService.apply` (Optionen, PPD wie oben), danach
-  `lpadmin -p <name> -v … -D …`, falls Geräte-URI (`device-uri`) oder Beschreibung (`printer-info` laut
-  `lpoptions -p`) abweichen. Eine Warteschlange dieses Namens mit fremdem Treiber bleibt unverändert
+* **Abgleich** (besteht sie, mit LabelWerk-Treiber): `CUPSService.apply` (Optionen, PPD wie oben, mit der
+  Soll-Geräte-URI `deviceURI:` im selben `lpadmin`-Aufruf `-v …`), danach `lpadmin -p <name> -D …`, falls die
+  Beschreibung (`printer-info` laut `lpoptions -p`) abweicht. Eine Warteschlange dieses Namens mit fremdem Treiber bleibt unverändert
   (`notLabelWerkQueue`).
 * **Wann:** wie die Warteschlange des Druckers – 1,5 s nach jeder Änderung (der Fingerabdruck enthält je
   Typ Kennung, Beschreibung und Soll-Zustand sowie die Verbindung des Druckers; der vergebene Name zählt
@@ -1638,6 +1736,7 @@ nicht für einen anderen Drucker); wird es gelöscht, übernimmt der Typ das For
 | `/Library/Printers/LabelWerk/Icons/LabelWerk.icns` | Druckersymbol |
 | `/Library/Printers/LabelWerk/VERSION` | Treiberversion |
 | `/Library/Printers/PPDs/Contents/Resources/LabelWerk-<model>-<dpi>dpi.ppd.gz` | PPD je Modell & Auflösung |
+| `/usr/libexec/cups/backend/labelwerk` | CUPS-Backend `labelwerk://` (Universal, root:wheel 0755) – Druck geht nach Papier- oder Farbbandende weiter |
 | `/Applications/LabelWerk.app` | App (Druckerdienstprogramm via `*APPrinterUtilityPath`) |
 
 PPD-Eckdaten: `*cupsFilter: "application/vnd.cups-raster 0 /Library/Printers/LabelWerk/Filter/rastertolabelwerk"`,
@@ -1649,6 +1748,151 @@ PPD-Eckdaten: `*cupsFilter: "application/vnd.cups-raster 0 /Library/Printers/Lab
 `*Manufacturer: "Zebra"`, `*NickName: "Zebra <Modell> (<dpi> dpi) – LabelWerk"`.
 
 Der Filter verarbeitet alle Rasterformate robust (1/8/16 Bit, W/SW/K/RGB → Luminanz) und dithert selbst.
+
+### Backend `labelwerk` (Druck geht nach Papier- oder Farbbandende weiter)
+
+Mit dem CUPS-Backend `socket` ist ein Auftrag erledigt, sobald die Daten beim Drucker sind. Gehen dann
+Etiketten oder Farbband aus, weiß macOS nichts davon: Was im Drucker lag, druckt er nach dem Einlegen
+(mit `^JZN` ohne das unterbrochene Etikett) – oder gar nicht, wenn er zum Einlegen aus- und
+eingeschaltet wurde; man muss nachzählen und den Rest neu drucken. Das Backend `labelwerk` verhält sich
+wie ein normaler Drucker: Der Auftrag bleibt in der macOS-Warteschlange, bis jedes Etikett gedruckt ist,
+die Warteschlange zeigt „Kein Papier“/„Farbband leer“/„Druckkopf offen“, und nach dem Einlegen geht es
+genau dort weiter – jedes Etikett genau einmal.
+
+**Quellen:** `Driver/backend/` – `labelwerk.c` (Ein-/Ausgabe, Ablauf), `lwb_core.c/.h` (reine Logik:
+Zerlegung, `~HS`, URI; C-Unit-Tests `tests/test_backend.c`), Optionsauswertung aus `Driver/filter`
+(`lw_cups`, `lw_options`: Steuerzeichen „Intern“ und Sprache aus `argv[5]` und PPD). `make -C Driver/backend
+test` (auch `asan`, `valgrind`, `universal`, `install`); `Scripts/build_driver.sh` legt es nach
+`usr/libexec/cups/backend/labelwerk` in den Treiberbaum (Universal, signiert), `ci_linux.sh`/`ci_macos.sh`
+(`test-driver`, Paketprüfung) testen es.
+
+**Rechte:** root:wheel **0755**. CUPS startet ein Backend, das für „andere“ ausführbar ist, als
+unprivilegierten Benutzer (`_lp`); nur 0700 hieße Ausführung als root – unnötig, denn das Backend öffnet
+nur eine TCP-Verbindung zum Drucker. Gruppe/andere dürfen nicht schreiben (sonst verweigert cupsd es).
+CUPS sucht Backends nur in `ServerBin/backend` (`/usr/libexec/cups/backend`); `lpadmin -v labelwerk://…`
+lehnt cupsd ab, solange die Datei fehlt – App und `lwctl` verwenden dann `socket://`.
+
+**Geräte-URI:** `labelwerk://host[:port][?mode=stream]` (Port ohne Angabe 9100, IPv6 in `[ ]`, Zone `%25`).
+Ohne Argumente (`lpinfo -v`) meldet es nur `network labelwerk "Unknown" "LabelWerk Zebra network printer …"`
+(keine eigene Suche). `argv[0]`/`DEVICE_URI`, `argv[1…5]` wie jedes Backend; ohne `argv[6]` liest es die
+Ausgabe des Filters von stdin (1 Kopie, der Filter erzeugt `^PQ`), mit Datei (Rohaufträge `lp -o raw`) druckt
+es `argv[4]` Kopien.
+
+**Ablauf (ZPL):**
+1. TCP-Verbindung; `<~>HS` – antwortet der Drucker nicht (Zeitlimit 5 s), sendet das Backend wie `socket`
+   am Stück (WARNING). Ebenso bei `lwLanguage` EPL/CPCL, `lwResumeOnError=False` in den Auftragsoptionen
+   oder `?mode=stream`.
+2. Auftragskopf (Rohdaten vor dem ersten Format) senden. Beginnt er mit `<~>JA` („Aufträge vor dem Drucken
+   abbrechen“), geht zuerst nur die `~JA`-Zeile hinaus, dann wartet das Backend `lwCancelDelay` (Standard
+   1000 ms, aus den Auftragsoptionen bzw. der PPD) – `~JA` löscht die Daten vor sich im Empfangspuffer.
+   Dieselbe Teilung gilt beim erneuten Senden nach einem Neustart des Druckers.
+   Vor dem ersten druckenden Format, sobald der Drucker bereit ist (also **nach** dem Kopf):
+   `<^>XA<^>JZY<^>XZ` (das bei einem Fehler unterbrochene Etikett druckt der Drucker danach erneut) und der
+   **Neustart-Merker** `<~>DGR:LWJOB.GRF,1,1,00` – 1 Byte im RAM-Laufwerk `R:`, das beim Aus- und
+   Einschalten leer ist. `<^>XA<^>HWR:LWJOB.GRF<^>XZ` prüft einmal, ob der Drucker ihn meldet
+   (`lwb_parse_directory`: Eintragszeile `*R:LWJOB.GRF …` in der ersten Dateiliste STX…ETX; andere
+   Rahmen wie `~HS`-Antworten zählen nicht). Am Ende löscht `^ID` den Merker.
+3. Zerlegung (`lwb_next_segment`) mit den Steuerzeichen des Auftrags (`lwControlChars=Printer` mit
+   `lwFormatPrefix`/`lwControlPrefix`/`lwDelimiter`, sonst `^ ~ ,`; Wechsel per `^CC`/`~CC`, `^CT`/`~CT`,
+   `^CD`/`~CD` im Datenstrom gelten ab dort): Rohdaten außerhalb von Formaten (Auftragskopf `~JA ~SD ~TA ~JS
+   ~JC`, SGD) gehen sofort hinaus und werden für einen Neustart des Druckers gemerkt; Formate `^XA…^XZ`
+   (samt Zeilenende) einzeln. Binärdaten von `^GFB` werden übersprungen (kein Fehltreffer auf „^XZ“). Ein
+   Format **druckt**, wenn es `^FO ^FT ^FD ^FV ^GF ^GB ^GC ^GD ^GE ^XG ^XF` und kein `^DF` enthält; Menge aus
+   `^PQ` (ohne: 1). Nicht druckende Formate (`^XA^ST…^XZ`, `^XA^MF…^XZ`, `^XA^JUS^XZ`) gehen sofort hinaus.
+   Das erste Etikett geht los, sobald es vom Filter vollständig da ist (wie bei `socket`); während des
+   Wartens liest das Backend ohne zu blockieren weiter (höchstens 64 MB im Speicher). Bis das Auftragsende
+   gelesen ist, meldet es `Etikett n`, danach `Etikett n von N`. Eine Druckdatei (`argv[6]`, Kopien) liest
+   es vorab ganz.
+4. **Takt:** Vor jedem druckenden Format fragt es `~HS` ab (alle 200 ms), bis `formats in receive buffer` = 0,
+   `labels remaining in batch` = 0 und kein Fehler – erst dann folgt das Format. So liegt nie mehr als ein
+   Format im Drucker. Nach dem Senden zählt „leer“ erst nach zwei Abfragen (der Drucker hat das Format evtl.
+   noch nicht gezählt). Am Ende wartet es ebenso, bis das letzte Etikett gedruckt ist.
+5. **Fehler:** Papier leer → `STATE: +media-empty-error`, Farbband leer (nur bei Thermotransfer, Feld `q`)
+   → `+marker-supply-empty-error`, Druckkopf offen → `+cover-open-error`, Pause → `+other-warning` (nicht
+   `paused`: damit hielte cupsd die ganze Warteschlange an), je mit deutscher `INFO:`-Meldung
+   („Kein Papier – neue Etikettenrolle einlegen. Der Druck geht danach automatisch weiter.“ …); Abfrage alle
+   2 s, nach dem Beheben `STATE: -…`. Bleibt der Drucker nach einem dieser Fehler angehalten, setzt `~PS` ihn
+   fort; eine Pause ohne vorherigen Fehler beendet der Benutzer.
+6. **Fortschritt:** `INFO: Etikett 37 von 50` (bei `^PQ` > 1 aus `labels remaining`), am Ende
+   `INFO: Alle 50 Etiketten gedruckt.` Kein `ATTR: job-impressions-completed` bzw. `PAGE:` – die Seiten
+   zählt schon der Filter (`PAGE:`), doppelt gezählt hätte CUPS sonst.
+7. **Verbindungsabbruch** (getaktet): neu verbinden (1, 2, 4 … höchstens 30 s, unbegrenzt;
+   `STATE: +connecting-to-device`). Antwortet der Drucker nicht auf `~HS` mit den aktuellen Steuerzeichen,
+   versucht das Backend die des Auftragsanfangs und `~` – antwortet er so, hat er nach einem Neustart
+   wieder seine gespeicherten Zeichen (Wechsel per `^CC`/`~CT` im Auftrag sind weg). Ein gemeldetes
+   Teilformat verwirft `~JX`. Dann entscheidet der **Zustand des Druckers**, nicht eine Vermutung, ob er
+   neu gestartet wurde:
+   * Formate oder Restetiketten im Puffer bzw. ein Teilformat → Puffer behalten;
+   * Antwort nur mit den gespeicherten Steuerzeichen → neu gestartet;
+   * sonst der Neustart-Merker: Bei Papier leer, Kopf offen oder Pause bearbeitet der Drucker `^HW` (ein
+     Format) erst danach – das Backend wartet deshalb mit `STATE`-Meldungen wie beim Drucken, bis er bereit
+     ist, und fragt dann `^HW`: vorhanden → behalten, fehlt → neu gestartet; meldet der Drucker den
+     Merker gar nicht (Prüfung am Auftragsanfang ohne Treffer) → nicht prüfbar.
+
+   Behalten: nichts erneut senden – was der Drucker inzwischen gedruckt hat (z. B. die Rolle wurde
+   eingelegt, während das WLAN weg war), zählt, sobald `~HS` leer meldet. Neu gestartet: Steuerzeichen
+   des Auftragsanfangs, Auftragskopf (mit `~JA`-Pause), Steuerzeichen des offenen Formats, `^JZY`, Merker
+   und das offene Format mit den **restlichen** Etiketten (`^PQ` = zuletzt gemeldete Restetiketten) –
+   ebenso, wenn der Drucker mitten in einer Menge ohne Fehler aus- und eingeschaltet wurde (wird er genau
+   zwischen zwei Abfragen ausgeschaltet, kann ein Etikett doppelt kommen, nie eines fehlen). Beim Senden
+   abgebrochen und das Format liegt nicht vollständig im Drucker: erneut senden (nach einem Neustart samt
+   Kopf). Nicht prüfbar: nichts automatisch wiederholen, `WARNING: … Möglicherweise fehlen bis zu n
+   Etikett(en); bitte nachzählen.` und am Ende statt „Alle … gedruckt“ eine WARNING mit der Zahl.
+   Nie `CUPS_BACKEND_RETRY` nach dem ersten gesendeten Etikett (CUPS wiederholte sonst den ganzen
+   Auftrag); nur bei erschöpften Versuchen vor jedem Senden (Testgrenze `LW_BACKEND_RECONNECT_LIMIT`).
+
+   **Am Stück** (EPL/CPCL, `lwResumeOnError=False`, `?mode=stream`, Drucker ohne `~HS`, Rest nach einem
+   Download): Bricht die Verbindung ab, nachdem Auftragsdaten gesendet wurden, endet der Auftrag mit
+   `ERROR` und Exitcode 1 wie bei `socket` – was davon ankam, lässt sich nicht feststellen; alles erneut
+   zu senden druckte das Angekommene doppelt. Nur ohne gesendete Daten wird neu verbunden.
+8. **Abbrechen** (SIGTERM): `STATE`-Meldungen zurücksetzen, `<~>JA` leert den Druckerpuffer (auch einen
+   wartenden Auftrag), Ende mit 0.
+9. **Downloads** (`~DG ~DY ~DB ~DS ~DT ~DU ~DN`) und Binärdaten außerhalb von `^GFB` (Bytes < 0x09 bzw.
+   0x0E…0x1F, z. B. Firmware): ab dort am Stück – nie eine `~HS`-Abfrage mitten in den Daten.
+
+Zeiten für Tests: `LW_BACKEND_POLL_MS`, `LW_BACKEND_ERROR_POLL_MS`, `LW_BACKEND_REPLY_TIMEOUT_MS`,
+`LW_BACKEND_STALL_MS` (30 s ohne Antwort → Verbindung neu), `LW_BACKEND_RECONNECT_MS`/`_MAX_MS`/`_LIMIT`,
+`LW_BACKEND_CONNECT_TIMEOUT_MS`, `LW_BACKEND_CANCEL_DELAY_MS` (nach `~JX` bzw. dem `~JA` beim Abbruch),
+`LW_BACKEND_SNDBUF` (Sendepuffer, für den Abbruch mitten im Senden).
+
+**Tests:** `tests/run_backend_e2e.py` startet das echte Backend gegen einen nachgebildeten Zebra-Drucker
+(`tests/fake_zebra.py`: TCP-Server mit `~HS`, Empfangspuffer, Druckzeit je Etikett, `^PQ`, `~JA` (verwirft
+auch noch nicht bearbeitete Formate davor), `~PS`, `^JZY/N` – ohne `^JZY` geht das unterbrochene Etikett
+verloren –, nicht druckende Formate erst nach einer Bearbeitungszeit und nicht bei Fehler/Pause, `~DG`/
+`^HW`/`^ID` mit RAM-Laufwerk `R:`, Papier leer/Farbband leer/Kopf offen/Pause nach N Etiketten, behoben nach
+M s, Aus- und Einschalten (auch ohne Fehler), nur die Netzverbindung weg, langsamer Empfang, stumm, ohne
+`^HW`, anfangs nicht erreichbar) und prüft:
+jedes Etikett genau einmal (auch `^PQ` > 1), nie mehr als ein druckendes Format im Drucker, Ende erst nach
+dem letzten Etikett, `STATE` gesetzt und zurückgesetzt, Fortsetzen nach allen vier Fehlern, `~PS` nur nach
+einem Fehler, Neustart des Druckers, Abbruch mit `~JA` (auch im Fehlerzustand), Senden am Stück (keine
+`~HS`-Antwort, EPL, `lwResumeOnError=False`, `?mode=stream` – als Gegenprobe mit verlorenem Etikett),
+eigene Steuerzeichen, Kopien aus einer Datei, Downloads, Versuchsgrenze (`CUPS_BACKEND_RETRY`); dazu
+Verbindungsabbruch bei „Papier leer“ mit Einlegen während der Unterbrechung (nichts doppelt, auch `^PQ`),
+Neustart mitten in einer Menge ohne Fehler (Rest erneut), Neustart nach `^CC`/`~CT` im Auftrag, Drucker ohne
+`^HW` (WARNING statt Wiederholung), `~JA` im Kopf (Pause `lwCancelDelay`, `^JZY` danach und wirksam),
+Abbruch mitten im Senden am Stück (Fehler, keine zweite Verbindung) und einen langsamen Filter (erstes
+Etikett vor dem Auftragsende gedruckt, „Etikett 1“, später „Etikett 4 von 4“).
+
+**Warteschlangen:** LabelWerk-Warteschlangen eines Netzwerkdruckers (Assistent, „Treiber“, übernommene,
+Etikettentypen, `lwctl install`) erhalten `labelwerk://host:port`, sofern „Bei Papier- oder Farbbandende
+anhalten und fortsetzen“ an ist (`PrintSettings.resumeAfterError`, Standard an, nur Treiber – keine
+CUPS-Option, kein Befehl) und das Backend installiert ist; sonst `socket://host:port`. `QueueDeviceURI`
+(LabelWerkCore, unter Linux getestet): `networkURI`, `target(for:resume:)` stellt nur `socket://` ↔
+`labelwerk://` um (Pfad/Optionen der socket-URI entfallen), `arguments(…)` liefert dazu den
+Warteschlangen-Standard `lwResumeOnError-default=False` bei „aus“ (bzw. `-R lwResumeOnError-default` bei
+„an“). `CUPSService.apply` gleicht Geräte-URI und Markierung mit ab (auch ohne andere Abweichung),
+`adoptQueue`/`ensureLabelTypeQueue`/`installQueue` setzen sie beim Anlegen; `QueueSyncService` gleicht
+nach jeder Änderung, beim Start und nach einer Treiberinstallation aus der App
+(`CUPSService.driverDidChangeNotification`) ab. `lwctl install`: `--no-resume`/`--resume` (ohne Angabe:
+an bzw. die Wahl der vorhandenen Warteschlange). Das **postinstall** des Pakets stellt bei einem Update
+LabelWerk-Warteschlangen (PPD mit `*lwModel`) mit `socket://` auf `labelwerk://` um – außer mit
+`lwResumeOnError=False`; die Deinstallation entfernt das Backend. `socket://` und `labelwerk://` mit
+gleichem Host und Port gelten überall als dasselbe Gerät (`QueueAdoption.rawSchemes`, Netzwerksuche,
+Assistent, `lwctl install`). USB-Warteschlangen behalten `usb://` – das Backend spricht nur den
+Rohdatenport; dort gilt weiter das Verhalten des CUPS-Backends `usb` (Fortsetzen nur bei Druck aus der App).
+
+**macOS-Hinweis:** `/usr/libexec/cups` ist von SIP ausgenommen, damit Treiber Backends installieren können
+(z. B. Gutenprint); `ci_macos.sh` prüft das installierte Backend im Paket (Universal, signiert, 0755).
 
 ## 11. App-Architektur (Kurzfassung, Details in `docs/APP_ARCHITECTURE.md`)
 

@@ -409,8 +409,10 @@ public enum DiscoveryFilter {
             // ein Anschluss eines Druckservers mit mehreren Anschlüssen) hieße sonst „jeder Port dieses
             // Hosts“ – und ein anderer Drucker am selben Druckserver gälte als eingerichtet.
             guard let endpoint = QueueAdoption.deviceEndpoint(ofDeviceURI: trimmed) else { return ([], nil, nil) }
-            // Nur `socket://` nennt den Rohdatenport; IPP/LPD erreichen dasselbe Gerät über andere Ports.
-            let port = endpoint.scheme == "socket" ? (endpoint.port ?? ZebraIdentifiers.rawPort) : nil
+            // Nur `socket://` (bzw. `labelwerk://`, das LabelWerk-Backend) nennt den Rohdatenport; IPP/LPD
+            // erreichen dasselbe Gerät über andere Ports.
+            let port = QueueAdoption.rawSchemes.contains(endpoint.scheme)
+                ? (endpoint.port ?? ZebraIdentifiers.rawPort) : nil
             return ([AddedPrinterIdentity.Endpoint(host: endpoint.host, port: port)], nil, nil)
         }
     }
