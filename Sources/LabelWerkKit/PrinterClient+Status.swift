@@ -25,6 +25,21 @@ extension PrinterClient {
         return try await guarded { try await self.collectStatus() }
     }
 
+    /// Nur `~HS` (schnell, für das Abfragen während eines Druckauftrags, ``PacedJobSender``), mit den
+    /// Steuerzeichen des Auftrags (`characters`, z. B. „Intern“ `lwControlChars`).
+    ///
+    /// - Returns: `nil`, wenn der Drucker nicht oder unverständlich antwortet.
+    /// - Throws: ``PrinterClientError/notBidirectional(_:)`` ohne Rückkanal, Transportfehler.
+    public func hostStatus(characters: ControlCharacters = .standard, timeout: Duration? = nil) async throws -> HostStatus? {
+        try await guarded {
+            let command = ZPL.hostStatus().rendered(with: characters.clamped())
+            let data = try await self.exchange(command, operation: "Statusabfrage (~HS)", timeout: timeout,
+                                               isComplete: ResponseFraming.hostStatusComplete)
+            guard !data.isEmpty else { return nil }
+            return try? HostStatusParser.parse(data)
+        }
+    }
+
     func collectStatus() async throws -> PrinterStatusSnapshot {
         var hostStatus: HostStatus?
         var query: HostQueryStatus?
