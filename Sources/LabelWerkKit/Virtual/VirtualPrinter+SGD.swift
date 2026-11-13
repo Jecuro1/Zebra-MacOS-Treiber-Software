@@ -10,7 +10,8 @@ extension VirtualPrinter {
     ]
 
     /// Präfix der Simulationsvariablen (nur im virtuellen Drucker): `head_open`, `media_out`,
-    /// `ribbon_out`, `paused` mit den Werten `on`/`off`. Damit lassen sich Fehlerzustände auch
+    /// `ribbon_out`, `paused` mit den Werten `on`/`off` sowie `print_time_ms` (Druckzeit je Etikett in
+    /// Millisekunden, `0` = sofort). Damit lassen sich Fehlerzustände auch
     /// über das Netzwerk herstellen (z. B. `lwctl setvar labelwerk.simulation.head_open on`).
     /// Sie erscheinen nicht in `allconfig`/`allcv`.
     static let simulationPrefix = "labelwerk.simulation."
@@ -23,12 +24,19 @@ extension VirtualPrinter {
         case "media_out": return mediaOut ? "on" : "off"
         case "ribbon_out": return ribbonOut ? "on" : "off"
         case "paused": return paused ? "on" : "off"
+        case "print_time_ms": return printTime.map { String(Int($0 / .milliseconds(1))) } ?? "0"
         default: return nil
         }
     }
 
     /// Setzt eine Simulationsvariable; `false`, wenn Name oder Wert ungültig sind.
     func setSimulation(_ name: String, _ value: String) -> Bool {
+        if name.dropFirst(Self.simulationPrefix.count) == "print_time_ms" {
+            // Druckzeit je Etikett in Millisekunden (0 = sofort drucken), höchstens eine Minute.
+            guard let ms = Int(value.trimmingCharacters(in: .whitespaces)), (0...60_000).contains(ms) else { return false }
+            setPrintTime(ms > 0 ? .milliseconds(ms) : nil)
+            return true
+        }
         let lower = value.lowercased()
         let on: Bool
         if ["on", "yes", "true", "1"].contains(lower) {
