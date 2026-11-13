@@ -89,7 +89,7 @@ extension VirtualPrinter {
             paperOut: mediaOut,
             paused: paused,
             labelLengthDots: labelLengthDots,
-            formatsInReceiveBuffer: queued.count,
+            formatsInReceiveBuffer: queued.filter { !$0.started }.count,
             receiveBufferFull: false,
             diagnosticMode: false,
             partialFormatInProgress: stream.isInsideFormat,
@@ -103,7 +103,7 @@ extension VirtualPrinter {
             printMode: currentPrintMode,
             printWidthMode: 0,
             labelWaitingToBePeeled: false,
-            labelsRemainingInBatch: queued.reduce(0) { $0 + max(1, $1.quantity) },
+            labelsRemainingInBatch: queued.reduce(0) { $0 + $1.remaining },
             formatWhileWritingGraphics: true,
             graphicsStoredInMemory: storedFiles.values.filter { $0.bitmap != nil }.count,
             password: "1234",
@@ -162,7 +162,7 @@ extension VirtualPrinter {
         case "PS":
             paused = false
             flushQueue()
-        case "JA": queued.removeAll()
+        case "JA": cancelAllFormats()
         case "JR": restartDevice()
         case "WC": printReport(title: "PRINTER CONFIGURATION", lines: configurationEntries().map { "\($0.value)  \($0.name)" })
         case "WL": printReport(title: "NETWORK CONFIGURATION", lines: networkReportLines())
@@ -263,6 +263,9 @@ extension VirtualPrinter {
                 if let offset = Double(first), offset.isFinite {
                     relativeDarkness = min(30, max(-30, offset))
                 }
+            case "JZ":
+                // ^JZ{Y|N}: Etikett nach einem Fehler (Papier/Farbband leer, Kopf offen) erneut drucken.
+                reprintAfterError = !first.hasPrefix("N")
             case "JS":
                 // ^JS{A|R|T} ist die Sensorwahl (automatisch, reflektiv, transmissiv) und wird
                 // nicht nachgebildet. Den Rückzug stellt der Steuerbefehl ~JS ein.
@@ -422,8 +425,9 @@ extension VirtualPrinter {
             }
         }
         let document = interpreter().render(prefix + text)
+        let record = Self.printRecord(forFormat: text)
         for label in document.labels {
-            printOrQueue(label)
+            printOrQueue(label, record: record)
         }
     }
 
@@ -434,25 +438,13 @@ extension VirtualPrinter {
 
     // MARK: - Drucken
 
-    func printOrQueue(_ label: RenderedLabel) {
-        if canPrint {
-            commitPrint(label)
-        } else {
-            queued.append(label)
-        }
-    }
-
-    func flushQueue() {
-        while canPrint, !queued.isEmpty {
-            commitPrint(queued.removeFirst())
-        }
-    }
-
-    func commitPrint(_ label: RenderedLabel) {
-        printed.append(label)
-        if printed.count > Self.historyLimit { printed.removeFirst(printed.count - Self.historyLimit) }
-        let quantity = max(1, label.quantity)
-        advanceMedia(labels: quantity, lengthDots: label.heightDots)
+    /// Nimmt ein Etikett in die Druckwarteschlange und druckt, sobald der Drucker bereit ist – sofort
+    /// (ohne Druckzeit) oder Exemplar für Exemplar mit der eingestellten Druckzeit (``setPrintTime(_:)``,
+    /// `VirtualPrinter+Engine.swift`).
+    func printOrQueue(_ label: RenderedLabel, record: String? = nil) {
+        queued.append(QueuedFormat(label: label, remaining: max(1, label.quantity),
+                                   record: record ?? Self.printRecord(for: label)))
+        flushQueue()
     }
 
     /// Medienvorschub: erhöht Etikettenzähler und Odometer.
@@ -493,7 +485,7 @@ extension VirtualPrinter {
     func restartDevice() {
         restartCount += 1
         paused = false
-        queued.removeAll()
+        cancelAllFormats()
         relativeDarkness = 0
         bootDate = Date()
         let protocolValue = store.rawValue("ip.ip_protocol") ?? "dhcp"

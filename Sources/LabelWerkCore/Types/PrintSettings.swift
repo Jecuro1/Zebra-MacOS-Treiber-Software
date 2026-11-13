@@ -97,6 +97,16 @@ public struct PrintSettings: Codable, Hashable, Sendable {
     /// dann passt der Treiber nur die Breite an).
     public var labelHeightHundredthsMM: Int
 
+    // MARK: Treiber (Warteschlange)
+
+    /// „Bei Papier- oder Farbbandende anhalten und fortsetzen“ (Standard an): Netzwerk-Warteschlangen
+    /// verwenden das LabelWerk-Backend (`labelwerk://host:port`) statt `socket://`. Der Auftrag bleibt
+    /// dann in der macOS-Warteschlange, bis jedes Etikett gedruckt ist, meldet „Kein Papier“/
+    /// „Farbband leer“/„Druckkopf offen“ und geht nach dem Einlegen dort weiter, wo er stand
+    /// (ARCHITECTURE.md §10 „Backend labelwerk“). Nur Treiber: keine CUPS-Option, kein Befehl an den
+    /// Drucker; aus = `socket://` wie bisher.
+    public var resumeAfterError: Bool
+
     public init(
         darkness: Int? = nil,
         speed: Int? = nil,
@@ -134,7 +144,8 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         headCloseAction: MediaFeedAction? = nil,
         fitToLabel: LabelFitMode = .auto,
         labelWidthHundredthsMM: Int = 0,
-        labelHeightHundredthsMM: Int = 0
+        labelHeightHundredthsMM: Int = 0,
+        resumeAfterError: Bool = true
     ) {
         self.darkness = darkness
         self.speed = speed
@@ -173,6 +184,7 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         self.fitToLabel = fitToLabel
         self.labelWidthHundredthsMM = labelWidthHundredthsMM
         self.labelHeightHundredthsMM = labelHeightHundredthsMM
+        self.resumeAfterError = resumeAfterError
     }
 
     /// Standard: Alle Druckerwerte beibehalten, Schwellenwert-Rasterung, Z64.
@@ -538,7 +550,8 @@ extension PrintSettings {
             headCloseAction: value(MediaFeedAction.self, .headCloseAction),
             fitToLabel: value(LabelFitMode.self, .fitToLabel) ?? .auto,
             labelWidthHundredthsMM: value(Int.self, .labelWidthHundredthsMM) ?? 0,
-            labelHeightHundredthsMM: value(Int.self, .labelHeightHundredthsMM) ?? 0
+            labelHeightHundredthsMM: value(Int.self, .labelHeightHundredthsMM) ?? 0,
+            resumeAfterError: value(Bool.self, .resumeAfterError) ?? true
         )
         self = clamped()
     }

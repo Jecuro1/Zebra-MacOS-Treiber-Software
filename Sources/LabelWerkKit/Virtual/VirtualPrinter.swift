@@ -29,6 +29,10 @@ import LabelWerkTransport
 ///   werden „gedruckt“ (``renderedLabels``, höchstens 50) und erhöhen Etikettenzähler und
 ///   Odometer – solange der Drucker pausiert ist oder ein Fehler vorliegt (Kopf offen, Medium
 ///   bzw. Farbband leer), warten sie in ``pendingLabels`` und werden danach gedruckt.
+/// * Mit ``setPrintTime(_:)`` druckt er wie ein echter Drucker Exemplar für Exemplar mit Druckzeit
+///   (`~HS` meldet Formate im Puffer und Restetiketten); ``scheduleFault(_:afterLabels:clearAfter:pauseAfterRecovery:)``
+///   lässt nach N Etiketten Papier/Farbband ausgehen bzw. den Kopf öffnen – mitten im Etikett, das
+///   mit `^JZY` danach erneut gedruckt wird, mit `^JZN` verloren ist (``printLog``, ``spoiledLabels``).
 /// * `~DG`, `~DY` (Schriften, Grafiken), `^DF` (Formate) speichern Dateien, `^ID` löscht sie;
 ///   `^XG`/`^IM`/`^XF` finden sie in späteren Formaten wieder.
 /// * EPL-Zeilen (bei `device.languages` = `epl_zpl`) und CPCL-Blöcke (Modelle mit CPCL) werden
@@ -93,7 +97,22 @@ public actor VirtualPrinter: PrinterConnection {
     var simulatedWarnings: PrinterWarningFlags = []
     var calibrationNeeded = false
     var printed: [RenderedLabel] = []
-    var queued: [RenderedLabel] = []
+    /// Empfangene, noch nicht (vollständig) gedruckte Formate – das erste ist ggf. gerade im Druck.
+    var queued: [QueuedFormat] = []
+    /// Druckzeit je Etikett (`nil` = sofort drucken, Standard), siehe ``setPrintTime(_:)``.
+    var printTime: Duration?
+    /// `^JZ`: Etikett, dessen Druck ein Fehler unterbrochen hat, danach erneut drucken (Standard `Y`).
+    var reprintAfterError = true
+    /// Druckwerk im Zeitbetrieb (läuft, solange gedruckt werden kann und Formate warten).
+    var engineTask: Task<Void, Never>?
+    /// Geplanter Fehler (``scheduleFault(_:afterLabels:clearAfter:pauseAfterRecovery:)``).
+    var scheduledFault: ScheduledFault?
+    /// Laufende Aufgabe, die einen geplanten Fehler wieder behebt.
+    var faultRecoveryTask: Task<Void, Never>?
+    /// Ein Eintrag je gedrucktem Exemplar (``printLog``).
+    var printLogEntries: [String] = []
+    /// Durch einen Fehler verdorbene Exemplare ohne `^JZY` (``spoiledLabels``).
+    var spoiledCount = 0
     var storedFiles: [String: StoredFile] = [:]
     var bootDate = Date()
     var printLengthMM: Double
@@ -303,7 +322,7 @@ public actor VirtualPrinter: PrinterConnection {
     public var renderedLabels: [RenderedLabel] { printed }
 
     /// Etiketten, die wegen Pause oder Fehler noch auf den Druck warten.
-    public var pendingLabels: [RenderedLabel] { queued }
+    public var pendingLabels: [RenderedLabel] { queued.map(\.label) }
 
     /// Dateien im simulierten Speicher, sortiert nach Laufwerk und Name.
     public var files: [PrinterFile] {
