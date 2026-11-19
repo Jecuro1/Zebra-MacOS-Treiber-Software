@@ -568,3 +568,217 @@ struct VolatileMarkerTests {
         #expect(try await client.volatileMarkerExists("R:LWAPP.GRF", characters: .standard, timeout: .seconds(2)) == false)
     }
 }
+
+// MARK: - Nachdruck nach Papier-/Farbbandende
+
+@Suite("PacedJobPlan – Etiketten nachdrucken")
+struct PacedJobReprintPlanTests {
+
+    @Test("Etikett → Segment/Exemplar, letzte n Etiketten")
+    func locations() {
+        let plan = PacedJobPlan.split(Paced.job(labels: 2, quantity: 3))
+        #expect(plan.totalLabels == 6)
+        #expect(plan.location(ofLabel: 1)! == (0, 0))
+        #expect(plan.location(ofLabel: 3)! == (0, 2))
+        #expect(plan.location(ofLabel: 4)! == (1, 0))
+        #expect(plan.location(ofLabel: 6)! == (1, 2))
+        #expect(plan.location(ofLabel: 0) == nil)
+        #expect(plan.location(ofLabel: 7) == nil)
+        #expect(PacedJobPlan.lastLabels(2, of: 5) == [4, 5])
+        #expect(PacedJobPlan.lastLabels(3, of: 2) == [1, 2])
+        #expect(PacedJobPlan.lastLabels(1, of: 0) == [])
+        #expect(PacedJobPlan.lastLabels(0, of: 9) == [])
+    }
+
+    @Test("Nachdruck-Formate: Menge 1, aufeinanderfolgende Exemplare zusammengefasst, Reihenfolge")
+    func reprintSegments() {
+        let plan = PacedJobPlan.split(Paced.job(labels: 2, quantity: 5))
+        // Etiketten 5 (L1, letztes Exemplar), 6 und 7 (L2, erste zwei Exemplare); doppelte/ungültige weg.
+        let segments = plan.reprintSegments(forLabels: [7, 5, 6, 6, 99, 0])
+        #expect(segments.map(\.quantity) == [1, 2])
+        #expect(String(decoding: segments[0].data, as: UTF8.self).contains("^FDL1^FS\n^PQ1\n"))
+        #expect(String(decoding: segments[1].data, as: UTF8.self).contains("^FDL2^FS\n^PQ2\n"))
+        // Nicht zusammenhängend im selben Format: getrennte Formate.
+        #expect(plan.reprintSegments(forLabels: [1, 3]).map(\.quantity) == [1, 1])
+        // Einzelnes Etikett zum Anzeigen: Kopf + Format mit Menge 1.
+        let label = String(decoding: plan.labelData(8)!, as: UTF8.self)
+        #expect(label.hasPrefix("~JA\n~SD15\n"))
+        #expect(label.contains("^FDL2^FS\n^PQ1\n^XZ"))
+        #expect(plan.labelData(11) == nil)
+    }
+}
+
+extension EventLog {
+    var reprintEvents: [PacedJobEvent] {
+        events.filter {
+            switch $0 {
+            case .reprintSuggested, .reprinting, .reprinted: return true
+            default: return false
+            }
+        }
+    }
+}
+
+@Suite("PacedJobSender – zusätzlich nachdrucken nach Papier-/Farbbandende")
+struct PacedJobReprintTests {
+
+    private func makeTimedPrinter(printTime: Duration = .milliseconds(8)) async throws -> (VirtualPrinter, PrinterClient) {
+        let printer = try await KitTestSupport.makePrinter()
+        await printer.setPrintTime(printTime)
+        await printer.setReprintAfterError(false)
+        let client = await KitTestSupport.makeClient(printer)
+        return (printer, client)
+    }
+
+    private func options(reprint: Int) -> PacedJobOptions {
+        var options = Paced.options
+        options.reprintAfterError = reprint
+        return options
+    }
+
+    @Test("Papier leer, 1 nachdrucken: unterbrochenes Etikett (^JZY), dann das letzte fertige, dann der Rest")
+    func mediaOutReprintsLast() async throws {
+        let (printer, client) = try await makeTimedPrinter()
+        await printer.scheduleFault(.mediaOut, afterLabels: 3, clearAfter: .milliseconds(150))
+        let log = EventLog()
+        let result = try await PacedJobSender(client: client, options: options(reprint: 1))
+            .send(Paced.job(labels: 8), onEvent: log.append)
+        #expect(result.printed == 8)
+        #expect(result.reprinted == 1)
+        #expect(await printer.printLog == ["L1", "L2", "L3", "L4", "L3", "L5", "L6", "L7", "L8"])
+        #expect(log.reprintEvents == [.reprintSuggested(labels: [3], completed: 3), .reprinting(index: 1, total: 1),
+                                      .reprinted(labels: 1)])
+        // Der Fortschritt des Auftrags zählt Nachdrucke nicht mit.
+        #expect(log.progress == Array(0...8))
+    }
+
+    @Test("Farbband leer, 2 nachdrucken – in Auftragsreihenfolge")
+    func ribbonOutReprintsTwo() async throws {
+        let (printer, client) = try await makeTimedPrinter()
+        await printer.scheduleFault(.ribbonOut, afterLabels: 4, clearAfter: .milliseconds(120))
+        let log = EventLog()
+        let result = try await PacedJobSender(client: client, options: options(reprint: 2))
+            .send(Paced.job(labels: 6), onEvent: log.append)
+        #expect(result.reprinted == 2)
+        #expect(await printer.printLog == ["L1", "L2", "L3", "L4", "L5", "L3", "L4", "L6"])
+        #expect(log.contains { $0 == .reprinting(index: 1, total: 2) })
+        #expect(log.contains { $0 == .reprinting(index: 2, total: 2) })
+    }
+
+    @Test("Mehr verlangt als fertig: nur die fertigen; nichts fertig: nichts")
+    func fewerCompleted() async throws {
+        let (printer, client) = try await makeTimedPrinter()
+        await printer.scheduleFault(.mediaOut, afterLabels: 1, clearAfter: .milliseconds(100))
+        let result = try await PacedJobSender(client: client, options: options(reprint: 3))
+            .send(Paced.job(labels: 3), onEvent: { _ in })
+        #expect(result.reprinted == 1)
+        #expect(await printer.printLog == ["L1", "L2", "L1", "L3"])
+
+        let (second, secondClient) = try await makeTimedPrinter()
+        await second.scheduleFault(.mediaOut, afterLabels: 0, clearAfter: .milliseconds(100))
+        let none = try await PacedJobSender(client: secondClient, options: options(reprint: 3))
+            .send(Paced.job(labels: 2), onEvent: { _ in })
+        #expect(none.reprinted == 0)
+        #expect(await second.printLog == ["L1", "L2"])
+    }
+
+    @Test("Druckkopf offen allein und „Keins“: kein Nachdruck")
+    func noReprintForHeadOpenOrZero() async throws {
+        let (printer, client) = try await makeTimedPrinter()
+        await printer.scheduleFault(.headOpen, afterLabels: 2, clearAfter: .milliseconds(100))
+        let log = EventLog()
+        let result = try await PacedJobSender(client: client, options: options(reprint: 2))
+            .send(Paced.job(labels: 4), onEvent: log.append)
+        #expect(result.reprinted == 0)
+        #expect(log.reprintEvents.isEmpty)
+        #expect(await printer.printLog == Paced.expectedLog(labels: 4))
+
+        let (zero, zeroClient) = try await makeTimedPrinter()
+        await zero.scheduleFault(.mediaOut, afterLabels: 2, clearAfter: .milliseconds(100))
+        let zeroLog = EventLog()
+        _ = try await PacedJobSender(client: zeroClient, options: options(reprint: 0))
+            .send(Paced.job(labels: 4), onEvent: zeroLog.append)
+        #expect(zeroLog.reprintEvents.isEmpty)
+        #expect(await zero.printLog == Paced.expectedLog(labels: 4))
+    }
+
+    @Test("Rolle endet genau mit dem letzten Etikett: warten, dann nachdrucken")
+    func rollEndsWithJob() async throws {
+        let (printer, client) = try await makeTimedPrinter()
+        await printer.scheduleFault(.mediaOut, afterLabels: 4, clearAfter: .milliseconds(150), betweenLabels: true)
+        let log = EventLog()
+        let result = try await PacedJobSender(client: client, options: options(reprint: 1))
+            .send(Paced.job(labels: 4), onEvent: log.append)
+        #expect(log.waitReasons == [.mediaOut])
+        #expect(result.reprinted == 1)
+        #expect(await printer.printLog == ["L1", "L2", "L3", "L4", "L4"])
+        #expect(log.events.last == .finished(printed: 4, total: 4))
+    }
+
+    @Test("Fehler zwischen zwei Etiketten (Klebestreifen, von selbst behoben): einmal nachdrucken")
+    func transientBetweenLabels() async throws {
+        let (printer, client) = try await makeTimedPrinter()
+        await printer.scheduleFault(.mediaOut, afterLabels: 2, clearAfter: .milliseconds(60), betweenLabels: true)
+        let log = EventLog()
+        let result = try await PacedJobSender(client: client, options: options(reprint: 1))
+            .send(Paced.job(labels: 4), onEvent: log.append)
+        #expect(result.reprinted == 1)
+        #expect(await printer.printLog == ["L1", "L2", "L2", "L3", "L4"])
+        #expect(log.reprintEvents.filter { if case .reprinted = $0 { return true } else { return false } }.count == 1)
+    }
+
+    @Test("Auswahl während des Fehlers ersetzt den Vorschlag; leere Auswahl druckt nichts nach")
+    func userChoice() async throws {
+        for selection in [[1, 3], []] {
+            let (printer, client) = try await makeTimedPrinter()
+            await printer.scheduleFault(.mediaOut, afterLabels: 3)
+            let choice = PacedJobReprintChoice()
+            let log = EventLog()
+            let job = Task {
+                try await PacedJobSender(client: client, options: options(reprint: 1))
+                    .send(Paced.job(labels: 5), reprintChoice: choice, onEvent: log.append)
+            }
+            #expect(await Paced.waitUntil { log.contains { $0 == .reprintSuggested(labels: [3], completed: 3) } })
+            choice.select(selection)
+            await printer.setMediaOut(false)
+            let result = try await job.value
+            #expect(result.reprinted == selection.count)
+            #expect(await printer.printLog == ["L1", "L2", "L3", "L4"] + selection.map { "L\($0)" } + ["L5"])
+            #expect(choice.selection == nil)
+        }
+    }
+
+    @Test("^PQ-Menge: Nachdruck als dasselbe Format mit angepasster Menge")
+    func quantityBatch() async throws {
+        let (printer, client) = try await makeTimedPrinter(printTime: .milliseconds(10))
+        await printer.scheduleFault(.mediaOut, afterLabels: 7, clearAfter: .milliseconds(120))
+        let result = try await PacedJobSender(client: client, options: options(reprint: 3))
+            .send(Paced.job(labels: 2, quantity: 5), onEvent: { _ in })
+        #expect(result.printed == 10)
+        #expect(result.reprinted == 3)
+        // L1 ×5, L2 ×2, Fehler im 3. L2 (druckt der Drucker mit ^JZY erneut), Rest der Menge, dann
+        // Nachdruck der Etiketten 5–7 (L1, L2, L2).
+        #expect(await printer.printLog == Array(repeating: "L1", count: 5) + Array(repeating: "L2", count: 5)
+                + ["L1", "L2", "L2"])
+        let received = String(decoding: await printer.receivedData, as: UTF8.self)
+        #expect(received.contains("^FDL2^FS\n^PQ2\n^XZ"))
+    }
+
+    @Test("Abbruch während „Papier leer“: kein Nachdruck")
+    func cancelNeverReprints() async throws {
+        let (printer, client) = try await makeTimedPrinter()
+        await printer.scheduleFault(.mediaOut, afterLabels: 2)
+        let log = EventLog()
+        let job = Task {
+            try await PacedJobSender(client: client, options: options(reprint: 2))
+                .send(Paced.job(labels: 5), onEvent: log.append)
+        }
+        #expect(await Paced.waitUntil { log.waitReasons == [.mediaOut] })
+        job.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await job.value }
+        await printer.setMediaOut(false)
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(await printer.printLog == ["L1", "L2"])
+        #expect(!log.contains { if case .reprinting = $0 { return true } else { return false } })
+    }
+}

@@ -201,6 +201,16 @@ struct LabelWerkCommands: Commands {
             .keyboardShortcut("f", modifiers: [.command, .shift])
             .disabled(model.selectedSession == nil)
 
+            Divider()
+
+            // Druckjournal: das letzte Etikett des neuesten Auftrags (gewählter Drucker, sonst der des
+            // neuesten Auftrags) bzw. eine Auswahl aus den zuletzt gedruckten Aufträgen.
+            Button(tr("Letztes Etikett nochmal")) { model.reprintLastLabel() }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .disabled(model.sessions.isEmpty)
+            Button(tr("Nachdrucken …")) { model.showReprintWindow(printer: model.selectedSession) }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+
             // ⌘1 … ⌘9 folgen den sichtbaren Bereichen des gewählten Druckers (wie die Tab-Leiste).
             let sections = model.selectedSession?.availableSections ?? []
             if !sections.isEmpty {

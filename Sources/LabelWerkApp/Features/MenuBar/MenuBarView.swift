@@ -109,6 +109,24 @@ struct MenuBarView: View {
             }
             .buttonStyle(.labelWerkPlain)
             Spacer()
+            if !model.sessions.isEmpty {
+                // Druckjournal: Klick = „Letztes Etikett nochmal“ (Drucker des neuesten Auftrags),
+                // gedrückt halten = Menü mit „Nachdrucken …“.
+                Menu {
+                    Button(tr("Letztes Etikett nochmal")) { model.reprintLastLabel() }
+                    Button(tr("Nachdrucken …")) { model.showReprintWindow() }
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                } primaryAction: {
+                    model.reprintLastLabel()
+                }
+                .menuStyle(.button)
+                .buttonStyle(.labelWerkPlain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(tr("Letztes Etikett nochmal – gedrückt halten für „Nachdrucken …“"))
+                .accessibilityLabel(tr("Letztes Etikett nochmal"))
+            }
             Button {
                 showsUpdateFeedback = true
                 model.updates.checkNow(userInitiated: true, feedback: .inline)

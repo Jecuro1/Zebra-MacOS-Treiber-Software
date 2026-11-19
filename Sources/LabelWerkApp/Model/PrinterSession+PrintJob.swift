@@ -21,6 +21,31 @@ struct PrintJobProgress: Identifiable, Equatable {
     var reconnecting = false
     /// „Abbrechen“ gedrückt, `~JA` wird gesendet.
     var isCancelling = false
+    /// Papier oder Farbband leer: bis zum Fehler fertige Etiketten – aus ihnen wählt der Hinweis die
+    /// nachzudruckenden (0 = keine Auswahl anzeigen).
+    var reprintCompleted = 0
+    /// Nach dem Einlegen zusätzlich nachzudruckende Etiketten (1-basiert), vorbelegt nach
+    /// „Danach zusätzlich nachdrucken“ (`PrintSettings.reprintAfterError`).
+    var reprintSelection: Set<Int> = []
+    /// Nachdruck läuft: Etikett `index` von `total`.
+    var reprinting: ReprintStep?
+    /// Bisher nachgedruckte Etiketten (zählen nicht zu ``printed``).
+    var reprinted = 0
+
+    struct ReprintStep: Equatable {
+        var index: Int
+        var total: Int
+    }
+
+    /// Die Auswahl der Nachdrucke anzeigen (Papier oder Farbband leer, mindestens ein Etikett fertig).
+    var offersReprintChoice: Bool {
+        waiting?.triggersReprint == true && reprintCompleted > 0 && !isCancelling
+    }
+
+    /// „Nachdruck 1 von 2 (Etikettenende)“.
+    var reprintText: String? {
+        reprinting.map { tr("Nachdruck %d von %d (Etikettenende)", $0.index, $0.total) }
+    }
 
     /// Gerade gedrucktes Etikett (1-basiert).
     var currentLabel: Int { total > 0 ? min(total, printed + 1) : printed + 1 }
@@ -145,12 +170,26 @@ extension PrinterSession {
     ///   - labels: erwartete Etikettenzahl (Anzeige, falls der Auftrag sie nicht selbst liefert).
     ///   - characters: Steuerzeichen des Auftrags (`nil` = erkennen).
     ///   - quiet: Fehler nicht als Hinweis anzeigen (der Aufrufer meldet sie selbst).
+    ///   - journal: ZPL-Auftrag ins Druckjournal der App aufnehmen („Nachdrucken“,
+    ///     `PrinterSession+Journal.swift`); Nachdrucke selbst nicht.
     func transmitPrintJob(_ data: Data, title: String, labels: Int, characters: ControlCharacters?,
-                          cancelPrefix: Int?, delay: Int, activity: String, quiet: Bool = false) async -> PrintJobOutcome {
+                          cancelPrefix: Int?, delay: Int, activity: String, quiet: Bool = false,
+                          journal: Bool = true) async -> PrintJobOutcome {
         await runPrintJobsInOrder(labels: labels) {
             await self.performPrintJob(data, title: title, labels: labels, characters: characters,
-                                       cancelPrefix: cancelPrefix, delay: delay, activity: activity, quiet: quiet)
+                                       cancelPrefix: cancelPrefix, delay: delay, activity: activity, quiet: quiet,
+                                       journal: journal)
         }
+    }
+
+    /// Ändert während „Papier leer“/„Farbband leer“ die Etiketten, die nach dem Einlegen zusätzlich
+    /// nachgedruckt werden (Hinweis mit Vorschaubildern). Gilt für den laufenden Fehler.
+    func setReprintSelection(_ labels: Set<Int>) {
+        guard var job = printJob, job.offersReprintChoice else { return }
+        let valid = labels.filter { (1...job.reprintCompleted).contains($0) }
+        job.reprintSelection = valid
+        printJobReprintChoice?.select(valid.sorted())
+        withAnimation(Motion.animation(Motion.snappy, reduceMotion: app?.reducesMotion ?? false)) { printJob = job }
     }
 
     /// Bricht den laufenden Auftrag ab (`~JA`); wartende Aufträge folgen danach. Wirkt auch, solange
@@ -198,15 +237,45 @@ extension PrinterSession {
     }
 
     private func performPrintJob(_ data: Data, title: String, labels: Int, characters: ControlCharacters?,
-                                 cancelPrefix: Int?, delay: Int, activity: String, quiet: Bool) async -> PrintJobOutcome {
+                                 cancelPrefix: Int?, delay: Int, activity: String, quiet: Bool,
+                                 journal: Bool) async -> PrintJobOutcome {
         guard pacesPrintJobs else {
             let ok = await withClient(activity, quiet: quiet) { client in
                 try await client.sendJob(data, cancelPrefixLength: cancelPrefix, delayMilliseconds: delay)
             } != nil
+            if ok, journal { recordInJournal(data, characters: characters, title: title, printed: labels, status: .completed) }
             return ok ? .printed(labels: labels)
                 : .failed(message: lastError ?? tr("Der Drucker hat den Auftrag nicht angenommen."), printed: 0, total: labels)
         }
 
+        let outcome = await performPacedPrintJob(data, title: title, labels: labels, characters: characters,
+                                                 cancelPrefix: cancelPrefix, delay: delay, activity: activity,
+                                                 quiet: quiet)
+        if journal {
+            let reprinted = lastPrintJobReprints
+            switch outcome {
+            case .printed(let count, _):
+                recordInJournal(data, characters: characters, title: title, printed: count, reprinted: reprinted,
+                                status: .completed)
+            case .cancelled(let printed, _):
+                recordInJournal(data, characters: characters, title: title, printed: printed, reprinted: reprinted,
+                                status: .cancelled)
+            case .failed(_, let printed, _):
+                recordInJournal(data, characters: characters, title: title, printed: printed, reprinted: reprinted,
+                                status: .failed)
+            }
+        }
+        return outcome
+    }
+
+    private func performPacedPrintJob(_ data: Data, title: String, labels: Int, characters: ControlCharacters?,
+                                      cancelPrefix: Int?, delay: Int, activity: String,
+                                      quiet: Bool) async -> PrintJobOutcome {
+        lastPrintJobReprints = 0
+        // Etiketten des Auftrags für die Vorschaubilder im Hinweis („Danach zusätzlich nachdrucken“).
+        printJobPlan = PacedJobPlan.split(data, characters: characters)
+        let reprintChoice = PacedJobReprintChoice()
+        printJobReprintChoice = reprintChoice
         let start = PrintJobProgress(title: title, printed: 0, total: labels)
         withAnimation(Motion.animation(Motion.spring, reduceMotion: app?.reducesMotion ?? false)) { printJob = start }
         // Ein Auftrag kann minutenlang auf eine neue Rolle warten: währenddessen weder Ruhezustand noch
@@ -217,6 +286,8 @@ extension PrinterSession {
         defer {
             ProcessInfo.processInfo.endActivity(keepAwake)
             printJobTask = nil
+            printJobPlan = nil
+            printJobReprintChoice = nil
             withAnimation(Motion.animation(Motion.spring, reduceMotion: app?.reducesMotion ?? false)) { printJob = nil }
         }
 
@@ -230,10 +301,13 @@ extension PrinterSession {
             reachedPrinter = true
             // „Abbrechen“ während des Verbindens: nichts senden.
             if self.printJob?.isCancelling == true { throw CancellationError() }
-            let sender = PacedJobSender(client: client)
+            // „Danach zusätzlich nachdrucken“ (nur sinnvoll mit „anhalten und fortsetzen“, das hier gilt).
+            let options = PacedJobOptions(reprintAfterError: self.saved.settings.reprintAfterError)
+            let sender = PacedJobSender(client: client, options: options)
             let task = Task.detached(priority: .userInitiated) {
                 try await sender.send(data, characters: characters, cancelPrefixLength: cancelPrefix,
-                                      delayMilliseconds: delay, onEvent: { _ = continuation.yield($0) })
+                                      delayMilliseconds: delay, reprintChoice: reprintChoice,
+                                      onEvent: { _ = continuation.yield($0) })
             }
             self.printJobTask = task
             do {
@@ -253,6 +327,7 @@ extension PrinterSession {
         await consumer.value
 
         let job = printJob ?? start
+        lastPrintJobReprints = result?.reprinted ?? job.reprinted
         if let result {
             if result.uncertain > 0, !quiet {
                 app?.toast(tr("Bitte nachzählen"),
@@ -295,6 +370,9 @@ extension PrinterSession {
         case .resumed(let printed, _):
             job.printed = printed
             job.waiting = nil
+            // Fehler behoben: Die Auswahl der Nachdrucke galt nur während des Fehlers. (Der Vorschlag
+            // kommt vor `.waiting`, deshalb erst hier zurücksetzen.)
+            job.reprintCompleted = 0
         case .unpaced:
             job.paced = false
         case .connectionLost:
@@ -303,13 +381,23 @@ extension PrinterSession {
             job.reconnecting = false
         case .cancelled(let printed, _):
             job.printed = printed
+            job.reprintCompleted = 0
         case .finished(let printed, let total):
             job.printed = printed
             if total > 0 { job.total = total }
             job.waiting = nil
+        case .reprintSuggested(let labels, let completed):
+            job.reprintCompleted = completed
+            job.reprintSelection = Set(labels)
+        case .reprinting(let index, let total):
+            job.reprinting = PrintJobProgress.ReprintStep(index: index, total: total)
+        case .reprinted(let labels):
+            job.reprinting = nil
+            job.reprinted += labels
         case .resumeSent, .resending, .uncertain:
             break
         }
+
         guard job != printJob else { return }
         withAnimation(Motion.animation(Motion.snappy, reduceMotion: app?.reducesMotion ?? false)) { printJob = job }
         setActivityProgress(job.fraction)

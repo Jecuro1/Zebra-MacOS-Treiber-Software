@@ -782,6 +782,62 @@ Druckers gewartet wird (je Etikett meist unter einer halben Sekunde), aber ohne 
 * Wird der Drucker genau zwischen zwei Statusabfragen ausgeschaltet, kann ein einzelnes Etikett doppelt
   kommen – fehlen wird keines.
 
+### Die letzten Etiketten zusätzlich nachdrucken (Rollenende, Klebestreifen)
+
+Am Ende einer Rolle sind die letzten Etiketten oft unbrauchbar: Meist klebt dort ein Klebestreifen, das
+Etikett ist schief oder nur halb bedruckt, oder das Farbband war schon dünn. Dasselbe passiert mitten in
+der Rolle an einer **Klebestelle**, die der Drucker kurz als Fehler erkennt. Deshalb druckt LabelWerk nach
+**„Papier leer“** oder **„Farbband leer“** – und nach einem Medienfehler, der von selbst wieder
+verschwindet – die **zuletzt fertigen Etiketten zusätzlich noch einmal**, bevor der Auftrag weitergeht:
+
+1. zuerst das Etikett, das beim Ausgehen gerade gedruckt wurde (das druckt der Drucker selbst erneut),
+2. dann die Nachdrucke der zuletzt fertigen Etiketten in ihrer ursprünglichen Reihenfolge,
+3. dann der Rest des Auftrags.
+
+In der macOS-Warteschlange steht währenddessen z. B. **„Nachdruck 1 von 2 (Etikettenende)“**, in
+LabelWerk dasselbe im Hinweis oben im Fenster. Nachdrucke zählen nicht zum Fortschritt „Etikett 37 von
+50“. Ein nur geöffneter Druckkopf löst keinen Nachdruck aus, ein abgebrochener Auftrag auch nicht; je
+Fehler wird nur einmal nachgedruckt. Endet die Rolle genau mit dem letzten Etikett des Auftrags, wartet
+der Auftrag trotzdem auf die neue Rolle und druckt danach nach.
+
+**Einstellung:** **Druckeinstellungen › Druckoptionen › „Danach zusätzlich nachdrucken“** (direkt unter
+„Bei Papier- oder Farbbandende anhalten und fortsetzen“, nur zusammen damit wirksam): **Keins**,
+**Letztes Etikett (Standard)**, **Letzte 2**, **Letzte 3** oder **Benutzerdefiniert …** (1 bis 99). Für die
+macOS-Warteschlangen steht die Zahl in der Geräte-URI (`labelwerk://Adresse:9100?reprint=2`); LabelWerk
+hält sie auf dem Stand der Einstellung.
+
+**Während des Fehlers anders wählen:** Beim Druck aus LabelWerk zeigt der Hinweis „Papier leer – …“ die
+zuletzt fertigen Etiketten als kleine Vorschaubilder; die vorgesehenen sind angehakt („Nach dem Einlegen
+wird 1 Etikett zusätzlich nachgedruckt.“). Ein Klick hakt ein Etikett an oder ab, **„Keins“** druckt
+nichts nach. Die Wahl gilt beim Einlegen der neuen Rolle.
+
+**Hinweis:** Etiketten mit fortlaufender Nummer (`^SN`/`^SF`) werden mit dem Wert gedruckt, mit dem ihr
+Format beginnt – bei Serien in einem einzigen Format also mit der Startnummer. RFID-Etiketten werden nie
+nachgedruckt (jede EPC darf nur einmal geschrieben werden).
+
+### Nachdrucken und „Letztes Etikett nochmal“
+
+Fällt ein schlechtes Etikett erst später auf (z. B. an einer Klebestelle mitten in der Rolle), lässt es
+sich gezielt noch einmal drucken – auch wenn es **aus einem anderen Programm** über die
+macOS-Warteschlange kam:
+
+* **Drucker › Nachdrucken …** (⌥⌘L) öffnet das Fenster **„Nachdrucken“**: links die zuletzt gedruckten
+  Aufträge nach Tag („Heute“, „Gestern“ …) mit Vorschau, rechts die Etiketten des gewählten Auftrags als
+  Vorschaubilder. Etiketten anhaken (oder **„Letztes“**, **„Alle“**), Drucker wählen und
+  **„Nachdrucken“** – der Druck läuft wie jeder andere Druck aus LabelWerk (mit Warten bei „Papier
+  leer“). Oben links lässt sich die Liste auf einen Drucker beschränken.
+* **Drucker › Letztes Etikett nochmal** (⇧⌘L) druckt das zuletzt gedruckte Etikett des neuesten Auftrags
+  des gewählten Druckers sofort noch einmal; ist kein Drucker gewählt, das des neuesten Auftrags
+  überhaupt. Dasselbe macht der Knopf **↺** unten im Menüleisten-Fenster (gedrückt halten öffnet das
+  Menü mit „Nachdrucken …“). Ein Hinweis bestätigt, was gedruckt wurde.
+
+Die Aufträge stehen im **Druckjournal**: Aufträge über die macOS-Warteschlangen (Geräte-URI
+`labelwerk://`) in `/Users/Shared/LabelWerk/Journal`, Aufträge aus LabelWerk in
+`~/Library/Application Support/LabelWerk/Journal`. Je Warteschlange bzw. Drucker bleiben die letzten
+**30 Aufträge** (höchstens 50 MB); Aufträge über 20 MB werden nicht aufgenommen. Gespeichert werden die
+Druckdaten, wie sie an den Drucker gingen (ZPL) – wer das nicht möchte, kann die Ordner jederzeit löschen.
+Aufträge über `socket://`- oder `usb://`-Warteschlangen und EPL/CPCL-Drucker erscheinen nicht.
+
 ## Druckeinstellungen wie unter Windows
 
 Unter Windows stellt man Zebra-Drucker im Dialog **„Druckeinstellungen für ZD421 …“** des

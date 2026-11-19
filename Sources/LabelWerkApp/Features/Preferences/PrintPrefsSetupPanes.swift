@@ -200,6 +200,9 @@ struct PrintPrefsPagePane: View {
 struct PrintPrefsOptionsPane: View {
     let context: PrintPrefsContext
     @State private var lastPauseCount = 10
+    /// „Benutzerdefiniert …“ gewählt (bleibt auch bei 1–3 sichtbar, bis eine feste Wahl folgt).
+    @State private var customReprint = false
+    @State private var lastCustomReprint = 5
 
     init(context: PrintPrefsContext) {
         self.context = context
@@ -237,6 +240,53 @@ struct PrintPrefsOptionsPane: View {
             set: { value in
                 editor.draft.settings.pauseEvery = value.clamped(to: 1...9999)
                 lastPauseCount = value.clamped(to: 1...9999)
+            }
+        )
+    }
+
+    /// „Danach zusätzlich nachdrucken“: Keins / Letztes Etikett / Letzte 2 / Letzte 3 / Benutzerdefiniert.
+    private enum ReprintChoice: Hashable { case none, one, two, three, custom }
+
+    private var reprintBinding: Binding<ReprintChoice> {
+        let editor = self.editor
+        let animation = context.animation
+        let custom = customReprint
+        let lastCustom = lastCustomReprint
+        return Binding(
+            get: {
+                let count = editor.draft.settings.reprintAfterError
+                if custom, count > 0 { return .custom }
+                switch count {
+                case ...0: return .none
+                case 1: return .one
+                case 2: return .two
+                case 3: return .three
+                default: return .custom
+                }
+            },
+            set: { choice in
+                withAnimation(animation) {
+                    customReprint = choice == .custom
+                    switch choice {
+                    case .none: editor.draft.settings.reprintAfterError = 0
+                    case .one: editor.draft.settings.reprintAfterError = 1
+                    case .two: editor.draft.settings.reprintAfterError = 2
+                    case .three: editor.draft.settings.reprintAfterError = 3
+                    case .custom: editor.draft.settings.reprintAfterError = lastCustom.clamped(to: 1...99)
+                    }
+                }
+            }
+        )
+    }
+
+    private var reprintCountBinding: Binding<Int> {
+        let editor = self.editor
+        return Binding(
+            get: { max(1, editor.draft.settings.reprintAfterError) },
+            set: { value in
+                let value = value.clamped(to: 1...99)
+                editor.draft.settings.reprintAfterError = value
+                lastCustomReprint = value
             }
         )
     }
@@ -367,6 +417,29 @@ struct PrintPrefsOptionsPane: View {
                                          ? tr("Der Druck geht nach dem Einlegen automatisch weiter")
                                          : tr("Auftrag gilt als erledigt, sobald die Daten beim Drucker sind"))
                 }
+                PrintPrefsRow(.reprintAfterError, context: context, isEnabled: settings.resumeAfterError,
+                              note: settings.resumeAfterError && settings.reprintAfterError > 0
+                                  ? tr("Am Rollenende sind die letzten Etiketten oft unbrauchbar (Klebestreifen). Sie werden nach dem Einlegen zusätzlich gedruckt.")
+                                  : nil) {
+                    HStack(spacing: 10) {
+                        Picker("", selection: reprintBinding) {
+                            Text(tr("Keins")).tag(ReprintChoice.none)
+                            Text(tr("Letztes Etikett (Standard)")).tag(ReprintChoice.one)
+                            Text(tr("Letzte 2")).tag(ReprintChoice.two)
+                            Text(tr("Letzte 3")).tag(ReprintChoice.three)
+                            Divider()
+                            Text(tr("Benutzerdefiniert …")).tag(ReprintChoice.custom)
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .frame(maxWidth: 220)
+                        if reprintBinding.wrappedValue == .custom {
+                            PrintPrefsIntegerField(value: reprintCountBinding, range: 1...99, unit: tr("Etiketten"))
+                                .transition(.opacity.combined(with: .move(edge: .leading)))
+                        }
+                    }
+                    .disabled(!settings.resumeAfterError)
+                }
             }
 
             PrintPrefsGroup(tr("Aufträge vor dem Drucken abbrechen"), systemImage: "xmark.bin") {
@@ -382,6 +455,7 @@ struct PrintPrefsOptionsPane: View {
             }
         }
         .animation(context.animation, value: settings.pauseEvery > 0)
+        .animation(context.animation, value: reprintBinding.wrappedValue == .custom)
         .animation(context.animation, value: settings.controlCharacters != nil)
     }
 

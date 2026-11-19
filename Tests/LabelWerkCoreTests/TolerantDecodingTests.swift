@@ -27,6 +27,24 @@ struct TolerantDecodingTests {
         #expect(decoded == original)
     }
 
+    @Test("„Danach zusätzlich nachdrucken“: Standard 1, fehlend/ungültig → 1, begrenzt auf 0…99")
+    func reprintAfterError() throws {
+        func decode(_ json: String) throws -> PrintSettings {
+            try JSONDecoder().decode(PrintSettings.self, from: Data(json.utf8))
+        }
+        #expect(PrintSettings().reprintAfterError == 1)
+        #expect(try decode("{}").reprintAfterError == 1)
+        #expect(try decode(#"{"reprintAfterError": "zwei"}"#).reprintAfterError == 1)
+        #expect(try decode(#"{"reprintAfterError": 0}"#).reprintAfterError == 0)
+        #expect(try decode(#"{"reprintAfterError": 3}"#).reprintAfterError == 3)
+        #expect(try decode(#"{"reprintAfterError": 250}"#).reprintAfterError == 99)
+        #expect(try decode(#"{"reprintAfterError": -4}"#).reprintAfterError == 0)
+        #expect(PrintSettings(reprintAfterError: 120).clamped().reprintAfterError == 99)
+        let original = PrintSettings(resumeAfterError: true, reprintAfterError: 7)
+        let decoded = try JSONDecoder().decode(PrintSettings.self, from: JSONEncoder().encode(original))
+        #expect(decoded.reprintAfterError == 7)
+    }
+
     @Test("Etikettenformat: nur Kennung, Name und Maße sind Pflicht")
     func labelStock() throws {
         let json = #"{"id": "x", "name": "Test", "widthMM": 50, "heightMM": 30, "tracking": "zukunft"}"#

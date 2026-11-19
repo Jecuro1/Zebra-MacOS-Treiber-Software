@@ -55,6 +55,7 @@ struct PrintJobBanner: View {
         if job.isCancelling { return tr("Wird abgebrochen …") }
         if let reason = job.waiting { return PrintJobProgress.title(for: reason) }
         if job.reconnecting { return tr("Verbindung unterbrochen") }
+        if let reprint = job.reprintText { return reprint }
         return job.paced ? job.counterText : tr("Wird gesendet …")
     }
 
@@ -99,6 +100,10 @@ struct PrintJobBanner: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                if job.offersReprintChoice {
+                    PrintJobReprintChooser(session: session, job: job)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
                 if let fraction = job.fraction {
                     ProgressView(value: fraction)
                         .tint(tint)
@@ -132,5 +137,104 @@ struct PrintJobBanner: View {
         }
         .animation(reduceMotion ? nil : Motion.snappy, value: job)
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// Während „Papier leer“/„Farbband leer“: die zuletzt fertigen Etiketten als kleine Vorschaubilder mit
+/// Häkchen – vorbelegt nach „Danach zusätzlich nachdrucken“. Was hier angehakt ist, druckt LabelWerk nach
+/// dem Einlegen zusätzlich noch einmal (danach geht der Auftrag weiter).
+struct PrintJobReprintChooser: View {
+    let session: PrinterSession
+    let job: PrintJobProgress
+
+    /// Höchstens so viele der letzten Etiketten zur Wahl (mindestens alle vorbelegten).
+    private static let visibleCount = 8
+
+    private var candidates: [Int] {
+        let earliestSelected = job.reprintSelection.min() ?? job.reprintCompleted
+        let count = max(Self.visibleCount, job.reprintCompleted - earliestSelected + 1)
+        return PacedJobPlan.lastLabels(count, of: job.reprintCompleted)
+    }
+
+    private var summary: String {
+        switch job.reprintSelection.count {
+        case 0: return tr("Kein Nachdruck – nach dem Einlegen geht der Auftrag direkt weiter.")
+        case 1: return tr("Nach dem Einlegen wird 1 Etikett zusätzlich nachgedruckt.")
+        default: return tr("Nach dem Einlegen werden %d Etiketten zusätzlich nachgedruckt.", job.reprintSelection.count)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(summary)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.opacity)
+                Spacer(minLength: 4)
+                if !job.reprintSelection.isEmpty {
+                    Button(tr("Keins")) { session.setReprintSelection([]) }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11.5))
+                        .help(tr("Nichts zusätzlich nachdrucken"))
+                }
+            }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 8) {
+                        ForEach(candidates, id: \.self) { number in
+                            candidate(number)
+                                .id(number)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .onAppear { proxy.scrollTo(job.reprintCompleted, anchor: .trailing) }
+            }
+            .frame(height: 78)
+        }
+    }
+
+    private func candidate(_ number: Int) -> some View {
+        let selected = job.reprintSelection.contains(number)
+        let plan = session.printJobPlan
+        let dotsPerMM = session.resolution.dotsPerMM
+        let width = session.labelWidthDots
+        let height = session.labelHeightDots
+        return Button {
+            var selection = job.reprintSelection
+            if selected { selection.remove(number) } else { selection.insert(number) }
+            session.setReprintSelection(selection)
+        } label: {
+            VStack(spacing: 3) {
+                LabelThumbnailView(key: "job-\(job.id.uuidString)-\(number)",
+                                   placeholderAspect: CGFloat(max(1, width)) / CGFloat(max(1, height))) {
+                    plan?.labelData(number).flatMap {
+                        LabelThumbnail.render($0, dotsPerMM: dotsPerMM, widthDots: width, heightDots: height, maxSide: 120)
+                    }
+                }
+                .frame(height: 52)
+                .opacity(selected ? 1 : 0.55)
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(selected ? Color.white : Color.secondary, selected ? Theme.accent : Color.clear)
+                        .background(Circle().fill(.background).padding(1))
+                        .offset(x: 5, y: -5)
+                }
+                Text(tr("Nr. %d", number))
+                    .font(.system(size: 10.5, weight: selected ? .semibold : .regular).monospacedDigit())
+                    .foregroundStyle(selected ? Color.primary : Color.secondary)
+            }
+            .padding(.top, 5)
+            .padding(.trailing, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(selected ? tr("Etikett %d wird nachgedruckt – klicken zum Abwählen", number)
+                       : tr("Etikett %d zusätzlich nachdrucken", number))
+        .accessibilityLabel(tr("Etikett %d", number))
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

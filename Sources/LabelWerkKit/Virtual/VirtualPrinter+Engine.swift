@@ -48,6 +48,9 @@ extension VirtualPrinter {
         var labelsBeforeFault: Int
         var clearAfter: Duration?
         var pauseAfterRecovery: Bool
+        /// Der Fehler tritt direkt nach dem letzten fehlerfreien Exemplar auf, statt das nächste zu
+        /// unterbrechen (z. B. die Rolle endet genau mit dem Auftrag).
+        var betweenLabels = false
     }
 
     /// Höchstzahl der Einträge in ``printLog`` (die neuesten bleiben).
@@ -76,10 +79,14 @@ extension VirtualPrinter {
     /// (neue Rolle eingelegt, Kopf geschlossen); `pauseAfterRecovery` lässt den Drucker danach
     /// pausiert stehen, bis `~PS` bzw. die Pause-Taste ihn fortsetzt (wie viele Zebra-Modelle nach
     /// „Papier leer“). Ohne Druckzeit (``setPrintTime(_:)``) wirkt der Fehler ebenso, nur ohne Zeit.
+    /// Mit `betweenLabels` tritt der Fehler direkt nach dem `afterLabels`-ten Exemplar auf, ohne ein
+    /// Exemplar zu unterbrechen – auch nach dem letzten Etikett eines Auftrags (die Rolle endet genau mit
+    /// dem Auftrag).
     public func scheduleFault(_ fault: Fault, afterLabels: Int, clearAfter: Duration? = nil,
-                              pauseAfterRecovery: Bool = false) {
+                              pauseAfterRecovery: Bool = false, betweenLabels: Bool = false) {
         scheduledFault = ScheduledFault(fault: fault, labelsBeforeFault: max(0, afterLabels),
-                                        clearAfter: clearAfter, pauseAfterRecovery: pauseAfterRecovery)
+                                        clearAfter: clearAfter, pauseAfterRecovery: pauseAfterRecovery,
+                                        betweenLabels: betweenLabels)
     }
 
     /// Verwirft einen noch nicht eingetretenen geplanten Fehler.
@@ -174,12 +181,19 @@ extension VirtualPrinter {
             if planned.labelsBeforeFault <= 0 {
                 scheduledFault = nil
                 trigger(planned)
+                guard !planned.betweenLabels else { return }
                 queued[0].started = true
                 interruptCurrentCopy()
                 return
             }
             planned.labelsBeforeFault -= 1
             scheduledFault = planned
+            if planned.betweenLabels, planned.labelsBeforeFault == 0 {
+                commitCopy()
+                scheduledFault = nil
+                trigger(planned)
+                return
+            }
         }
         commitCopy()
     }

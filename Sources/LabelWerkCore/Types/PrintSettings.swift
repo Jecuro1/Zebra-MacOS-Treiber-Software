@@ -106,6 +106,14 @@ public struct PrintSettings: Codable, Hashable, Sendable {
     /// (ARCHITECTURE.md §10 „Backend labelwerk“). Nur Treiber: keine CUPS-Option, kein Befehl an den
     /// Drucker; aus = `socket://` wie bisher.
     public var resumeAfterError: Bool
+    /// „Danach zusätzlich nachdrucken“ (Standard 1, 0…99, 0 = keins): Nach „Papier leer“ oder
+    /// „Farbband leer“ (auch nach einem Medienfehler, der von selbst verschwindet, z. B. an einer
+    /// Klebestelle) druckt der Treiber die zuletzt vor dem Fehler fertigen `n` Etiketten zusätzlich
+    /// erneut, bevor der Auftrag weitergeht – am Rollenende sind sie oft unbrauchbar. Das unterbrochene
+    /// Etikett gehört nicht dazu (das druckt der Drucker wegen `^JZY` selbst erneut). Wirkt nur mit
+    /// ``resumeAfterError``; für die Warteschlange als `reprint=N` in der Geräte-URI `labelwerk://`
+    /// (ARCHITECTURE.md §7b).
+    public var reprintAfterError: Int
 
     public init(
         darkness: Int? = nil,
@@ -145,7 +153,8 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         fitToLabel: LabelFitMode = .auto,
         labelWidthHundredthsMM: Int = 0,
         labelHeightHundredthsMM: Int = 0,
-        resumeAfterError: Bool = true
+        resumeAfterError: Bool = true,
+        reprintAfterError: Int = 1
     ) {
         self.darkness = darkness
         self.speed = speed
@@ -185,6 +194,7 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         self.labelWidthHundredthsMM = labelWidthHundredthsMM
         self.labelHeightHundredthsMM = labelHeightHundredthsMM
         self.resumeAfterError = resumeAfterError
+        self.reprintAfterError = reprintAfterError
     }
 
     /// Standard: Alle Druckerwerte beibehalten, Schwellenwert-Rasterung, Z64.
@@ -207,8 +217,12 @@ public struct PrintSettings: Codable, Hashable, Sendable {
         s.cancelDelayMs = min(max(cancelDelayMs, 0), 10_000)
         s.labelWidthHundredthsMM = min(max(labelWidthHundredthsMM, 0), Self.maxLabelSizeHundredthsMM)
         s.labelHeightHundredthsMM = min(max(labelHeightHundredthsMM, 0), Self.maxLabelSizeHundredthsMM)
+        s.reprintAfterError = min(max(reprintAfterError, 0), Self.maxReprintAfterError)
         return s
     }
+
+    /// Obergrenze von ``reprintAfterError``.
+    public static let maxReprintAfterError = 99
 
     /// Obergrenze von `lwLabelWidth`/`lwLabelHeight` in 1/100 mm (1 m).
     public static let maxLabelSizeHundredthsMM = 100_000
@@ -551,7 +565,8 @@ extension PrintSettings {
             fitToLabel: value(LabelFitMode.self, .fitToLabel) ?? .auto,
             labelWidthHundredthsMM: value(Int.self, .labelWidthHundredthsMM) ?? 0,
             labelHeightHundredthsMM: value(Int.self, .labelHeightHundredthsMM) ?? 0,
-            resumeAfterError: value(Bool.self, .resumeAfterError) ?? true
+            resumeAfterError: value(Bool.self, .resumeAfterError) ?? true,
+            reprintAfterError: value(Int.self, .reprintAfterError) ?? 1
         )
         self = clamped()
     }

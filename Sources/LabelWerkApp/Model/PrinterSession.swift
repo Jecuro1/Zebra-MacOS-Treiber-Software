@@ -45,6 +45,12 @@ final class PrinterSession: Identifiable {
     var queuedPrintJobs = 0
 
     @ObservationIgnored var printJobTask: Task<PacedJobResult, Error>?
+    /// Etiketten des laufenden Auftrags (Vorschaubilder für „Danach zusätzlich nachdrucken“).
+    @ObservationIgnored var printJobPlan: PacedJobPlan?
+    /// Auswahl der Nachdrucke im laufenden Auftrag (`setReprintSelection(_:)`).
+    @ObservationIgnored var printJobReprintChoice: PacedJobReprintChoice?
+    /// Nachdrucke des zuletzt beendeten Auftrags (für das Druckjournal).
+    @ObservationIgnored var lastPrintJobReprints = 0
     /// Ende der Kette nacheinander auszuführender Druckaufträge.
     @ObservationIgnored var printJobTail: Task<Void, Never>?
     /// Kennungen der Aufträge, die noch auf ihren Beginn warten, und der davon verworfenen

@@ -55,7 +55,7 @@ ALL_LDFLAGS := $(LDFLAGS) $(SAN_FLAGS)
 # Bibliothek des Filters (Optionen, PPD) und eigener Kern.
 FILTER_SRCS := lw_util.c lw_bitmap.c lw_dither.c lw_encode.c lw_raster.c lw_options.c lw_fit.c lw_job.c lw_cups.c
 FILTER_OBJS := $(addprefix $(BUILDDIR)/obj/filter/,$(FILTER_SRCS:.c=.o))
-CORE_OBJS   := $(BUILDDIR)/obj/lwb_core.o
+CORE_OBJS   := $(BUILDDIR)/obj/lwb_core.o $(BUILDDIR)/obj/lwb_journal.o
 
 BACKEND     := $(BUILDDIR)/labelwerk
 TEST_TOOLS  := $(BUILDDIR)/tests/test_backend
@@ -120,10 +120,11 @@ ifeq ($(UNAME_S),Darwin)
 universal: $(UNIVERSAL_DIR)/labelwerk
 
 $(UNIVERSAL_DIR)/labelwerk: $(SRCDIR)/labelwerk.c $(SRCDIR)/lwb_core.c $(SRCDIR)/lwb_core.h \
+		$(SRCDIR)/lwb_journal.c $(SRCDIR)/lwb_journal.h \
 		$(addprefix $(FILTERDIR)/,$(FILTER_SRCS)) $(wildcard $(FILTERDIR)/*.h)
 	@mkdir -p $(dir $@)
 	clang $(UNIVERSAL_FLAGS) $(CFLAGS) $(STD_FLAGS) $(WARN_FLAGS) $(CPPFLAGS) -I$(SRCDIR) -I$(FILTERDIR) \
-		-o $@ $(SRCDIR)/labelwerk.c $(SRCDIR)/lwb_core.c $(addprefix $(FILTERDIR)/,$(FILTER_SRCS)) $(LIBS)
+		-o $@ $(SRCDIR)/labelwerk.c $(SRCDIR)/lwb_core.c $(SRCDIR)/lwb_journal.c $(addprefix $(FILTERDIR)/,$(FILTER_SRCS)) $(LIBS)
 
 INSTALL_SOURCE := $(UNIVERSAL_DIR)/labelwerk
 else
