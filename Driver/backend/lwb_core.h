@@ -147,49 +147,4 @@ bool lwb_parse_uri(const char *uri, char *host, size_t host_size, int *port, cha
  */
 bool lwb_uri_option(const char *options, const char *name, char *value, size_t value_size);
 
-/* ------------------------------------------------------------------------------------------ */
-/* Nachdruck nach Etiketten- bzw. Farbbandende (ARCHITECTURE.md §10 „Nachdruck“)              */
-/* ------------------------------------------------------------------------------------------ */
-
-/** Nachdrucke ohne Angabe (URI-Option `reprint`, Auftragsoption `lwReprintAfterError`). */
-#define LWB_REPRINT_DEFAULT 1
-/** Höchstzahl der Nachdrucke je Fehler. */
-#define LWB_REPRINT_MAX 99
-
-/**
- * Liest die Zahl der Nachdrucke („2“, „ 3 “, „Custom.5“; „None“/„Off“/„False“/„Keins“ = 0).
- * Werte über LWB_REPRINT_MAX werden begrenzt. false bei ungültigem Text (Wert bleibt).
- */
-bool lwb_parse_reprint_count(const char *text, long *count);
-
-/**
- * Vom offenen Format (Menge `quantity`) fertig gedruckte Etiketten laut ~HS, wenn gerade ein
- * Fehler eintritt: Format noch im Empfangspuffer → 0; Restetiketten > 0 → Menge − Rest (das
- * unterbrochene Etikett zählt nicht – es wiederholt der Drucker wegen ^JZY selbst); nichts mehr
- * im Puffer → die ganze Menge. Nicht vollständig gesendet (`written` = false) → 0.
- */
-long lwb_completed_in_format(const lwb_host_status *status, long quantity, bool written);
-
-/** Fertig gedruckte Etiketten eines Formats: Etiketten first … first+count−1 des Auftrags. */
-typedef struct lwb_label_run {
-    long first;
-    long count;
-} lwb_label_run;
-
-/** Teil eines Nachdrucks: `count` Etiketten aus dem Format runs[run]. */
-typedef struct lwb_reprint_slice {
-    size_t run;
-    long count;
-} lwb_reprint_slice;
-
-/**
- * Wählt die Etiketten anchor−count … anchor−1 (die letzten `count` vor dem Fehler, in
- * ursprünglicher Reihenfolge) aus den aufsteigenden `runs`. Aufeinanderfolgende Etiketten eines
- * Formats bilden eine Scheibe (dasselbe Format mit ^PQ = Anzahl). Liefert die Zahl der Scheiben
- * (höchstens `out_size`); fehlen Etiketten in `runs` (nicht mehr gespeichert), werden sie
- * übersprungen.
- */
-size_t lwb_reprint_slices(const lwb_label_run *runs, size_t run_count, long anchor, long count,
-                          lwb_reprint_slice *out, size_t out_size);
-
 #endif /* LWB_CORE_H */

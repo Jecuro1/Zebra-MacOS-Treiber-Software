@@ -64,61 +64,6 @@ public struct PacedJobPlan: Sendable, Hashable {
         self.characters = characters
     }
 
-    // MARK: - Etiketten nachdrucken
-
-    /// Segment und Exemplar (beide 0-basiert) des Etiketts `number` (1-basiert, in Auftragsreihenfolge:
-    /// alle Exemplare eines Formats nacheinander); `nil` außerhalb von 1…``totalLabels``.
-    public func location(ofLabel number: Int) -> (segment: Int, copy: Int)? {
-        guard number >= 1 else { return nil }
-        var first = 1
-        for (index, segment) in segments.enumerated() {
-            if number < first + segment.quantity { return (index, number - first) }
-            first += segment.quantity
-        }
-        return nil
-    }
-
-    /// Die letzten `count` von `completed` fertigen Etiketten (1-basiert, aufsteigend) – die Auswahl für
-    /// „Nach Papier- oder Farbbandende zusätzlich nachdrucken“ (`PrintSettings.reprintAfterError`).
-    public static func lastLabels(_ count: Int, of completed: Int) -> [Int] {
-        let count = min(max(0, count), max(0, completed))
-        guard count > 0 else { return [] }
-        return Array((completed - count + 1)...completed)
-    }
-
-    /// Formate zum Nachdrucken der Etiketten `numbers` (1-basiert; doppelte und ungültige werden
-    /// verworfen) in Auftragsreihenfolge: je Etikett sein Format mit Menge 1; aufeinanderfolgende
-    /// Etiketten desselben `^PQ`-Formats werden zu einem Format mit der passenden Menge zusammengefasst.
-    /// Serialisierte Felder (`^SN`/`^SF`) beginnen dabei wieder mit dem Startwert des Formats.
-    public func reprintSegments(forLabels numbers: [Int]) -> [Segment] {
-        let sorted = Set(numbers).sorted()
-        var result: [Segment] = []
-        var current: (segment: Int, count: Int, lastCopy: Int)?
-        func flush() {
-            guard let group = current else { return }
-            result.append(segments[group.segment].withQuantity(group.count))
-            current = nil
-        }
-        for number in sorted {
-            guard let place = location(ofLabel: number) else { continue }
-            if let group = current, group.segment == place.segment, group.lastCopy + 1 == place.copy {
-                current = (group.segment, group.count + 1, place.copy)
-            } else {
-                flush()
-                current = (place.segment, 1, place.copy)
-            }
-        }
-        flush()
-        return result
-    }
-
-    /// Daten eines einzelnen Etiketts zum Anzeigen oder Nachdrucken: Kopf (Einstellungen, Downloads)
-    /// und das Format des Etiketts mit Menge 1.
-    public func labelData(_ number: Int) -> Data? {
-        guard let place = location(ofLabel: number) else { return nil }
-        return prologue + segments[place.segment].withQuantity(1).data
-    }
-
     // MARK: - Zerlegen
 
     /// Zerlegt einen ZPL-Auftrag. Ohne `characters` werden die Steuerzeichen erkannt.
