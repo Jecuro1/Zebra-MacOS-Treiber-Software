@@ -37,6 +37,17 @@
  *      ~JX, dann geht das Format erneut hinaus; liegt es vollständig im Drucker, nicht.
  *   7. Downloads (~DG, ~DY …) und Binärdaten: ab dort am Stück, ohne ~HS dazwischen.
  *   8. Abbrechen (SIGTERM): ~JA leert den Druckerpuffer, dann Ende.
+ *   9. Nachdruck nach Etiketten- bzw. Farbbandende (URI-Option reprint=N, Auftragsoption
+ *      lwReprintAfterError=N, ohne Angabe 1, 0 = keiner): Meldet der Drucker „Papier leer“ oder
+ *      „Farbband leer“ (auch ein Fehler, der von selbst verschwindet, etwa ein Klebestreifen),
+ *      merkt sich das Backend die letzten N vor dem Fehler fertig gedruckten Etiketten – das
+ *      unterbrochene wiederholt der Drucker wegen ^JZY ohnehin. Ist der Fehler behoben und das offene
+ *      Format fertig, sendet es diese Etiketten erneut (ihre Formate, ^PQ = Anzahl, in ursprünglicher
+ *      Reihenfolge) und erst danach das nächste Etikett; ebenso, wenn die Rolle genau mit dem letzten
+ *      Etikett endet. Nie nach einem Abbruch, nie nach „Druckkopf offen“ oder einer Pause allein, nur
+ *      einmal je Fehler. Fortlaufende Felder (^SN/^SF) drucken dabei denselben Wert erneut.
+ *  10. Druckjournal (lwb_journal.h): Auftrag und Beschreibung nach /Users/Shared/LabelWerk/Journal
+ *      (LW_JOURNAL_DIR), für „Nachdrucken“ in der App; Fehler dabei beenden den Auftrag nie.
  *
  * Am Stück gesendet (EPL/CPCL, lwResumeOnError=False, ?mode=stream, Drucker ohne ~HS, Rest nach
  * einem Download) gilt wie bei `socket`: Bricht die Verbindung ab, nachdem Auftragsdaten gesendet
@@ -49,7 +60,9 @@
  * Umgebung nur für Tests: LW_BACKEND_POLL_MS, LW_BACKEND_ERROR_POLL_MS, LW_BACKEND_REPLY_TIMEOUT_MS,
  * LW_BACKEND_STALL_MS, LW_BACKEND_RECONNECT_MS, LW_BACKEND_RECONNECT_MAX_MS,
  * LW_BACKEND_RECONNECT_LIMIT, LW_BACKEND_CONNECT_TIMEOUT_MS, LW_BACKEND_CANCEL_DELAY_MS (Pause nach
- * ~JX bzw. dem ~JA beim Abbruch), LW_BACKEND_SNDBUF (Sendepuffer des Sockets in Byte).
+ * ~JX bzw. dem ~JA beim Abbruch), LW_BACKEND_SNDBUF (Sendepuffer des Sockets in Byte). LW_JOURNAL_DIR
+ * (Ordner des Druckjournals; leer = kein Journal) gilt auch außerhalb von Tests – ohne Angabe unter
+ * macOS /Users/Shared/LabelWerk/Journal, sonst kein Journal.
  *
  * Copyright (c) LabelWerk-Projekt. Zebra ist eine Marke der Zebra Technologies Corp.
  */
@@ -79,6 +92,7 @@
 #include "lw_options.h"
 #include "lw_util.h"
 #include "lwb_core.h"
+#include "lwb_journal.h"
 
 /* CUPS-Exitcodes (cups/backend.h), hier fest, damit der Kern ohne Backend-Header auskommt. */
 enum {
@@ -242,6 +256,29 @@ typedef struct timing {
  */
 #define MARKER_NAME "R:LWJOB.GRF"
 
+/* Gemerkte Formate für den Nachdruck: höchstens so viele Byte (älteste fallen zuerst weg). */
+#define HISTORY_BYTE_LIMIT (32u * 1024u * 1024u)
+/* Wartende Nachdrucke (je Fehler einer). */
+#define REPRINT_QUEUE 4
+
+/* Fertig gedruckte Etiketten eines Formats (für den Nachdruck). */
+typedef struct history_entry {
+    lw_buf data;
+    lwb_prefixes start;
+    lwb_prefixes after;
+    lwb_label_run run;      /* Etiketten run.first … run.first+run.count−1 des Auftrags */
+} history_entry;
+
+/* Art des Fehlers, nach dem nachgedruckt wird. */
+enum { REPRINT_MEDIA = 0, REPRINT_RIBBON = 1 };
+
+/* Nachdruck nach einem Fehler: die `count` Etiketten vor Etikett `anchor` (0-basiert, exklusiv). */
+typedef struct reprint_request {
+    long anchor;
+    long count;
+    int kind;
+} reprint_request;
+
 typedef struct job {
     char host[512];
     int port;
@@ -287,6 +324,29 @@ typedef struct job {
     bool data_sent;               /* Auftragsdaten (nicht nur Abfragen) gesendet */
     bool fault_seen;      /* Papier/Farbband/Kopf seit dem letzten fehlerfreien Stand */
     bool resume_sent;     /* ~PS nach diesem Fehler schon gesendet */
+    bool cancelled;       /* Auftrag abgebrochen (finish_cancelled) */
+    bool final_check;     /* letzte Prüfung am Auftragsende (Rolle genau mit dem Auftrag zu Ende?) */
+
+    /* Nachdruck nach Etiketten- bzw. Farbbandende. */
+    long reprint_setting;            /* 0 … LWB_REPRINT_MAX */
+    history_entry *history;          /* fertige Formate, aufsteigend */
+    size_t history_count;
+    size_t history_capacity;
+    size_t history_bytes;
+    bool reprint_episode;            /* Papier/Farbband leer seit dem letzten fehlerfreien Stand */
+    reprint_request pending[REPRINT_QUEUE];
+    size_t pending_count;
+    bool reprint_active;             /* ein Nachdruck läuft (Formate in `slices`) */
+    reprint_request current;
+    lwb_reprint_slice slices[LWB_REPRINT_MAX];
+    size_t slice_count;
+    size_t slice_next;
+    long reprint_total;              /* Etiketten des laufenden Nachdrucks */
+    long reprint_progress;           /* davon fertig */
+    long reported_reprint;
+    lwb_prefixes reprint_return;     /* Steuerzeichen nach dem Nachdruck */
+    bool outstanding_is_reprint;     /* das offene Format ist ein Nachdruck */
+    long reprints_done;              /* nachgedruckte Etiketten des Auftrags */
 } job;
 
 /* ------------------------------------------------------------------------------------------ */
@@ -310,8 +370,30 @@ static const struct {
 };
 #define REASON_COUNT (sizeof(REASONS) / sizeof(REASONS[0]))
 
+static const char *reprint_cause(int kind)
+{
+    return kind == REPRINT_RIBBON ? "Farbbandende" : "Etikettenende";
+}
+
 static void report_progress(job *j, bool force)
 {
+    if (j->outstanding_active && j->outstanding_is_reprint) {
+        /* „Nachdruck 1 von 2 (Etikettenende)“ – getrennt von „Etikett n von N“ gezählt. */
+        long current = j->reprint_progress + 1;
+        if (j->outstanding_seen) {
+            long printed = j->outstanding_quantity - j->outstanding_remaining;
+            if (printed > 0)
+                current += printed;
+        }
+        if (current > j->reprint_total)
+            current = j->reprint_total;
+        if (!force && current == j->reported_reprint)
+            return;
+        j->reported_reprint = current;
+        if (j->reported_reasons == 0)
+            message("INFO", "Nachdruck %ld von %ld (%s)", current, j->reprint_total, reprint_cause(j->current.kind));
+        return;
+    }
     long current = j->labels_done + 1;
     if (j->outstanding_active && j->outstanding_seen) {
         long printed = j->outstanding_quantity - j->outstanding_remaining;
@@ -784,6 +866,114 @@ static int connect_with_retry(job *j, lwb_host_status *status, bool *answered, b
     }
 }
 
+/* ------------------------------------------------------------------------------------------ */
+/* Nachdruck: fertige Formate merken, Fehler vormerken                                        */
+/* ------------------------------------------------------------------------------------------ */
+
+static void history_drop_front(job *j)
+{
+    if (j->history_count == 0)
+        return;
+    j->history_bytes -= j->history[0].data.len;
+    lw_buf_free(&j->history[0].data);
+    memmove(j->history, j->history + 1, (j->history_count - 1) * sizeof(*j->history));
+    j->history_count--;
+}
+
+/*
+ * Merkt ein Format, von dem die Etiketten first … first+count−1 fertig gedruckt sind. Behalten wird
+ * nur, was ein Nachdruck brauchen kann: die Formate der letzten reprint_setting Etiketten (höchstens
+ * HISTORY_BYTE_LIMIT Byte).
+ */
+static void history_push(job *j, const lw_buf *format, lwb_prefixes start, lwb_prefixes after, long first,
+                         long count)
+{
+    if (j->reprint_setting <= 0 || count <= 0)
+        return;
+    if (j->history_count == j->history_capacity) {
+        size_t grown = j->history_capacity == 0 ? 16 : j->history_capacity * 2;
+        history_entry *list = realloc(j->history, grown * sizeof(*list));
+        if (list == NULL)
+            return;
+        j->history = list;
+        j->history_capacity = grown;
+    }
+    history_entry *e = &j->history[j->history_count];
+    lw_buf_init(&e->data);
+    lw_buf_append(&e->data, format->data, format->len);
+    if (e->data.failed) {
+        lw_buf_free(&e->data);
+        return;
+    }
+    e->start = start;
+    e->after = after;
+    e->run.first = first;
+    e->run.count = count;
+    j->history_count++;
+    j->history_bytes += e->data.len;
+    /* Ältere Formate, deren Etiketten außerhalb der letzten reprint_setting liegen und die kein
+     * vorgemerkter oder laufender Nachdruck braucht, verwerfen. */
+    long keep_from = first + count - j->reprint_setting;
+    for (size_t k = 0; k < j->pending_count; k++) {
+        if (j->pending[k].anchor - j->pending[k].count < keep_from)
+            keep_from = j->pending[k].anchor - j->pending[k].count;
+    }
+    if (j->reprint_active && j->current.anchor - j->current.count < keep_from)
+        keep_from = j->current.anchor - j->current.count;
+    while (j->history_count > 1) {
+        const history_entry *front = &j->history[0];
+        bool unneeded = front->run.first + front->run.count <= keep_from;
+        if (!unneeded && j->history_bytes <= HISTORY_BYTE_LIMIT)
+            break;
+        history_drop_front(j);
+    }
+}
+
+static void history_free(job *j)
+{
+    while (j->history_count > 0)
+        history_drop_front(j);
+    free(j->history);
+    j->history = NULL;
+    j->history_capacity = 0;
+}
+
+/*
+ * Papier bzw. Farbband leer tritt ein (einmal je Fehler): die letzten reprint_setting vor dem Fehler
+ * fertig gedruckten Etiketten zum Nachdruck vormerken. Fertig = Etiketten der erledigten Formate
+ * plus die schon gedruckten des offenen Formats (das unterbrochene Etikett zählt nicht, es wiederholt
+ * der Drucker wegen ^JZY). Nachgedruckte Etiketten zählen nicht mit.
+ */
+static void note_reprint(job *j, const lwb_host_status *status, int kind)
+{
+    if (j->reprint_setting <= 0)
+        return;
+    long completed = j->labels_done;
+    if (j->outstanding_active && !j->outstanding_is_reprint)
+        completed += lwb_completed_in_format(status, j->outstanding_quantity, j->outstanding_written);
+    long count = completed < j->reprint_setting ? completed : j->reprint_setting;
+    if (count <= 0) {
+        message("DEBUG", "%s – noch kein Etikett fertig, kein Nachdruck.",
+                kind == REPRINT_RIBBON ? "Farbband leer" : "Papier leer");
+        return;
+    }
+    for (size_t k = 0; k < j->pending_count; k++) {
+        if (j->pending[k].anchor == completed)
+            return;   /* derselbe Stand ist schon vorgemerkt */
+    }
+    if (j->pending_count == REPRINT_QUEUE) {
+        message("DEBUG", "Zu viele Fehler hintereinander – ältester Nachdruck entfällt.");
+        memmove(j->pending, j->pending + 1, (REPRINT_QUEUE - 1) * sizeof(*j->pending));
+        j->pending_count--;
+    }
+    j->pending[j->pending_count].anchor = completed;
+    j->pending[j->pending_count].count = count;
+    j->pending[j->pending_count].kind = kind;
+    j->pending_count++;
+    message("DEBUG", "%s nach %ld Etikett(en) – nach dem Beheben werden die letzten %ld nachgedruckt.",
+            kind == REPRINT_RIBBON ? "Farbband leer" : "Papier leer", completed, count);
+}
+
 /*
  * Statusgründe melden; nach einem behobenen Fehler einen angehaltenen Drucker fortsetzen (~PS).
  * Liefert die Gründe; -2 bei Abbruch (in *reasons unverändert).
@@ -792,6 +982,14 @@ static int handle_reasons(job *j, const lwb_host_status *status, unsigned *reaso
 {
     unsigned reasons = lwb_status_reasons(status);
     report_reasons(j, reasons);
+    if ((reasons & (LWB_REASON_MEDIA_EMPTY | LWB_REASON_RIBBON_EMPTY)) && !j->reprint_episode) {
+        /* Nur Papier/Farbband leer (auch ein Fehler, der von selbst verschwindet) – nicht Kopf offen
+         * oder Pause allein; einmal je Fehler (bis der Drucker wieder fehlerfrei meldet). */
+        j->reprint_episode = true;
+        note_reprint(j, status, (reasons & LWB_REASON_MEDIA_EMPTY) ? REPRINT_MEDIA : REPRINT_RIBBON);
+    } else if (reasons == 0) {
+        j->reprint_episode = false;
+    }
     if (reasons & (LWB_REASON_MEDIA_EMPTY | LWB_REASON_RIBBON_EMPTY | LWB_REASON_COVER_OPEN)) {
         j->fault_seen = true;
     } else if (reasons == LWB_REASON_PAUSED && j->fault_seen && !j->resume_sent) {
@@ -947,7 +1145,15 @@ static int resume_after_reconnect(job *j, int verdict, bool busy, lwb_prefixes e
         }
         /* Neu gestartet: Kopf, ^JZY, Merker und die restlichen Etiketten erneut senden. */
         if (remaining < j->outstanding_quantity) {
-            j->labels_done += j->outstanding_quantity - remaining;
+            long printed = j->outstanding_quantity - remaining;
+            if (j->outstanding_is_reprint) {
+                j->reprint_progress += printed;
+                j->reprints_done += printed;
+            } else {
+                history_push(j, &j->outstanding, j->outstanding_prefixes, j->outstanding_after, j->labels_done,
+                             printed);
+                j->labels_done += printed;
+            }
             j->outstanding_quantity = remaining;
         }
         message("INFO", "Drucker wurde neu gestartet – %ld Etikett(en) werden erneut gesendet.", remaining);
@@ -1069,12 +1275,24 @@ static int wait_until_idle(job *j)
         }
         if (lwb_status_idle(&status)) {
             idle_streak++;
-            /* Nach dem Senden zweimal „leer“ verlangen: Der Drucker hat das Format evtl. noch nicht gezählt. */
+            /* Nach dem Senden zweimal „leer“ verlangen: Der Drucker hat das Format evtl. noch nicht gezählt.
+             * Ebenso am Auftragsende mit Nachdruck: Endet die Rolle genau mit dem letzten Etikett, meldet
+             * der Drucker „Papier leer“ evtl. erst kurz danach. */
             int needed = (j->outstanding_active && !j->outstanding_seen) ? 2 : 1;
+            if (j->final_check && j->reprint_setting > 0)
+                needed = 2;
             if (idle_streak >= needed) {
                 if (j->outstanding_active) {
-                    j->labels_done += j->outstanding_quantity;
+                    if (j->outstanding_is_reprint) {
+                        j->reprint_progress += j->outstanding_quantity;
+                        j->reprints_done += j->outstanding_quantity;
+                    } else {
+                        history_push(j, &j->outstanding, j->outstanding_prefixes, j->outstanding_after,
+                                     j->labels_done, j->outstanding_quantity);
+                        j->labels_done += j->outstanding_quantity;
+                    }
                     j->outstanding_active = false;
+                    j->outstanding_is_reprint = false;
                     j->outstanding_quantity = 0;
                     lw_buf_reset(&j->outstanding);
                 }
@@ -1133,12 +1351,13 @@ static int send_raw_paced(job *j, const uint8_t *data, size_t len, lwb_prefixes 
     }
 }
 
-/* Ein druckendes Format (in j->next) getaktet senden. */
-static int send_format_paced(job *j, lwb_prefixes start, lwb_prefixes after, long quantity)
+/*
+ * Das Format in j->next als offenes Format senden (der Drucker ist bereit); `reprint` = Nachdruck
+ * (zählt getrennt). 0 = gesendet, -2 = Abbruch, -3 = aufgegeben.
+ */
+static int send_prepared(job *j, lwb_prefixes start, lwb_prefixes after, long quantity, bool reprint)
 {
-    int rc = wait_until_idle(j);
-    if (rc != 0)
-        return rc;
+    int rc;
     while (!j->session_armed) {
         rc = arm_session(j);
         if (rc == 0)
@@ -1160,6 +1379,7 @@ static int send_format_paced(job *j, lwb_prefixes start, lwb_prefixes after, lon
     j->outstanding_quantity = quantity;
     j->outstanding_remaining = quantity;
     j->outstanding_seen = false;
+    j->outstanding_is_reprint = reprint;
     report_progress(j, false);
     for (;;) {
         rc = send_outstanding(j);
@@ -1171,6 +1391,115 @@ static int send_format_paced(job *j, lwb_prefixes start, lwb_prefixes after, lon
         if (j->outstanding_written)
             return 0;
     }
+}
+
+/* Steuerzeichen umstellen, nach einem Verbindungsabbruch erneut. 0, -2 = Abbruch, -3 = aufgegeben. */
+static int switch_prefixes_paced(job *j, lwb_prefixes to)
+{
+    for (;;) {
+        int rc = switch_prefixes(j, to);
+        if (rc != -1)
+            return rc;
+        rc = recover(j);
+        if (rc != 0)
+            return rc;
+    }
+}
+
+/*
+ * Nächster Schritt eines Nachdrucks (der Drucker ist bereit): einen vorgemerkten Nachdruck beginnen
+ * (Etiketten aus den gemerkten Formaten wählen) bzw. das nächste seiner Formate senden – mit ^PQ =
+ * Zahl der Etiketten daraus. 0 = weiter, -2 = Abbruch, -3 = aufgegeben.
+ */
+static int reprint_step(job *j)
+{
+    int rc;
+    if (!j->reprint_active) {
+        j->current = j->pending[0];
+        memmove(j->pending, j->pending + 1, (j->pending_count - 1) * sizeof(*j->pending));
+        j->pending_count--;
+        lwb_label_run runs[256];
+        size_t base = j->history_count > 256 ? j->history_count - 256 : 0;
+        size_t n = j->history_count - base;
+        for (size_t k = 0; k < n; k++)
+            runs[k] = j->history[base + k].run;
+        j->slice_count = lwb_reprint_slices(runs, n, j->current.anchor, j->current.count, j->slices, LWB_REPRINT_MAX);
+        j->reprint_total = 0;
+        for (size_t k = 0; k < j->slice_count; k++) {
+            j->slices[k].run += base;
+            j->reprint_total += j->slices[k].count;
+        }
+        if (j->reprint_total < j->current.count)
+            message("DEBUG", "Nur %ld von %ld Etiketten für den Nachdruck gespeichert.", j->reprint_total,
+                    j->current.count);
+        if (j->slice_count == 0)
+            return 0;
+        j->reprint_active = true;
+        j->slice_next = 0;
+        j->reprint_progress = 0;
+        j->reported_reprint = 0;
+        j->reprint_return = j->prefixes;
+        message("DEBUG", "Nachdruck: %ld Etikett(en) vor dem %s.", j->reprint_total,
+                j->current.kind == REPRINT_RIBBON ? "Farbbandende" : "Etikettenende");
+    }
+    if (j->slice_next >= j->slice_count) {
+        j->reprint_active = false;
+        rc = switch_prefixes_paced(j, j->reprint_return);
+        if (rc != 0)
+            return rc;
+        report_progress(j, true);
+        return 0;
+    }
+    if (g_cancel)
+        return -2;
+    lwb_reprint_slice slice = j->slices[j->slice_next++];
+    const history_entry *e = &j->history[slice.run];
+    rc = switch_prefixes_paced(j, e->start);
+    if (rc != 0)
+        return rc;
+    lw_buf_reset(&j->next);
+    lw_buf_append(&j->next, e->data.data, e->data.len);
+    if (j->next.failed) {
+        message("DEBUG", "Zu wenig Speicher für den Nachdruck.");
+        lw_buf_reset(&j->next);
+        return 0;
+    }
+    return send_prepared(j, e->start, e->after, slice.count, true);
+}
+
+/*
+ * Wartet, bis der Drucker bereit ist, und erledigt davor vorgemerkte Nachdrucke (jeder ihrer Formate
+ * wieder getaktet). `final` = Auftragsende. 0 = bereit, -2 = Abbruch, -3 = aufgegeben.
+ */
+static int ready_for_next(job *j, bool final)
+{
+    for (;;) {
+        j->final_check = final;
+        int rc = wait_until_idle(j);
+        j->final_check = false;
+        if (rc != 0)
+            return rc;
+        if (!j->reprint_active && j->pending_count == 0)
+            return 0;
+        rc = reprint_step(j);
+        if (rc != 0)
+            return rc;
+    }
+}
+
+/* Ein druckendes Format (in j->next) getaktet senden. */
+static int send_format_paced(job *j, lwb_prefixes start, lwb_prefixes after, long quantity)
+{
+    /* j->next bleibt während ready_for_next erhalten: Nachdrucke nutzen ihn erst, nachdem er hier
+     * gesichert ist. */
+    lw_buf pending_format = j->next;
+    lw_buf_init(&j->next);
+    int rc = ready_for_next(j, false);
+    lw_buf_free(&j->next);
+    j->next = pending_format;
+    if (rc != 0)
+        return rc;
+    return send_prepared(j, start, after, quantity, false);
 }
 
 /*
@@ -1239,8 +1568,11 @@ static bool option_false(const char *value)
 
 static int finish_cancelled(job *j)
 {
-    /* Ab hier ist der Abbruch beschlossen; weitere Signale ändern nichts mehr. */
+    /* Ab hier ist der Abbruch beschlossen; weitere Signale ändern nichts mehr. Kein Nachdruck. */
     g_cancel = 0;
+    j->cancelled = true;
+    j->pending_count = 0;
+    j->reprint_active = false;
     clear_states(j);
     message("INFO", "Auftrag abgebrochen – Druckerpuffer wird geleert.");
     if (j->fd < 0 && j->anything_sent) {
@@ -1255,6 +1587,58 @@ static int finish_cancelled(job *j)
         close_connection(j);
     }
     return BACKEND_OK;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Druckjournal                                                                               */
+/* ------------------------------------------------------------------------------------------ */
+
+/* Hängt Auftragsdaten an; über LWB_JOURNAL_MAX_JOB_BYTES kommt der Auftrag nicht ins Journal. */
+static void journal_add(lw_buf *journal, const uint8_t *data, size_t len)
+{
+    if (journal->failed)
+        return;
+    if (journal->len + len > LWB_JOURNAL_MAX_JOB_BYTES) {
+        message("DEBUG", "Auftrag größer als %u MB – kein Eintrag im Druckjournal.",
+                LWB_JOURNAL_MAX_JOB_BYTES / (1024u * 1024u));
+        lw_buf_free(journal);
+        journal->failed = true;   /* weitere Daten verwerfen */
+        return;
+    }
+    lw_buf_append(journal, data, len);
+}
+
+/* Schreibt den Auftrag ins Druckjournal; Fehler werden nur gemeldet (DEBUG). */
+static void write_journal(const job *j, char *argv[], const uint8_t *data, size_t len, int copies, long printed,
+                          const char *status)
+{
+    const char *root = getenv("LW_JOURNAL_DIR");
+#ifdef __APPLE__
+    if (root == NULL)
+        root = LWB_JOURNAL_DEFAULT_DIR;
+#endif
+    if (root == NULL || root[0] == '\0')
+        return;
+    const char *queue = getenv("PRINTER");
+    const char *uri = getenv("DEVICE_URI");
+    lwb_journal_meta meta;
+    memset(&meta, 0, sizeof(meta));
+    meta.queue = queue != NULL && queue[0] != '\0' ? queue : "unbekannt";
+    meta.job_id = strtol(argv[1], NULL, 10);
+    meta.user = argv[2];
+    meta.title = argv[3];
+    meta.date = time(NULL);
+    meta.printer_uri = uri != NULL ? uri : argv[0];
+    meta.printed = printed;
+    meta.reprinted = j->reprints_done;
+    meta.copies = copies;
+    meta.status = status;
+    char error[512];
+    int rc = lwb_journal_write(root, &meta, data, len, j->start_prefixes, error, sizeof(error));
+    if (rc < 0)
+        message("DEBUG", "Druckjournal nicht geschrieben: %s", error);
+    else if (rc == 0)
+        message("DEBUG", "Auftrag im Druckjournal %s gespeichert.", root);
 }
 
 int main(int argc, char *argv[])
@@ -1328,6 +1712,19 @@ int main(int argc, char *argv[])
                 settings.language != LW_LANGUAGE_ZPL ? lw_language_name(settings.language)
                                                      : (stream_requested ? "mode=stream" : "lwResumeOnError=False"));
     }
+    /* Nachdruck nach Etiketten-/Farbbandende: URI-Option reprint=N (ohne: 1), Auftragsoption
+     * lwReprintAfterError=N hat Vorrang. */
+    j.reprint_setting = LWB_REPRINT_DEFAULT;
+    char reprint_text[32];
+    if (lwb_uri_option(options, "reprint", reprint_text, sizeof(reprint_text)) &&
+        !lwb_parse_reprint_count(reprint_text, &j.reprint_setting))
+        message("DEBUG", "Ungültige URI-Option reprint=%s – es gilt %ld.", reprint_text, j.reprint_setting);
+    const char *reprint_option = lw_cups_lookup(&opts, "lwReprintAfterError", LW_LEVEL_ARGV);
+    if (reprint_option != NULL && !lwb_parse_reprint_count(reprint_option, &j.reprint_setting))
+        message("DEBUG", "Ungültige Option lwReprintAfterError=%s – es gilt %ld.", reprint_option, j.reprint_setting);
+    if (j.paced)
+        message("DEBUG", "Nachdruck nach Etiketten- bzw. Farbbandende: %ld Etikett(en).", j.reprint_setting);
+    bool journal_enabled = settings.language == LW_LANGUAGE_ZPL;
     lw_settings_free(&settings);
     lw_cups_options_close(&opts);
 
@@ -1336,6 +1733,8 @@ int main(int argc, char *argv[])
     memset(&in, 0, sizeof(in));
     bool whole_input = false;   /* Eingabe vollständig im Speicher (weitere Kopien ohne Neulesen) */
     lw_buf_init(&in.data);
+    lw_buf journal;             /* Auftrag (erste Kopie) für das Druckjournal */
+    lw_buf_init(&journal);
     int copies = 1;
     if (argc == 7) {
         in.fd = open(argv[6], O_RDONLY);
@@ -1434,6 +1833,8 @@ int main(int argc, char *argv[])
                         result = BACKEND_FAILED;
                         break;
                     }
+                    if (copy == 0 && journal_enabled)
+                        journal_add(&journal, data, len);
                     in.pos += len;
                 }
                 if (in.eof)
@@ -1447,7 +1848,7 @@ int main(int argc, char *argv[])
                     /* Download (Grafik, Schrift, Firmware) bzw. Binärdaten: keine ~HS-Abfragen mehr
                      * einschieben, der Rest geht am Stück wie bei socket://. */
                     message("DEBUG", "Download- bzw. Binärdaten im Auftrag – Rest wird am Stück gesendet.");
-                    rc = wait_until_idle(&j);
+                    rc = ready_for_next(&j, false);
                     if (rc == -2) {
                         result = finish_cancelled(&j);
                         goto done;
@@ -1498,6 +1899,8 @@ int main(int argc, char *argv[])
                         result = BACKEND_FAILED;
                         break;
                     }
+                    if (copy == 0 && journal_enabled)
+                        journal_add(&journal, data, seg);
                     in.pos += seg;
                     continue;
                 }
@@ -1514,7 +1917,7 @@ int main(int argc, char *argv[])
     }
 
     if (result == BACKEND_OK && j.paced) {
-        rc = wait_until_idle(&j);
+        rc = ready_for_next(&j, true);
         if (rc == -2)
             { result = finish_cancelled(&j); goto done; }
         if (rc != 0) {
@@ -1526,6 +1929,9 @@ int main(int argc, char *argv[])
                 message("WARNING", "%ld Etiketten gesendet – bis zu %ld davon nach einem Verbindungsabbruch "
                                    "möglicherweise nicht gedruckt; bitte nachzählen.",
                         j.labels_done, j.labels_uncertain);
+            else if (j.labels_done > 0 && j.reprints_done > 0)
+                message("INFO", "Alle %ld Etiketten gedruckt, dazu %ld Nachdruck(e) nach Etiketten- bzw. Farbbandende.",
+                        j.labels_done, j.reprints_done);
             else if (j.labels_done > 0)
                 message("INFO", "Alle %ld Etiketten gedruckt.", j.labels_done);
         }
@@ -1539,6 +1945,15 @@ int main(int argc, char *argv[])
 done:
     g_input = NULL;
     close_connection(&j);
+    /* Druckjournal (nach dem Trennen: die Warteschlange wartet nicht auf den Drucker). Nur, wenn
+     * Auftragsdaten beim Drucker ankamen – ein nicht erreichbarer Drucker (CUPS wiederholt) nicht. */
+    if (journal_enabled && journal.len > 0 && j.data_sent) {
+        const char *status = j.cancelled ? "cancelled" : (result == BACKEND_OK ? "completed" : "failed");
+        long printed = (result == BACKEND_OK && !j.cancelled && !j.paced) ? -1 : j.labels_done;
+        write_journal(&j, argv, journal.data, journal.len, copies, printed, status);
+    }
+    lw_buf_free(&journal);
+    history_free(&j);
     if (in.fd > 0)
         close(in.fd);
     lw_buf_free(&in.data);

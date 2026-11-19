@@ -24,7 +24,13 @@ Geprüft wird jeweils:
 * Abbrechen (SIGTERM): ~JA leert den Druckerpuffer;
 * Drucker ohne ~HS-Antwort, EPL, lwResumeOnError=False, ?mode=stream: Senden am Stück;
 * eigene Steuerzeichen („Intern“), Kopien aus einer Datei, Drucker anfangs nicht erreichbar;
-* Downloads (~DY mit Binärdaten): danach keine ~HS-Abfrage mehr mitten in den Daten.
+* Downloads (~DY mit Binärdaten): danach keine ~HS-Abfrage mehr mitten in den Daten;
+* Nachdruck nach Etiketten-/Farbbandende (URI ``reprint=N``, Auftragsoption ``lwReprintAfterError``):
+  0/1/2/3/mehr als fertig, ^PQ-Mengen, Rolle endet genau mit dem Auftrag, Farbband leer, ein
+  Medienfehler, der von selbst verschwindet, Abbruch im Fehler und Kopf offen (beide ohne Nachdruck);
+* Druckjournal (``LW_JOURNAL_DIR``): job.zpl wie empfangen, meta.json mit Etiketten, Status.
+
+Die übrigen Fälle laufen mit ``reprint=0`` (jedes Etikett genau einmal).
 
 Aufruf:
     run_backend_e2e.py --backend build/labelwerk [--quick] [--only MUSTER] [--wrapper "valgrind -q"]
@@ -34,9 +40,11 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -103,14 +111,22 @@ class Context:
         self.backend = backend
         self.wrapper = wrapper
         self.quick = quick
+        # Druckjournal aller Läufe (eigene Fälle setzen LW_JOURNAL_DIR selbst).
+        self.journal = tempfile.mkdtemp(prefix="lwbackend-journal-")
 
     def start(self, printer: FakeZebra, data: bytes, options: str = "", uri_suffix: str = "",
               file_copies: Optional[int] = None, env: Optional[Dict[str, str]] = None,
-              port: Optional[int] = None, keep_stdin: bool = False) -> Tuple[subprocess.Popen, Optional[str]]:
+              port: Optional[int] = None, keep_stdin: bool = False,
+              reprint: Optional[int] = 0) -> Tuple[subprocess.Popen, Optional[str]]:
+        """`reprint`: URI-Option reprint=N (None = ohne, d. h. Standard 1)."""
         uri = f"labelwerk://127.0.0.1:{port or printer.port}{uri_suffix}"
+        if reprint is not None:
+            uri += ("&" if "?" in uri else "?") + f"reprint={reprint}"
         environment = dict(os.environ)
         environment.pop("PPD", None)
         environment.update(FAST_ENV)
+        environment["LW_JOURNAL_DIR"] = self.journal
+        environment["PRINTER"] = "E2E"
         environment["DEVICE_URI"] = uri
         if env:
             environment.update(env)
@@ -640,6 +656,217 @@ def test_slow_filter(ctx: Context) -> None:
         printer.close()
 
 
+
+# --- Nachdruck nach Etiketten- bzw. Farbbandende -------------------------------------------------
+
+def reprint_case(count: Optional[int], fault_after: int, expected_reprints: List[str], kind: str = "paper",
+                 options: str = "", labels_count: int = 8, clear_after: float = 0.4,
+                 cause: str = "Etikettenende") -> Callable[[Context], None]:
+    """Fehler nach `fault_after` Etiketten mitten im nächsten: nach dem Beheben druckt der Drucker das
+    unterbrochene Etikett erneut (^JZY), dann folgen die Nachdrucke in Auftragsreihenfolge, dann der Rest."""
+    def test(ctx: Context) -> None:
+        printer = FakeZebra(print_time=0.02, faults=[Fault(after_labels=fault_after, kind=kind, clear_after=clear_after)])
+        try:
+            job = labels(labels_count)
+            run = ctx.run(printer, make_job(job), reprint=count, options=options)
+            assert_ok(run)
+            names = [name for name, _ in job]
+            interrupted = names[fault_after]
+            expected = names[:fault_after] + [interrupted] + expected_reprints + names[fault_after + 1:]
+            check(printer.printed == expected, f"Reihenfolge {printer.printed}, erwartet {expected}")
+            check(not printer.lost, f"verlorene Etiketten: {printer.lost}")
+            check(printer.max_outstanding <= 1, f"{printer.max_outstanding} Formate gleichzeitig im Drucker")
+            infos = run.lines("INFO")
+            total = len(expected_reprints)
+            for index in range(1, total + 1):
+                check(f"Nachdruck {index} von {total} ({cause})" in infos, f"„Nachdruck {index} von {total}“ fehlt: {infos}")
+            if total:
+                check(f"Alle {labels_count} Etiketten gedruckt, dazu {total} Nachdruck(e) nach Etiketten- bzw. "
+                      "Farbbandende." in infos, f"Abschlussmeldung: {infos}")
+            else:
+                check(not any(line.startswith("Nachdruck") for line in infos), f"unerwarteter Nachdruck: {infos}")
+                check(f"Alle {labels_count} Etiketten gedruckt." in infos, f"Abschlussmeldung: {infos}")
+            keyword = "marker-supply-empty-error" if kind == "ribbon" else "media-empty-error"
+            assert_states(run, keyword)
+        finally:
+            printer.close()
+    return test
+
+
+def test_reprint_quantity_batch(ctx: Context) -> None:
+    """^PQ-Mengen: die letzten 3 fertigen Etiketten stammen aus zwei Formaten – A mit ^PQ1, B mit ^PQ2."""
+    printer = FakeZebra(print_time=0.02, faults=[Fault(after_labels=7, kind="paper", clear_after=0.4)])
+    try:
+        job = [("A", 5), ("B", 5), ("C", 2)]
+        run = ctx.run(printer, make_job(job), reprint=3)
+        assert_ok(run)
+        expected = ["A"] * 5 + ["B"] * 2 + ["B"] * 3 + ["A", "B", "B"] + ["C"] * 2
+        check(printer.printed == expected, f"Reihenfolge {printer.printed}, erwartet {expected}")
+        reprints = [f for f in printer.formats_received if "^FDA^FS" in f or "^FDB^FS" in f][2:]
+        check(any(re.search(r"\^FDA\^FS.*\^PQ1\b", f, re.S) for f in reprints), f"A nicht mit ^PQ1 nachgedruckt: {reprints}")
+        check(any(re.search(r"\^FDB\^FS.*\^PQ2\b", f, re.S) for f in reprints), f"B nicht mit ^PQ2 nachgedruckt: {reprints}")
+        infos = run.lines("INFO")
+        check("Nachdruck 3 von 3 (Etikettenende)" in infos, f"Fortschritt: {infos}")
+        check("Alle 12 Etiketten gedruckt, dazu 3 Nachdruck(e) nach Etiketten- bzw. Farbbandende." in infos,
+              f"Abschlussmeldung: {infos}")
+    finally:
+        printer.close()
+
+
+def test_reprint_roll_ends_with_job(ctx: Context) -> None:
+    """Die Rolle endet genau mit dem letzten Etikett: Das Backend wartet auf das Einlegen und druckt
+    dann die letzten 2 nach – der Auftrag endet erst danach."""
+    printer = FakeZebra(print_time=0.02, faults=[Fault(after_labels=5, kind="paper", clear_after=0.5, at_end=True)])
+    try:
+        job = labels(5)
+        run = ctx.run(printer, make_job(job), reprint=2)
+        assert_ok(run)
+        expected = ["L001", "L002", "L003", "L004", "L005", "L004", "L005"]
+        check(printer.printed == expected, f"Reihenfolge {printer.printed}, erwartet {expected}")
+        check(printer.idle(), "Auftrag endete vor dem Nachdruck")
+        assert_states(run, "media-empty-error")
+        check(run.duration >= 0.5, f"nicht auf das Einlegen gewartet ({run.duration:.2f} s)")
+        check("Nachdruck 2 von 2 (Etikettenende)" in run.lines("INFO"), f"Fortschritt: {run.lines('INFO')}")
+    finally:
+        printer.close()
+
+
+def test_reprint_cancel_during_fault(ctx: Context) -> None:
+    """Abbruch, während Papier leer ist: kein Nachdruck, ~JA leert den Drucker."""
+    printer = FakeZebra(print_time=0.02, faults=[Fault(after_labels=3, kind="paper", clear_after=0.8)])
+    try:
+        process, _ = ctx.start(printer, make_job(labels(8)), reprint=3)
+        check(wait_for(lambda: printer.paper_out), "Papier leer nicht eingetreten")
+        time.sleep(0.2)
+        process.send_signal(signal.SIGTERM)
+        _, stderr = process.communicate(timeout=10)
+        text = stderr.decode("utf-8", errors="replace")
+        check(process.returncode == 0, f"Exitcode {process.returncode}")
+        time.sleep(1.0)   # Fehler behoben – der Drucker darf nichts mehr drucken
+        counts = collections.Counter(printer.printed)
+        check(not any(n > 1 for n in counts.values()), f"nach dem Abbruch nachgedruckt: {printer.printed}")
+        check(not any(line.startswith("INFO: Nachdruck") for line in text.splitlines()),
+              "Nachdruck nach dem Abbruch gemeldet")
+        check("JA" in printer.control_commands, "~JA fehlt")
+    finally:
+        printer.close()
+
+
+def test_reprint_not_after_head_open(ctx: Context) -> None:
+    """Druckkopf offen allein (ohne Papier-/Farbbandende) löst keinen Nachdruck aus; Pause auch nicht."""
+    printer = FakeZebra(print_time=0.02, faults=[Fault(after_labels=2, kind="head", clear_after=0.3),
+                                                  Fault(after_labels=4, kind="pause", clear_after=0.3)])
+    try:
+        job = labels(6)
+        run = ctx.run(printer, make_job(job), reprint=3)
+        assert_ok(run)
+        assert_exactly_once(printer, job)
+        check(not any(line.startswith("Nachdruck") for line in run.lines("INFO")), f"Nachdruck: {run.lines('INFO')}")
+    finally:
+        printer.close()
+
+
+def test_reprint_once_per_fault_with_power_cycle(ctx: Context) -> None:
+    """Papier leer, Drucker zum Einlegen aus- und eingeschaltet: Rest erneut gesendet, dazu genau ein
+    Nachdruck (nicht doppelt für denselben Fehler)."""
+    printer = FakeZebra(print_time=0.02, faults=[Fault(after_labels=3, kind="paper", clear_after=0.5, power_cycle=True)])
+    try:
+        job = labels(6)
+        run = ctx.run(printer, make_job(job), reprint=1)
+        assert_ok(run)
+        counts = collections.Counter(printer.printed)
+        expected = collections.Counter({name: 1 for name, _ in job})
+        expected["L003"] += 1
+        check(counts == expected, f"gedruckt {printer.printed}")
+        check(printer.printed.index("L004") < len(printer.printed) - 1 - printer.printed[::-1].index("L003"),
+              f"Nachdruck nicht nach dem unterbrochenen Etikett: {printer.printed}")
+    finally:
+        printer.close()
+
+
+# --- Druckjournal -----------------------------------------------------------------------------------
+
+def journal_entries(root: str, queue: str = "E2E") -> List[str]:
+    directory = os.path.join(root, queue)
+    if not os.path.isdir(directory):
+        return []
+    return sorted(os.path.join(directory, name) for name in os.listdir(directory) if not name.startswith("."))
+
+
+def test_journal_written(ctx: Context) -> None:
+    printer = FakeZebra(print_time=0.01)
+    root = tempfile.mkdtemp(prefix="lwjournal-")
+    try:
+        job = [("A", 2), ("B", 1), ("C", 3)]
+        data = make_job(job, rtc_between=True)
+        run = ctx.run(printer, data, env={"LW_JOURNAL_DIR": root, "PRINTER": "Zebra ZD421"}, reprint=None)
+        assert_ok(run)
+        entries = journal_entries(root, "Zebra ZD421")
+        check(len(entries) == 1, f"Journal: {entries}")
+        check(re.fullmatch(r"\d{8}-\d{6}-42", os.path.basename(entries[0])) is not None, f"Name {entries[0]}")
+        with open(os.path.join(entries[0], "job.zpl"), "rb") as f:
+            zpl = f.read()
+        check(zpl == data, "job.zpl weicht vom Auftrag ab")
+        check(b"~HS" not in zpl and b"JZY" not in zpl and b"LWJOB" not in zpl, "Backend-Befehle im Journal")
+        with open(os.path.join(entries[0], "meta.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+        check(meta["version"] == 1 and meta["queue"] == "Zebra ZD421" and meta["jobId"] == 42, f"meta {meta}")
+        check(meta["title"] == "Etiketten" and meta["user"] == "tester", f"meta {meta}")
+        check(meta["status"] == "completed" and meta["printed"] == 6, f"meta {meta}")
+        check(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", meta["date"]) is not None, f"Datum {meta['date']}")
+        check(meta["printerURI"].startswith("labelwerk://127.0.0.1:"), f"URI {meta['printerURI']}")
+        check([label["quantity"] for label in meta["labels"]] == [2, 1, 3], f"Etiketten {meta['labels']}")
+        check([label["index"] for label in meta["labels"]] == [1, 2, 3], f"Etiketten {meta['labels']}")
+        check(meta["prologueLength"] == data.find(b"^XA\n^PW"), f"prologueLength {meta['prologueLength']}")
+        for label, (name, _) in zip(meta["labels"], job):
+            text = zpl[label["offset"]:label["offset"] + label["length"]]
+            check(text.startswith(b"^XA") and text.rstrip().endswith(b"^XZ") and f"^FD{name}^FS".encode() in text,
+                  f"Etikett {name}: {text[:40]!r}")
+        mode = os.stat(os.path.join(entries[0], "job.zpl")).st_mode & 0o777
+        check(mode == 0o644, f"Rechte job.zpl {oct(mode)}")
+    finally:
+        printer.close()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_journal_cancelled_and_commands(ctx: Context) -> None:
+    """Abgebrochener Auftrag: Status „cancelled“ mit den gedruckten Etiketten; reine Befehle: kein Eintrag."""
+    printer = FakeZebra(print_time=0.05)
+    root = tempfile.mkdtemp(prefix="lwjournal-")
+    try:
+        run = ctx.run(printer, b"~JC\n", env={"LW_JOURNAL_DIR": root})
+        assert_ok(run)
+        check(journal_entries(root) == [], "Eintrag für einen reinen Befehlsauftrag")
+        process, _ = ctx.start(printer, make_job(labels(30)), env={"LW_JOURNAL_DIR": root})
+        check(wait_for(lambda: len(printer.printed) >= 2), "Druck nicht begonnen")
+        process.send_signal(signal.SIGTERM)
+        process.communicate(timeout=10)
+        entries = journal_entries(root)
+        check(len(entries) == 1, f"Journal: {entries}")
+        with open(os.path.join(entries[0], "meta.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+        check(meta["status"] == "cancelled", f"Status {meta['status']}")
+        check(1 <= meta["printed"] < 30, f"printed {meta['printed']}")
+    finally:
+        printer.close()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_journal_unwritable(ctx: Context) -> None:
+    """Journalordner nicht schreibbar: der Auftrag gelingt trotzdem."""
+    printer = FakeZebra(print_time=0.01)
+    handle, path = tempfile.mkstemp(prefix="lwjournal-file-")
+    os.close(handle)
+    try:
+        job = labels(2)
+        run = ctx.run(printer, make_job(job), env={"LW_JOURNAL_DIR": os.path.join(path, "sub")})
+        assert_ok(run)
+        assert_exactly_once(printer, job)
+        check(any("Druckjournal nicht geschrieben" in line for line in run.lines("DEBUG")), "DEBUG-Meldung fehlt")
+    finally:
+        printer.close()
+        os.unlink(path)
+
 TESTS: List[Tuple[str, Callable[[Context], None], bool]] = [
     ("normal", test_normal, True),
     ("paper_out", fault_case("paper", "media-empty-error", "Kein Papier"), True),
@@ -674,6 +901,23 @@ TESTS: List[Tuple[str, Callable[[Context], None], bool]] = [
     ("cancel_before_prologue", test_cancel_before_prologue, True),
     ("stream_drop_fails", test_stream_drop_fails, False),
     ("slow_filter", test_slow_filter, False),
+    ("reprint_none", reprint_case(0, 4, []), False),
+    ("reprint_default_one", reprint_case(None, 4, ["L004"]), True),
+    ("reprint_two", reprint_case(2, 4, ["L003", "L004"]), True),
+    ("reprint_three", reprint_case(3, 4, ["L002", "L003", "L004"]), False),
+    ("reprint_more_than_completed", reprint_case(9, 2, ["L001", "L002"]), False),
+    ("reprint_job_option_overrides_uri", reprint_case(0, 5, ["L001", "L002", "L003", "L004", "L005"],
+                                                      options="lwReprintAfterError=Custom.12"), False),
+    ("reprint_ribbon_out", reprint_case(2, 3, ["L002", "L003"], kind="ribbon", cause="Farbbandende"), True),
+    ("reprint_transient_media_error", reprint_case(1, 3, ["L003"], kind="media", clear_after=0.12), True),
+    ("reprint_quantity_batch", test_reprint_quantity_batch, True),
+    ("reprint_roll_ends_with_job", test_reprint_roll_ends_with_job, True),
+    ("reprint_cancel_during_fault", test_reprint_cancel_during_fault, False),
+    ("reprint_not_after_head_open", test_reprint_not_after_head_open, False),
+    ("reprint_once_per_fault_with_power_cycle", test_reprint_once_per_fault_with_power_cycle, False),
+    ("journal_written", test_journal_written, True),
+    ("journal_cancelled_and_commands", test_journal_cancelled_and_commands, False),
+    ("journal_unwritable", test_journal_unwritable, False),
 ]
 
 
@@ -703,6 +947,7 @@ def main() -> int:
         except Failure as error:
             failures += 1
             print(f"FAIL  {name}: {error}")
+    shutil.rmtree(ctx.journal, ignore_errors=True)
     print(f"{count} Backend-Fälle, {failures} Fehler")
     return 0 if failures == 0 else 1
 

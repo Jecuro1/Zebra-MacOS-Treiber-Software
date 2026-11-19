@@ -21,7 +21,10 @@ Ein TCP-Server (Rohdatenport) mit dem Verhalten, auf das sich das Backend verlä
 * Fehler (``Fault``): nach N fertigen Etiketten tritt Papier leer / Farbband leer / Druckkopf offen /
   Pause ein, mitten im nächsten Etikett, und wird nach ``clear_after`` Sekunden behoben. Mit
   ``power_cycle`` wird der Drucker dabei aus- und eingeschaltet: Puffer weg, Verbindung getrennt,
-  kurz nicht erreichbar.
+  kurz nicht erreichbar. ``kind="media"`` ist ein Medienfehler, der von selbst verschwindet (etwa ein
+  Klebestreifen, den der Sensor für das Rollenende hält): „Papier leer“ für ``clear_after`` Sekunden.
+  ``at_end=True``: Der Fehler tritt direkt nach dem N-ten Etikett ein, ohne ein Etikett zu
+  unterbrechen (die Rolle endet genau mit dem Auftrag).
 * ``answer_status=False`` simuliert einen Drucker ohne Rückkanal (~HS bleibt unbeantwortet).
 * ``offline_until``: nimmt Verbindungen erst ab diesem Zeitpunkt an (Drucker noch aus).
 * ``drop_connection(down)``: nur die Netzverbindung bricht ab (WLAN, IP-Timeout), der Drucker behält
@@ -50,9 +53,10 @@ ETX = b"\x03"
 @dataclass
 class Fault:
     after_labels: int            # tritt beim Etikett nach so vielen fertigen Etiketten ein
-    kind: str                    # "paper", "ribbon", "head", "pause"
+    kind: str                    # "paper", "media" (verschwindet von selbst), "ribbon", "head", "pause"
     clear_after: float = 0.5     # Sekunden bis zur Behebung
     power_cycle: bool = False    # beim Beheben aus- und einschalten (Puffer weg)
+    at_end: bool = False         # direkt nach dem N-ten Etikett, ohne eines zu unterbrechen
     triggered: bool = False
 
 
@@ -403,18 +407,23 @@ class FakeZebra:
                 batch.remaining -= 1
                 if batch.remaining <= 0:
                     self.batch = None
+                # Rolle endet genau nach diesem Etikett: Fehler im selben Schritt (~HS sieht nie
+                # „fertig“ ohne den Fehler).
+                end_fault = self._due_fault(at_end=True)
+                if end_fault is not None:
+                    self._trigger(end_fault, None)
 
-    def _due_fault(self) -> Optional[Fault]:
+    def _due_fault(self, at_end: bool = False) -> Optional[Fault]:
         with self.lock:
             for fault in self.faults:
-                if not fault.triggered and len(self.printed) >= fault.after_labels:
+                if not fault.triggered and fault.at_end == at_end and len(self.printed) >= fault.after_labels:
                     fault.triggered = True
                     return fault
         return None
 
-    def _trigger(self, fault: Fault, batch: Batch) -> None:
+    def _trigger(self, fault: Fault, batch: Optional[Batch]) -> None:
         with self.lock:
-            if fault.kind == "paper":
+            if fault.kind in ("paper", "media"):
                 self.paper_out = True
             elif fault.kind == "ribbon":
                 self.ribbon_out = True
@@ -422,7 +431,7 @@ class FakeZebra:
                 self.head_open = True
             elif fault.kind == "pause":
                 self.paused = True
-            interrupted = fault.kind != "pause"
+            interrupted = fault.kind != "pause" and batch is not None
             if interrupted and not self.reprint:
                 # ^JZN: das unterbrochene Etikett ist verloren.
                 self.lost.append(batch.label)
