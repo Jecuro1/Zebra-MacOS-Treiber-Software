@@ -129,6 +129,9 @@ class Context:
             process.stdin.write(data)
         if not keep_stdin:
             process.stdin.close()
+            # communicate() würde in manchen Python-Versionen (z. B. 3.12 auf CI) eine bereits
+            # geschlossene stdin flushen und mit „flush of closed file“ abbrechen.
+            process.stdin = None
         return process, path
 
     def run(self, printer: FakeZebra, data: bytes, timeout: float = 30, **kwargs) -> Run:
@@ -624,6 +627,7 @@ def test_slow_filter(ctx: Context) -> None:
         printed_early = wait_for(lambda: printer.printed[:1] == ["L001"], timeout=10)
         process.stdin.write(data[first_end:])
         process.stdin.close()
+        process.stdin = None
         _, stderr = process.communicate(timeout=30)
         text = stderr.decode("utf-8", errors="replace")
         check(printed_early, "erstes Etikett erst nach dem Auftragsende gedruckt")
