@@ -230,13 +230,17 @@ static void set_error(char *error, size_t size, const char *what, const char *pa
         snprintf(error, size, "%s „%s“: %s", what, path, strerror(errno));
 }
 
-/* Legt einen Ordner an (0755, unabhängig von der umask); vorhandene bleiben unverändert. */
-static int make_dir(const char *path)
+/*
+ * Legt einen Ordner an (0755, unabhängig von der umask); vorhandene bleiben unverändert. Mit
+ * `follow == false` (der Ordner der Warteschlange) gilt ein symbolischer Link nie als vorhandener
+ * Ordner – lstat statt stat; Elternordner wie /tmp → /private/tmp unter macOS dürfen Links sein.
+ */
+static int make_dir(const char *path, bool follow)
 {
     struct stat st;
     /* Vorhandene Ordner nicht anfassen (die Sandbox von cupsd verbietet Schreiben außerhalb von
      * /Users/Shared/ – auch ein mkdir auf /Users). */
-    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode))
+    if ((follow ? stat(path, &st) : lstat(path, &st)) == 0 && S_ISDIR(st.st_mode))
         return 0;
     if (mkdir(path, 0755) == 0) {
         (void)chmod(path, 0755);
@@ -244,14 +248,14 @@ static int make_dir(const char *path)
     }
     if (errno != EEXIST)
         return -1;
-    if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    if ((follow ? stat(path, &st) : lstat(path, &st)) != 0 || !S_ISDIR(st.st_mode)) {
         errno = ENOTDIR;
         return -1;
     }
     return 0;
 }
 
-/* Legt einen Pfad samt fehlender Elternordner an. */
+/* Legt einen Pfad samt fehlender Elternordner an (der letzte Bestandteil darf kein Link sein). */
 static int make_dirs(const char *path)
 {
     char buffer[1024];
@@ -264,12 +268,12 @@ static int make_dirs(const char *path)
     for (size_t k = 1; k < len; k++) {
         if (buffer[k] == '/') {
             buffer[k] = '\0';
-            if (make_dir(buffer) != 0)
+            if (make_dir(buffer, true) != 0)
                 return -1;
             buffer[k] = '/';
         }
     }
-    return make_dir(buffer);
+    return make_dir(buffer, false);
 }
 
 static int write_file(const char *path, const uint8_t *data, size_t len)
@@ -439,6 +443,17 @@ int lwb_journal_write(const char *root, const lwb_journal_meta *meta, const uint
 
     if (make_dirs(queue_dir) != 0) {
         set_error(error, error_size, "Journalordner nicht anlegbar", queue_dir);
+        lw_buf_free(&json);
+        return -1;
+    }
+    /* Der Ordner der Warteschlange muss ein echter Ordner des Backends sein: Ein Link oder ein
+     * Ordner, den ein anderer Benutzer vorab angelegt hat, lenkte sonst Aufträge (und das Aufräumen,
+     * das Ordner löscht) an ein fremdes Ziel. Gegen ein späteres Austauschen schützt der Ordner
+     * Journal selbst (Besitzer _lp, 0755 – postinstall). */
+    struct stat qst;
+    if (lstat(queue_dir, &qst) != 0 || !S_ISDIR(qst.st_mode) || qst.st_uid != geteuid()) {
+        errno = EPERM;
+        set_error(error, error_size, "Journalordner gehört nicht dem Backend", queue_dir);
         lw_buf_free(&json);
         return -1;
     }

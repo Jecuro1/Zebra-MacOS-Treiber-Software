@@ -26,7 +26,9 @@ import LabelWerkKit
 /// (Administratoren gehören auf macOS zur Gruppe `_lpadmin`), sind bei Erfolg still und melden Fehler
 /// mit einem Hinweis „Erneut versuchen“. Eine in macOS entfernte Warteschlange wird nicht neu angelegt.
 /// Die Geräte-URI folgt „Bei Papier- oder Farbbandende anhalten und fortsetzen“ (`PrintSettings.resumeAfterError`):
-/// `labelwerk://` bzw. `socket://` (``CUPSService/apply(_:to:force:allowAdminPrompt:deviceURI:)``); nach einer
+/// `labelwerk://` bzw. `socket://` (``CUPSService/apply(_:to:force:allowAdminPrompt:deviceURI:)``), dazu die
+/// Warteschlangen-Standards `lwResumeOnError` und `lwReprintAfterError` („Danach zusätzlich nachdrucken“,
+/// `PrintSettings.reprintAfterError` – Teil des Fingerabdrucks, eine Änderung gleicht also ab); nach einer
 /// Treiberinstallation aus der App (`CUPSService.driverDidChangeNotification`) prüft der Dienst alle Drucker.
 /// Alle `lpadmin`-Aufrufe laufen nacheinander.
 ///

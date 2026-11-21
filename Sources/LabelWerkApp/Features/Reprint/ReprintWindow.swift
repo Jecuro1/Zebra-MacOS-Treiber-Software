@@ -151,7 +151,15 @@ struct ReprintView: View {
                 .padding(.top, 12)
                 .padding(.horizontal, Theme.Metrics.paddingLarge)
         }
-        .onAppear { if !store.hasLoaded { store.reload() } }
+        .onAppear {
+            if !store.hasLoaded {
+                store.reload()
+            } else if state.selectedEntryID == nil {
+                // Liste schon geladen (z. B. nach „Letztes Etikett nochmal“): neuesten Auftrag vorwählen –
+                // onChange(of: store.entries) meldet sich erst bei einer Änderung.
+                state.selectedEntryID = filteredEntries.first?.id
+            }
+        }
         .onChange(of: store.entries.map(\.id)) { _, ids in
             // Neuester Auftrag vorgewählt; ein aufgeräumter Auftrag verschwindet aus der Auswahl.
             if let id = state.selectedEntryID, ids.contains(id) { return }
@@ -228,7 +236,9 @@ private struct ReprintEntryRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            LabelThumbnailView(key: entry.id + "#0") {
+            // Eigener Schlüssel: die Zelle im Raster rendert dasselbe Etikett größer und mit der
+            // Auflösung des Zieldruckers.
+            LabelThumbnailView(key: entry.id + "#row") {
                 guard let job = try? entry.load(), let data = job.labelData(1) else { return nil }
                 return LabelThumbnail.render(data, maxSide: 90)
             }
@@ -343,11 +353,16 @@ private struct ReprintDetailView: View {
     private var statusText: String? {
         switch entry.status {
         case .completed:
-            return entry.reprinted > 0 ? tr("Nach Papier- oder Farbbandende %d nachgedruckt.", entry.reprinted) : nil
+            switch entry.reprinted {
+            case 0: return nil
+            case 1: return tr("Nach Papier- oder Farbbandende 1 Etikett nachgedruckt.")
+            default: return tr("Nach Papier- oder Farbbandende %d Etiketten nachgedruckt.", entry.reprinted)
+            }
         case .cancelled:
-            return tr("Abgebrochen – %d von %d Etiketten gedruckt.", entry.printed, entry.totalLabels)
+            // `printed` zählt über alle Kopien des Auftrags.
+            return tr("Abgebrochen – %d von %d Etiketten gedruckt.", entry.printed, entry.totalPrintedLabels)
         case .failed:
-            return tr("Fehlgeschlagen – %d von %d Etiketten gedruckt.", entry.printed, entry.totalLabels)
+            return tr("Fehlgeschlagen – %d von %d Etiketten gedruckt.", entry.printed, entry.totalPrintedLabels)
         }
     }
 
@@ -360,8 +375,10 @@ private struct ReprintDetailView: View {
                 ForEach(shownLabels, id: \.self) { number in
                     ReprintLabelCell(
                         number: number,
-                        // Exemplare desselben Formats (^PQ) teilen sich ein Vorschaubild.
-                        key: entry.id + "#\(job.plan.location(ofLabel: number)?.segment ?? number)",
+                        // Exemplare desselben Formats (^PQ) teilen sich ein Vorschaubild; Auflösung und
+                        // Größe des Zieldruckers gehören zum Schlüssel.
+                        key: "\(entry.id)#seg\(job.plan.location(ofLabel: number)?.segment ?? number)"
+                            + "@\(dotsPerMM)x\(width)x\(height)",
                         selected: selection.contains(number),
                         aspect: CGFloat(max(1, width)) / CGFloat(max(1, height)),
                         render: {
@@ -387,7 +404,7 @@ private struct ReprintDetailView: View {
     private var footer: some View {
         HStack(spacing: 12) {
             Button(tr("Letztes")) {
-                if let job { selection = [min(job.totalLabels, max(1, entry.printed > 0 ? entry.printed : job.totalLabels))] }
+                if let last = job?.lastPrintedLabel { selection = [last] }
             }
             .buttonStyle(.link)
             .help(tr("Nur das zuletzt gedruckte Etikett wählen"))

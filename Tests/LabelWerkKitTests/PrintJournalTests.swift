@@ -1,5 +1,8 @@
 import Foundation
 import Testing
+#if canImport(Glibc)
+import Glibc
+#endif
 @testable import LabelWerkKit
 
 /// Temporäres Verzeichnis je Test.
@@ -79,12 +82,13 @@ struct PrintJournalTests {
     func tolerantReading() throws {
         let root = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }
-        try writeBackendJob(root: root, queue: "Q", dirName: "a", job: backendJob,
+        try writeBackendJob(root: root, queue: "Zebra_ZD421", dirName: "a", job: backendJob,
                             meta: backendMeta(jobId: "\"7\"", date: "2026-11-13T11:15:30.250+01:00"))
-        try writeBackendJob(root: root, queue: "Q", dirName: "b", job: backendJob,
+        try writeBackendJob(root: root, queue: "Zebra_ZD421", dirName: "b", job: backendJob,
                             meta: backendMeta(jobId: "8", labels: #"[{"index":1,"offset":5000,"length":10,"quantity":1}]"#))
-        try writeBackendJob(root: root, queue: "Q", dirName: "c", job: backendJob, meta: "{kaputt")
-        try writeBackendJob(root: root, queue: "Q", dirName: "d", job: backendJob, meta: #"{"queue":"Q"}"#)   // ohne Datum
+        try writeBackendJob(root: root, queue: "Zebra_ZD421", dirName: "c", job: backendJob, meta: "{kaputt")
+        try writeBackendJob(root: root, queue: "Zebra_ZD421", dirName: "d", job: backendJob,
+                            meta: #"{"queue":"Zebra_ZD421"}"#)   // ohne Datum
         let entries = PrintJournal.entries(in: root, source: .system)
         #expect(entries.map(\.jobID).sorted() == ["7", "8"])
         let seven = try #require(entries.first { $0.jobID == "7" })
@@ -197,5 +201,77 @@ struct PrintJournalTests {
         #expect(PrintJournal.directoryComponent(forQueue: "../a b") == "_a_b")
         #expect(PrintJournal.directoryComponent(forQueue: "") == "_")
         #expect(PrintJournal.directoryName(date: Date(timeIntervalSince1970: 0), jobID: "5") == "19700101-000000-5")
+    }
+
+    @Test("Ordnernamen des Backends (lwb_journal_safe_name): Leerzeichen/UTF-8 bleiben, / \\ Steuerzeichen und Punkt am Anfang → _")
+    func systemDirectoryNames() throws {
+        #expect(PrintJournal.systemDirectoryComponent(forQueue: "Etiketten Lager Ä") == "Etiketten Lager Ä")
+        #expect(PrintJournal.systemDirectoryComponent(forQueue: "..x") == "_.x")
+        #expect(PrintJournal.systemDirectoryComponent(forQueue: "a/b") == "a_b")
+        #expect(PrintJournal.systemDirectoryComponent(forQueue: "Zürich_ß") == "Zürich_ß")
+        #expect(PrintJournal.systemDirectoryComponent(forQueue: "a\\b\tc\u{7F}") == "a_b_c_")
+        #expect(PrintJournal.systemDirectoryComponent(forQueue: "") == "unbekannt")
+        // Filter nach Warteschlange findet Einträge des Backends unter seinem Ordnernamen.
+        let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = backendMeta().replacingOccurrences(of: "\"queue\":\"Zebra_ZD421\"", with: "\"queue\":\"Zebra ZD421\"")
+        try writeBackendJob(root: root, queue: "Zebra ZD421", dirName: "20261113-101530-42", job: backendJob, meta: meta)
+        #expect(PrintJournal.entries(in: root, source: .system, queue: "Zebra ZD421").count == 1)
+        #expect(PrintJournal.entries(in: root, source: .system).count == 1)
+    }
+
+    @Test("Kopien: printed zählt über alle, letztes gedrucktes Etikett liegt in der letzten Kopie")
+    func copies() throws {
+        let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = backendMeta().replacingOccurrences(of: "\"printed\":4", with: "\"printed\":6,\"copies\":2")
+        try writeBackendJob(root: root, queue: "Zebra_ZD421", dirName: "x", job: backendJob, meta: meta)
+        let entry = try #require(PrintJournal.entries(in: root, source: .system).first)
+        #expect(entry.copies == 2)
+        #expect(entry.totalLabels == 4)
+        #expect(entry.totalPrintedLabels == 8)
+        let job = try entry.load()
+        #expect(job.lastPrintedLabel == 2)          // 6 gedruckt: Kopie 1 ganz, Kopie 2 bis Etikett 2
+        let plain = try #require(PrintJournal.entries(in: root, source: .system).first)
+        #expect(plain.printed == 6)
+        // Ohne "copies": 1; printed 0 → letztes Etikett des Auftrags.
+        try writeBackendJob(root: root, queue: "Zebra_ZD421", dirName: "y", job: backendJob,
+                            meta: backendMeta(jobId: "43", date: "2026-11-14T10:15:30Z")
+                                .replacingOccurrences(of: "\"printed\":4", with: "\"printed\":0"))
+        let newest = try #require(PrintJournal.entries(in: root, source: .system).first)
+        #expect(newest.copies == 1)
+        #expect(try newest.load().lastPrintedLabel == 4)
+    }
+
+    @Test("System-Journal: symbolische Links, fremde Besitzer und Einträge unter fremdem Warteschlangennamen zählen nicht")
+    func systemJournalTrust() throws {
+        let root = try makeTempDir()
+        let elsewhere = try makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: elsewhere)
+        }
+        let fm = FileManager.default
+        // Gültig.
+        try writeBackendJob(root: root, queue: "Zebra_ZD421", dirName: "ok", job: backendJob, meta: backendMeta(jobId: "1"))
+        // Eintrag mit "queue":"Zebra_ZD421" in einem anderen Ordner (untergeschoben).
+        try writeBackendJob(root: root, queue: "x", dirName: "forged", job: backendJob, meta: backendMeta(jobId: "2"))
+        // Warteschlangenordner als symbolischer Link.
+        try writeBackendJob(root: elsewhere, queue: "Zebra_ZD421", dirName: "linked", job: backendJob,
+                            meta: backendMeta(jobId: "3"))
+        try fm.createSymbolicLink(at: root.appendingPathComponent("Andere"),
+                                  withDestinationURL: elsewhere.appendingPathComponent("Zebra_ZD421"))
+        // Eintrag als symbolischer Link.
+        try fm.createSymbolicLink(at: root.appendingPathComponent("Zebra_ZD421").appendingPathComponent("link"),
+                                  withDestinationURL: elsewhere.appendingPathComponent("Zebra_ZD421").appendingPathComponent("linked"))
+        if geteuid() == 0 {
+            // Ordner eines anderen Benutzers (nur als root prüfbar).
+            let foreign = try writeBackendJob(root: root, queue: "Zebra_ZD421", dirName: "foreign", job: backendJob,
+                                              meta: backendMeta(jobId: "4"))
+            try fm.setAttributes([.ownerAccountID: 4242], ofItemAtPath: foreign.path)
+        }
+        #expect(PrintJournal.entries(in: root, source: .system).map(\.jobID) == ["1"])
+        // Das Journal der App prüft das nicht (eigener Ordner des Benutzers).
+        #expect(PrintJournal.entries(in: root, source: .app).count >= 2)
     }
 }

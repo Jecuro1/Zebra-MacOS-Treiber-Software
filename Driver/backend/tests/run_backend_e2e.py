@@ -25,8 +25,9 @@ Geprüft wird jeweils:
 * Drucker ohne ~HS-Antwort, EPL, lwResumeOnError=False, ?mode=stream: Senden am Stück;
 * eigene Steuerzeichen („Intern“), Kopien aus einer Datei, Drucker anfangs nicht erreichbar;
 * Downloads (~DY mit Binärdaten): danach keine ~HS-Abfrage mehr mitten in den Daten;
-* Nachdruck nach Etiketten-/Farbbandende (URI ``reprint=N``, Auftragsoption ``lwReprintAfterError``):
-  0/1/2/3/mehr als fertig, ^PQ-Mengen, Rolle endet genau mit dem Auftrag, Farbband leer, ein
+* Nachdruck nach Etiketten-/Farbbandende (Auftragsoption ``lwReprintAfterError`` – so kommt der
+  Warteschlangen-Standard ``lwReprintAfterError-default`` an –, ersatzweise URI ``reprint=N``):
+  0/1/2/3/mehr als fertig, Optionsname ohne Groß-/Kleinschreibung, ungültiger Wert = 1, ^PQ-Mengen, Rolle endet genau mit dem Auftrag, Farbband leer, ein
   Medienfehler, der von selbst verschwindet, Abbruch im Fehler und Kopf offen (beide ohne Nachdruck);
 * Druckjournal (``LW_JOURNAL_DIR``): job.zpl wie empfangen, meta.json mit Etiketten, Status.
 
@@ -786,6 +787,22 @@ def test_reprint_once_per_fault_with_power_cycle(ctx: Context) -> None:
         printer.close()
 
 
+def test_reprint_overlapping_faults_in_batch(ctx: Context) -> None:
+    """Zwei Medienfehler im selben ^PQ-Format, ein Etikett auseinander (N=2): Die Bereiche 2–3 und 3–4
+    überlappen und werden zusammengefasst – Etikett 3 kommt nicht doppelt (wie die App)."""
+    printer = FakeZebra(print_time=0.08, faults=[Fault(after_labels=3, kind="media", clear_after=0.15),
+                                                  Fault(after_labels=4, kind="media", clear_after=0.15)])
+    try:
+        run = ctx.run(printer, make_job([("A", 8), ("B", 1)]), reprint=2)
+        assert_ok(run)
+        counts = collections.Counter(printer.printed)
+        check(counts == collections.Counter({"A": 8 + 3, "B": 1}), f"gedruckt {counts}, erwartet A×11, B×1")
+        check(any("erweitert" in line for line in run.lines("DEBUG")), f"nicht zusammengefasst: {run.lines('DEBUG')}")
+        check("Nachdruck 3 von 3 (Etikettenende)" in run.lines("INFO"), f"Fortschritt: {run.lines('INFO')}")
+    finally:
+        printer.close()
+
+
 # --- Druckjournal -----------------------------------------------------------------------------------
 
 def journal_entries(root: str, queue: str = "E2E") -> List[str]:
@@ -869,6 +886,58 @@ def test_journal_unwritable(ctx: Context) -> None:
         printer.close()
         os.unlink(path)
 
+def test_journal_queue_dir_is_symlink(ctx: Context) -> None:
+    """Ein vorab angelegter Link Journal/<queue> (das Journal war früher für alle beschreibbar) lenkt
+    weder Aufträge noch das Aufräumen an ein fremdes Ziel; der Druck läuft trotzdem."""
+    printer = FakeZebra(print_time=0.001)
+    base = tempfile.mkdtemp(prefix="lwjournal-link-")
+    try:
+        root = os.path.join(base, "Journal")
+        victim = os.path.join(base, "victim")
+        os.mkdir(root)
+        os.mkdir(victim)
+        for index in range(35):
+            folder = os.path.join(victim, f"keep{index:02d}")
+            os.mkdir(folder)
+            with open(os.path.join(folder, "file"), "w", encoding="utf-8") as f:
+                f.write("wichtig")
+        os.symlink(victim, os.path.join(root, "Q"))
+        job = labels(1)
+        run = ctx.run(printer, make_job(job), env={"LW_JOURNAL_DIR": root, "PRINTER": "Q"})
+        assert_ok(run)
+        assert_exactly_once(printer, job)
+        left = sorted(os.listdir(victim))
+        check(len(left) == 35 and all(name.startswith("keep") for name in left), f"Ziel des Links verändert: {left[:8]}")
+        check(any("Druckjournal nicht geschrieben" in line for line in run.lines("DEBUG")), "DEBUG-Meldung fehlt")
+    finally:
+        printer.close()
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_journal_queue_dir_foreign_owner(ctx: Context) -> None:
+    """Ordner der Warteschlange gehört einem anderen Benutzer: nichts hineinschreiben, nichts darin
+    löschen (nur als root prüfbar – sonst übersprungen)."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    printer = FakeZebra(print_time=0.001)
+    root = tempfile.mkdtemp(prefix="lwjournal-owner-")
+    try:
+        queue_dir = os.path.join(root, "Q")
+        os.mkdir(queue_dir)
+        for index in range(32):
+            os.mkdir(os.path.join(queue_dir, f"2026010{index % 10}-000000-{index}"))
+        os.chown(queue_dir, 4242, 4242)
+        job = labels(1)
+        run = ctx.run(printer, make_job(job), env={"LW_JOURNAL_DIR": root, "PRINTER": "Q"})
+        assert_ok(run)
+        assert_exactly_once(printer, job)
+        check(len(os.listdir(queue_dir)) == 32, f"fremder Ordner verändert: {len(os.listdir(queue_dir))} Einträge")
+        check(any("gehört nicht dem Backend" in line for line in run.lines("DEBUG")), f"DEBUG: {run.lines('DEBUG')}")
+    finally:
+        printer.close()
+        shutil.rmtree(root, ignore_errors=True)
+
+
 TESTS: List[Tuple[str, Callable[[Context], None], bool]] = [
     ("normal", test_normal, True),
     ("paper_out", fault_case("paper", "media-empty-error", "Kein Papier"), True),
@@ -910,6 +979,11 @@ TESTS: List[Tuple[str, Callable[[Context], None], bool]] = [
     ("reprint_more_than_completed", reprint_case(9, 2, ["L001", "L002"]), False),
     ("reprint_job_option_overrides_uri", reprint_case(0, 5, ["L001", "L002", "L003", "L004", "L005"],
                                                       options="lwReprintAfterError=Custom.12"), False),
+    # Warteschlangen-Standard lwReprintAfterError-default=N: cupsd gibt ihn als Auftragsoption in argv[5]
+    # mit (URI ohne reprint=). Name ohne Groß-/Kleinschreibung (cupsGetOption); ungültig = Standard 1.
+    ("reprint_queue_default_option", reprint_case(None, 4, ["L003", "L004"], options="lwReprintAfterError=2"), True),
+    ("reprint_option_name_case", reprint_case(None, 4, [], options="lwreprintaftererror=0"), False),
+    ("reprint_option_invalid_is_one", reprint_case(None, 4, ["L004"], options="lwReprintAfterError=viele"), False),
     ("reprint_ribbon_out", reprint_case(2, 3, ["L002", "L003"], kind="ribbon", cause="Farbbandende"), True),
     ("reprint_transient_media_error", reprint_case(1, 3, ["L003"], kind="media", clear_after=0.12), True),
     ("reprint_quantity_batch", test_reprint_quantity_batch, True),
@@ -917,9 +991,12 @@ TESTS: List[Tuple[str, Callable[[Context], None], bool]] = [
     ("reprint_cancel_during_fault", test_reprint_cancel_during_fault, False),
     ("reprint_not_after_head_open", test_reprint_not_after_head_open, False),
     ("reprint_once_per_fault_with_power_cycle", test_reprint_once_per_fault_with_power_cycle, False),
+    ("reprint_overlapping_faults_in_batch", test_reprint_overlapping_faults_in_batch, False),
     ("journal_written", test_journal_written, True),
     ("journal_cancelled_and_commands", test_journal_cancelled_and_commands, False),
     ("journal_unwritable", test_journal_unwritable, False),
+    ("journal_queue_dir_is_symlink", test_journal_queue_dir_is_symlink, False),
+    ("journal_queue_dir_foreign_owner", test_journal_queue_dir_foreign_owner, False),
 ]
 
 

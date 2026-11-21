@@ -305,6 +305,7 @@ $ /usr/sbin/lpadmin -p Zebra_ZD421t_192.168.1.50 -E -v socket://192.168.1.50:910
 | `--location TEXT` | Standort |
 | `-s`, `--stock ID` | Etikettenformat als Standard-Papiergröße; muss auf den Drucker passen (`lwctl stocks --model <id>`) |
 | `--size BxH(mm\|in)` | eigene Etikettengröße statt `--stock`, z. B. `104x76.2mm`, `104x76,2mm` oder `4x3in` (ohne Einheit mm; mindestens 10 × 5 mm, höchstens Druckbreite + 2 mm × größte Etikettenlänge) |
+| `--reprint N` | nach Papier- oder Farbbandende die letzten `N` Etiketten zusätzlich drucken, 0 (keins) bis 99 (Standard 1; ohne Angabe bleibt der Wert einer vorhandenen Warteschlange). Wird als Warteschlangen-Standard `lwReprintAfterError` gesetzt und wirkt nur mit `labelwerk://` (siehe [Die letzten Etiketten zusätzlich nachdrucken](#die-letzten-etiketten-zusätzlich-nachdrucken-rollenende-klebestreifen)) |
 | `--default` | als Standarddrucker festlegen |
 | `--test-page` | danach eine Testseite über die neue Warteschlange drucken |
 | `--ppd-dir DIR` | anderer PPD-Ordner (Standard: `/Library/Printers/PPDs/Contents/Resources`, unter Linux `/usr/share/ppd/labelwerk`) |
@@ -803,8 +804,11 @@ der Auftrag trotzdem auf die neue Rolle und druckt danach nach.
 **Einstellung:** **Druckeinstellungen › Druckoptionen › „Danach zusätzlich nachdrucken“** (direkt unter
 „Bei Papier- oder Farbbandende anhalten und fortsetzen“, nur zusammen damit wirksam): **Keins**,
 **Letztes Etikett (Standard)**, **Letzte 2**, **Letzte 3** oder **Benutzerdefiniert …** (1 bis 99). Für die
-macOS-Warteschlangen steht die Zahl in der Geräte-URI (`labelwerk://Adresse:9100?reprint=2`); LabelWerk
-hält sie auf dem Stand der Einstellung.
+macOS-Warteschlangen überträgt LabelWerk die Zahl als Warteschlangen-Standard `lwReprintAfterError`
+(beim Standard 1 nicht gesetzt) und hält ihn auf dem Stand der Einstellung – macOS gibt ihn jedem Auftrag
+mit, auch aus anderen Programmen. Ohne App: `lwctl install … --reprint 2` bzw. von Hand
+`sudo lpadmin -p <Warteschlange> -o lwReprintAfterError-default=2` (zurück zum Standard:
+`sudo lpadmin -p <Warteschlange> -R lwReprintAfterError-default`); anzeigen mit `lpoptions -p <Warteschlange>`.
 
 **Während des Fehlers anders wählen:** Beim Druck aus LabelWerk zeigt der Hinweis „Papier leer – …“ die
 zuletzt fertigen Etiketten als kleine Vorschaubilder; die vorgesehenen sind angehakt („Nach dem Einlegen
@@ -837,6 +841,27 @@ Die Aufträge stehen im **Druckjournal**: Aufträge über die macOS-Warteschlang
 **30 Aufträge** (höchstens 50 MB); Aufträge über 20 MB werden nicht aufgenommen. Gespeichert werden die
 Druckdaten, wie sie an den Drucker gingen (ZPL) – wer das nicht möchte, kann die Ordner jederzeit löschen.
 Aufträge über `socket://`- oder `usb://`-Warteschlangen und EPL/CPCL-Drucker erscheinen nicht.
+
+**Für Administratoren – Druckjournal der Warteschlangen:**
+
+* **Ort und Rechte:** Das Installationspaket legt `/Users/Shared/LabelWerk/Journal` an (Besitzer
+  `_lp`, Rechte `0755`): Das CUPS-Backend läuft als Systembenutzer `_lp` und ist das Einzige, was dort
+  schreibt – andere Benutzer können keine Einträge unterschieben, die „Nachdrucken“ dann anböte. Ein
+  Update korrigiert die früheren Rechte `1777` und entfernt dabei Einträge, die nicht `_lp` gehören.
+  Darunter legt das Backend je Warteschlange einen Ordner an, je Auftrag einen Unterordner
+  `<Datum UTC>-<Auftragsnummer>` mit `job.zpl` und `meta.json` (Ordner `0755`, Dateien `0644`).
+* **Datenschutz:** Das Journal enthält die **gedruckten Etikettendaten** (Adressen, Namen, Barcodes …)
+  und ist für **alle Benutzer des Macs lesbar** – die App jedes Benutzers zeigt daraus „Nachdrucken“ an.
+  Es bleibt auf die neuesten 30 Aufträge bzw. 50 MB je Warteschlange begrenzt. Wo das nicht erwünscht
+  ist: Ordner leeren (`sudo rm -rf /Users/Shared/LabelWerk/Journal/*`) oder das Journal abschalten, indem
+  man `Journal` durch eine leere Datei ersetzt
+  (`sudo rm -rf /Users/Shared/LabelWerk/Journal && sudo touch /Users/Shared/LabelWerk/Journal`) – das
+  Backend druckt dann unverändert und protokolliert nur, dass es nichts ablegen konnte; ein Update legt
+  den Ordner nicht neu an, solange dort eine Datei steht.
+* **Fehler beim Ablegen** (fehlende Rechte, Sandbox von cupsd, voller Datenträger) brechen nie einen
+  Auftrag ab; sie stehen mit `LogLevel debug` (`sudo cupsctl --debug-logging`) als „Druckjournal nicht
+  geschrieben: …“ in `/var/log/cups/error_log`. „Nachdrucken“ kennt den Auftrag dann nicht.
+* **Deinstallation:** `uninstall.sh` lässt das Journal stehen; `--purge-user-data` entfernt es mit.
 
 ## Druckeinstellungen wie unter Windows
 
@@ -1004,7 +1029,7 @@ sudo bash /Library/Printers/LabelWerk/uninstall.sh --remove-queues    # zusätzl
 |---|---|
 | `--remove-queues` | auch alle Warteschlangen entfernen, die LabelWerk-PPDs verwenden (ohne die Option bleiben sie bestehen, drucken aber nicht mehr) |
 | `--keep-app` | die App (samt `lwctl`-Link in `/usr/local/bin`) behalten und nur den Treiber entfernen |
-| `--purge-user-data` | zusätzlich Einstellungen und Daten des Benutzers löschen (`~/Library/Application Support/LabelWerk`, Einstellungen, Caches samt geladenen Update-Paketen, Update-Protokoll `~/Library/Logs/LabelWerk`) und die Zugriffstoken für Updates aus seinem Schlüsselbund (Dienst `com.labelwerk.app.update`) |
+| `--purge-user-data` | zusätzlich Einstellungen und Daten des Benutzers löschen (`~/Library/Application Support/LabelWerk`, Einstellungen, Caches samt geladenen Update-Paketen, Update-Protokoll `~/Library/Logs/LabelWerk`) und die Zugriffstoken für Updates aus seinem Schlüsselbund (Dienst `com.labelwerk.app.update`); dazu das Druckjournal der Warteschlangen `/Users/Shared/LabelWerk/Journal` (gedruckte Etiketten aller Benutzer – ohne diese Option bleibt es stehen) |
 | `-y`, `--yes` | ohne Rückfrage |
 | `-n`, `--dry-run` | nur anzeigen, was entfernt würde |
 | `--no-restart` | `cupsd` danach nicht neu starten |

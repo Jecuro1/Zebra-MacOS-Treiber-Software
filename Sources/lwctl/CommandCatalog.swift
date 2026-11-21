@@ -156,6 +156,14 @@ enum CommandCatalog {
             dort weiter. --no-resume richtet stattdessen socket://HOST:PORT ein (Auftrag erledigt, sobald
             die Daten beim Drucker sind) und merkt das in der Warteschlange (lwResumeOnError=False);
             --resume schaltet es wieder ein. Ohne Angabe bleibt die Wahl einer vorhandenen Warteschlange.
+
+            Nachdruck: Am Rollenende sind die letzten Etiketten oft unbrauchbar. Nach „Papier leer“ oder
+            „Farbband leer“ druckt das Backend deshalb die zuletzt fertigen Etiketten zusätzlich erneut,
+            bevor der Auftrag weitergeht – ohne Angabe das letzte. --reprint N wählt 0 (keins) bis 99 und
+            merkt die Zahl in der Warteschlange (lwReprintAfterError, bei 1 nicht gesetzt); ohne --reprint
+            bleibt der Wert einer vorhandenen Warteschlange. Wirkt nur mit labelwerk://. Die Aufträge der
+            Warteschlange landen zudem im Druckjournal /Users/Shared/LabelWerk/Journal („Nachdrucken“ in
+            der App).
             """,
             options: [
                 OptionSpec("model", short: "m", value: "auto|id|generic",
@@ -170,6 +178,8 @@ enum CommandCatalog {
                            "Eigene Etikettengröße als Standard-Papiergröße, z. B. 104x76.2mm oder 4x3in (statt --stock)"),
                 OptionSpec("no-resume", "socket:// statt labelwerk:// – Auftrag nicht bis zum letzten Etikett in der Warteschlange halten"),
                 OptionSpec("resume", "labelwerk:// (Standard): bei Papier- oder Farbbandende anhalten und danach fortsetzen"),
+                OptionSpec("reprint", value: "0-99",
+                           "Nach Papier- oder Farbbandende die letzten N Etiketten zusätzlich drucken (Standard 1, 0 = keins)"),
                 OptionSpec("default", "Als Standarddrucker festlegen"),
                 OptionSpec("test-page", "Danach eine Testseite über die neue Warteschlange drucken"),
                 OptionSpec("ppd-dir", value: "ordner", "Ordner mit den LabelWerk-PPDs (Standard: \(InstallCommands.defaultPPDDirectory))"),
@@ -181,6 +191,7 @@ enum CommandCatalog {
                 "lwctl install -p tcp://192.168.1.51 --name Versand --location \"Lager, Tor 3\" --stock w4h6in --default --test-page",
                 "lwctl install -p tcp://etiketten-2.local:9100 --model zt410 --dpi 300 --dry-run",
                 "lwctl install -p tcp://192.168.1.52 --size 104x76.2mm",
+                "lwctl install -p tcp://192.168.1.53 --reprint 2",
                 "for ip in 192.168.1.50 192.168.1.51; do lwctl install -p tcp://$ip --json; done",
             ]),
         CommandSpec(

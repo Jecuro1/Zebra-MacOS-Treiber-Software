@@ -16,6 +16,8 @@
 "Status aktualisieren" = "Status aktualisieren";
 "Kalibrieren" = "Kalibrieren";
 "Etikett vorschieben" = "Etikett vorschieben";
+"Letztes Etikett nochmal" = "Letztes Etikett nochmal";
+"Nachdrucken …" = "Nachdrucken …";
 "Etiketten-Designer" = "Etiketten-Designer";
 "Auftragsverlauf" = "Auftragsverlauf";
 "Treiber & Warteschlangen" = "Treiber & Warteschlangen";
@@ -653,6 +655,9 @@
 "rastertolabelwerk fehlt" = "rastertolabelwerk fehlt";
 "Befehlsfilter" = "Befehlsfilter";
 "commandtolabelwerk fehlt (Reinigen, Kalibrieren, Selbsttest)" = "commandtolabelwerk fehlt (Reinigen, Kalibrieren, Selbsttest)";
+"Backend „labelwerk“" = "Backend „labelwerk“";
+"Druck geht nach Papier- oder Farbbandende automatisch weiter" = "Druck geht nach Papier- oder Farbbandende automatisch weiter";
+"labelwerk fehlt – Warteschlangen drucken über socket:// (ohne Fortsetzen nach Papierende)" = "labelwerk fehlt – Warteschlangen drucken über socket:// (ohne Fortsetzen nach Papierende)";
 "PPD-Dateien" = "PPD-Dateien";
 "%d Modell-/Auflösungsvarianten installiert" = "%d Modell-/Auflösungsvarianten installiert";
 "Keine LabelWerk-PPDs gefunden" = "Keine LabelWerk-PPDs gefunden";
@@ -1158,6 +1163,7 @@
 "An macOS-Warteschlange übergeben" = "An macOS-Warteschlange übergeben";
 "„%@“ war nicht direkt erreichbar. Der Auftrag liegt in der macOS-Warteschlange „%@“ und wird gedruckt, sobald der Drucker erreichbar ist – genau wie in der Vorschau." = "„%@“ war nicht direkt erreichbar. Der Auftrag liegt in der macOS-Warteschlange „%@“ und wird gedruckt, sobald der Drucker erreichbar ist – genau wie in der Vorschau.";
 "Drucken fehlgeschlagen" = "Drucken fehlgeschlagen";
+"Abgebrochen – %d von %d Etiketten gedruckt." = "Abgebrochen – %d von %d Etiketten gedruckt.";
 
 /* MARK: Features/LabelPrint/LabelPrintView.swift */
 "Öffne ein PDF oder Bild – LabelWerk zeigt genau, wie das Etikett aus dem Drucker kommt, und druckt es mit dem gewählten Etikettentyp." = "Öffne ein PDF oder Bild – LabelWerk zeigt genau, wie das Etikett aus dem Drucker kommt, und druckt es mit dem gewählten Etikettentyp.";
@@ -1173,7 +1179,6 @@
 
 /* MARK: Features/LabelPrint/PrinterSession+LabelPrint.swift */
 "Etiketten werden gedruckt …" = "Etiketten werden gedruckt …";
-"Der Drucker hat den Auftrag nicht angenommen." = "Der Drucker hat den Auftrag nicht angenommen.";
 "Der Drucker ist nicht erreichbar." = "Der Drucker ist nicht erreichbar.";
 "Über die macOS-Warteschlange „%@“ gesendet (Drucker nicht direkt erreichbar)." = "Über die macOS-Warteschlange „%@“ gesendet (Drucker nicht direkt erreichbar).";
 
@@ -1557,6 +1562,7 @@
 "Keine Drucker" = "Keine Drucker";
 "%d von %d Druckern bereit" = "%d von %d Druckern bereit";
 "LabelWerk öffnen" = "LabelWerk öffnen";
+"Letztes Etikett nochmal – gedrückt halten für „Nachdrucken …“" = "Letztes Etikett nochmal – gedrückt halten für „Nachdrucken …“";
 "LabelWerk beenden" = "LabelWerk beenden";
 "Im Hauptfenster öffnen" = "Im Hauptfenster öffnen";
 "Test" = "Test";
@@ -1831,6 +1837,8 @@
 "Befehlssprache des Druckers (ZPL II, EPL2, CPCL). ZPL bietet alle Funktionen. Ein Wechsel baut die Verbindung nach dem Speichern neu auf." = "Befehlssprache des Druckers (ZPL II, EPL2, CPCL). ZPL bietet alle Funktionen. Ein Wechsel baut die Verbindung nach dem Speichern neu auf.";
 "Löscht vor jedem Auftrag alle aktuellen und wartenden Aufträge im Drucker (~JA, ganz am Anfang des Auftrags vor den Startbefehlen), damit nur der neue gedruckt wird. Wirkt bei ZPL und EPL." = "Löscht vor jedem Auftrag alle aktuellen und wartenden Aufträge im Drucker (~JA, ganz am Anfang des Auftrags vor den Startbefehlen), damit nur der neue gedruckt wird. Wirkt bei ZPL und EPL.";
 "Wartezeit nach dem Abbrechen, bevor der neue Auftrag folgt (0 bis 10 000 ms, Standard 1000 ms)." = "Wartezeit nach dem Abbrechen, bevor der neue Auftrag folgt (0 bis 10 000 ms, Standard 1000 ms).";
+"Wie bei einem normalen Drucker: Der Auftrag bleibt in der macOS-Warteschlange, bis jedes Etikett gedruckt ist. Gehen Etiketten oder Farbband aus oder ist der Druckkopf offen, zeigt macOS „Kein Papier“ bzw. „Farbband leer“; nach dem Einlegen geht der Druck genau dort weiter – das unterbrochene Etikett druckt der Drucker erneut, nichts muss nachgezählt werden. Gilt für Netzwerkdrucker mit ZPL (macOS-Geräte-URI labelwerk:// statt socket://) und für Drucke aus LabelWerk. Aus: Der Auftrag gilt als erledigt, sobald die Daten beim Drucker sind." = "Wie bei einem normalen Drucker: Der Auftrag bleibt in der macOS-Warteschlange, bis jedes Etikett gedruckt ist. Gehen Etiketten oder Farbband aus oder ist der Druckkopf offen, zeigt macOS „Kein Papier“ bzw. „Farbband leer“; nach dem Einlegen geht der Druck genau dort weiter – das unterbrochene Etikett druckt der Drucker erneut, nichts muss nachgezählt werden. Gilt für Netzwerkdrucker mit ZPL (macOS-Geräte-URI labelwerk:// statt socket://) und für Drucke aus LabelWerk. Aus: Der Auftrag gilt als erledigt, sobald die Daten beim Drucker sind.";
+"Am Ende einer Rolle sind die letzten Etiketten oft unbrauchbar – meist klebt dort ein Klebestreifen, oder das Farbband ist schon dünn. Nach „Papier leer“ oder „Farbband leer“ (auch nach einem Medienfehler, der von selbst verschwindet, z. B. an einer Klebestelle mitten in der Rolle) druckt LabelWerk die zuletzt fertigen Etiketten deshalb zusätzlich noch einmal: zuerst druckt der Drucker das unterbrochene Etikett erneut, dann folgen die Nachdrucke, dann der Rest des Auftrags. Standard: das letzte Etikett. Etiketten mit fortlaufender Nummer (^SN) erhalten dabei den Startwert ihres Formats. Während des Fehlers lassen sich im Hinweis der App andere Etiketten wählen. Gilt nur zusammen mit „Bei Papier- oder Farbbandende anhalten und fortsetzen“, für Drucke aus LabelWerk und für die macOS-Warteschlangen (Warteschlangen-Standard lwReprintAfterError, von LabelWerk übertragen)." = "Am Ende einer Rolle sind die letzten Etiketten oft unbrauchbar – meist klebt dort ein Klebestreifen, oder das Farbband ist schon dünn. Nach „Papier leer“ oder „Farbband leer“ (auch nach einem Medienfehler, der von selbst verschwindet, z. B. an einer Klebestelle mitten in der Rolle) druckt LabelWerk die zuletzt fertigen Etiketten deshalb zusätzlich noch einmal: zuerst druckt der Drucker das unterbrochene Etikett erneut, dann folgen die Nachdrucke, dann der Rest des Auftrags. Standard: das letzte Etikett. Etiketten mit fortlaufender Nummer (^SN) erhalten dabei den Startwert ihres Formats. Während des Fehlers lassen sich im Hinweis der App andere Etiketten wählen. Gilt nur zusammen mit „Bei Papier- oder Farbbandende anhalten und fortsetzen“, für Drucke aus LabelWerk und für die macOS-Warteschlangen (Warteschlangen-Standard lwReprintAfterError, von LabelWerk übertragen).";
 "Was nach dem Druck geschieht (^MM): Abreißen, Spendemodus, Abschneider, verzögerter Abschneider, Aufwickeln, Applikator oder Kiosk. Linerless-Modi (Etiketten ohne Trägermaterial) setzt der Treiber per SGD „media.printmode“." = "Was nach dem Druck geschieht (^MM): Abreißen, Spendemodus, Abschneider, verzögerter Abschneider, Aufwickeln, Applikator oder Kiosk. Linerless-Modi (Etiketten ohne Trägermaterial) setzt der Treiber per SGD „media.printmode“.";
 "Feinjustierung der Abreiß- bzw. Spendeposition (~TA, −120 bis 120 Punkte)." = "Feinjustierung der Abreiß- bzw. Spendeposition (~TA, −120 bis 120 Punkte).";
 "Mit Abschneider: nur am Auftragsende schneiden oder nach jeweils N Etiketten (^PQ n,N,0,Y). Gezählt wird je Seite und Kopiengruppe: Bei sortierten Aufträgen mit mehreren Seiten schneidet der Drucker ab N = 2 nicht zwischendurch." = "Mit Abschneider: nur am Auftragsende schneiden oder nach jeweils N Etiketten (^PQ n,N,0,Y). Gezählt wird je Seite und Kopiengruppe: Bei sortierten Aufträgen mit mehreren Seiten schneidet der Drucker ab N = 2 nicht zwischendurch.";
@@ -1954,6 +1962,8 @@
 "Einstellungen im Drucker speichern" = "Einstellungen im Drucker speichern";
 "Alle aktuellen und nächsten Druckjobs löschen" = "Alle aktuellen und nächsten Druckjobs löschen";
 "Verzögerung" = "Verzögerung";
+"Bei Papier- oder Farbbandende anhalten und fortsetzen" = "Bei Papier- oder Farbbandende anhalten und fortsetzen";
+"Danach zusätzlich nachdrucken" = "Danach zusätzlich nachdrucken";
 "Modus" = "Modus";
 "Versatz" = "Versatz";
 "Abschneider" = "Abschneider";
@@ -2127,12 +2137,22 @@
 "Beim Speichern wird die Verbindung in der neuen Sprache aufgebaut." = "Beim Speichern wird die Verbindung in der neuen Sprache aufgebaut.";
 "~JC vor jedem Auftrag" = "~JC vor jedem Auftrag";
 "^JUS mit dem ersten Etikett" = "^JUS mit dem ersten Etikett";
+"Papier- oder Farbbandende" = "Papier- oder Farbbandende";
+"Der Druck geht nach dem Einlegen automatisch weiter" = "Der Druck geht nach dem Einlegen automatisch weiter";
+"Auftrag gilt als erledigt, sobald die Daten beim Drucker sind" = "Auftrag gilt als erledigt, sobald die Daten beim Drucker sind";
+"Am Rollenende sind die letzten Etiketten oft unbrauchbar (Klebestreifen). Sie werden nach dem Einlegen zusätzlich gedruckt." = "Am Rollenende sind die letzten Etiketten oft unbrauchbar (Klebestreifen). Sie werden nach dem Einlegen zusätzlich gedruckt.";
+"Keins" = "Keins";
+"Letztes Etikett (Standard)" = "Letztes Etikett (Standard)";
+"Letzte 2" = "Letzte 2";
+"Letzte 3" = "Letzte 3";
+"Benutzerdefiniert …" = "Benutzerdefiniert …";
 "Wirkt nur bei ZPL und EPL." = "Wirkt nur bei ZPL und EPL.";
 "~JA vor jedem Auftrag" = "~JA vor jedem Auftrag";
 "ms" = "ms";
 "Formatpräfix" = "Formatpräfix";
 "Steuerpräfix" = "Steuerpräfix";
 "Trennzeichen" = "Trennzeichen";
+"Für macOS-Drucker den LabelWerk-Treiber aktualisieren (Backend „labelwerk“ fehlt)." = "Für macOS-Drucker den LabelWerk-Treiber aktualisieren (Backend „labelwerk“ fehlt).";
 "Sehr hell – Barcodes können unlesbar werden." = "Sehr hell – Barcodes können unlesbar werden.";
 "Sehr dunkel – Balken können verlaufen, der Druckkopf altert schneller." = "Sehr dunkel – Balken können verlaufen, der Druckkopf altert schneller.";
 "Pausieren hat Vorrang vor „Schneiden alle N Etiketten“." = "Pausieren hat Vorrang vor „Schneiden alle N Etiketten“.";
@@ -2149,6 +2169,23 @@
 "Testseite konnte nicht erzeugt werden" = "Testseite konnte nicht erzeugt werden";
 "Testseite wird gedruckt …" = "Testseite wird gedruckt …";
 "Testseite gedruckt" = "Testseite gedruckt";
+
+/* MARK: Features/PrintJob/PrintJobBanner.swift */
+"Verbindung unterbrochen" = "Verbindung unterbrochen";
+"LabelWerk verbindet neu und druckt danach weiter – kein Etikett geht verloren." = "LabelWerk verbindet neu und druckt danach weiter – kein Etikett geht verloren.";
+"%@ · %@" = "%@ · %@";
+"Weitere Aufträge warten: %d" = "Weitere Aufträge warten: %d";
+"Wartende verwerfen" = "Wartende verwerfen";
+"Die wartenden Aufträge werden nicht gesendet. Der laufende Auftrag druckt weiter." = "Die wartenden Aufträge werden nicht gesendet. Der laufende Auftrag druckt weiter.";
+"Bricht den Auftrag ab und leert den Speicher des Druckers. Bereits gedruckte Etiketten bleiben im Verlauf vermerkt." = "Bricht den Auftrag ab und leert den Speicher des Druckers. Bereits gedruckte Etiketten bleiben im Verlauf vermerkt.";
+"Kein Nachdruck – nach dem Einlegen geht der Auftrag direkt weiter." = "Kein Nachdruck – nach dem Einlegen geht der Auftrag direkt weiter.";
+"Nach dem Einlegen wird 1 Etikett zusätzlich nachgedruckt." = "Nach dem Einlegen wird 1 Etikett zusätzlich nachgedruckt.";
+"Nach dem Einlegen werden %d Etiketten zusätzlich nachgedruckt." = "Nach dem Einlegen werden %d Etiketten zusätzlich nachgedruckt.";
+"Nichts zusätzlich nachdrucken" = "Nichts zusätzlich nachdrucken";
+"Nr. %d" = "Nr. %d";
+"Etikett %d wird nachgedruckt – klicken zum Abwählen" = "Etikett %d wird nachgedruckt – klicken zum Abwählen";
+"Etikett %d zusätzlich nachdrucken" = "Etikett %d zusätzlich nachdrucken";
+"Etikett %d" = "Etikett %d";
 
 /* MARK: Features/RFID/RFIDComponents.swift */
 "In die Zwischenablage kopieren" = "In die Zwischenablage kopieren";
@@ -2468,6 +2505,44 @@
 "Start-Seriennummer" = "Start-Seriennummer";
 "Die Länge des Firmenpräfixes ergibt sich aus Ihrer GS1-Mitgliedschaft (meist 7 bis 10 Stellen). Beim Hochzählen ändert sich nur die Seriennummer." = "Die Länge des Firmenpräfixes ergibt sich aus Ihrer GS1-Mitgliedschaft (meist 7 bis 10 Stellen). Beim Hochzählen ändert sich nur die Seriennummer.";
 
+/* MARK: Features/Reprint/AppModel+Reprint.swift */
+"Kein Auftrag zum Nachdrucken" = "Kein Auftrag zum Nachdrucken";
+"Für „%@“ ist noch kein Auftrag im Druckjournal." = "Für „%@“ ist noch kein Auftrag im Druckjournal.";
+"Im Druckjournal ist noch kein Auftrag eines eingerichteten Druckers." = "Im Druckjournal ist noch kein Auftrag eines eingerichteten Druckers.";
+"Die Druckdaten dieses Auftrags fehlen." = "Die Druckdaten dieses Auftrags fehlen.";
+"Nachdrucken nicht möglich" = "Nachdrucken nicht möglich";
+"Etikett %d aus „%@“ wird auf „%@“ gedruckt." = "Etikett %d aus „%@“ wird auf „%@“ gedruckt.";
+
+/* MARK: Features/Reprint/PrinterSession+Journal.swift */
+"„%@“ druckt nicht mit ZPL – Aufträge aus dem Druckjournal sind ZPL." = "„%@“ druckt nicht mit ZPL – Aufträge aus dem Druckjournal sind ZPL.";
+"Keine Etiketten gewählt." = "Keine Etiketten gewählt.";
+"RFID-Kodieraufträge werden nicht wiederholt – jede EPC darf nur einmal geschrieben werden." = "RFID-Kodieraufträge werden nicht wiederholt – jede EPC darf nur einmal geschrieben werden.";
+"Nachdruck: %@" = "Nachdruck: %@";
+"Etiketten werden nachgedruckt …" = "Etiketten werden nachgedruckt …";
+"1 Etikett auf „%@“ nachgedruckt." = "1 Etikett auf „%@“ nachgedruckt.";
+"%d Etiketten auf „%@“ nachgedruckt." = "%d Etiketten auf „%@“ nachgedruckt.";
+"Nachgedruckt" = "Nachgedruckt";
+"Ohne Titel" = "Ohne Titel";
+
+/* MARK: Features/Reprint/ReprintWindow.swift */
+"Nachdrucken" = "Nachdrucken";
+"Noch nichts gedruckt" = "Noch nichts gedruckt";
+"Hier erscheinen die zuletzt gedruckten Aufträge – aus LabelWerk und aus anderen Programmen über die macOS-Warteschlange (Geräte-URI labelwerk://). Je Warteschlange bleiben die letzten 30 Aufträge." = "Hier erscheinen die zuletzt gedruckten Aufträge – aus LabelWerk und aus anderen Programmen über die macOS-Warteschlange (Geräte-URI labelwerk://). Je Warteschlange bleiben die letzten 30 Aufträge.";
+"Auftrag wählen" = "Auftrag wählen";
+"Liste aktualisieren" = "Liste aktualisieren";
+"Heute" = "Heute";
+"Gestern" = "Gestern";
+"Über die macOS-Warteschlange „%@“ gedruckt" = "Über die macOS-Warteschlange „%@“ gedruckt";
+"Aus LabelWerk gedruckt" = "Aus LabelWerk gedruckt";
+"macOS-Warteschlange „%@“" = "macOS-Warteschlange „%@“";
+"Nach Papier- oder Farbbandende 1 Etikett nachgedruckt." = "Nach Papier- oder Farbbandende 1 Etikett nachgedruckt.";
+"Nach Papier- oder Farbbandende %d Etiketten nachgedruckt." = "Nach Papier- oder Farbbandende %d Etiketten nachgedruckt.";
+"Fehlgeschlagen – %d von %d Etiketten gedruckt." = "Fehlgeschlagen – %d von %d Etiketten gedruckt.";
+"Gezeigt werden die letzten %d von %d Etiketten." = "Gezeigt werden die letzten %d von %d Etiketten.";
+"Letztes" = "Letztes";
+"Nur das zuletzt gedruckte Etikett wählen" = "Nur das zuletzt gedruckte Etikett wählen";
+"%d nachdrucken" = "%d nachdrucken";
+
 /* MARK: Features/Root/PrinterDetailView.swift */
 "Status aktualisieren (⌘R)" = "Status aktualisieren (⌘R)";
 "Testetikett drucken (⇧⌘T)" = "Testetikett drucken (⇧⌘T)";
@@ -2523,7 +2598,6 @@
 
 /* MARK: Features/Setup/LabelStockChooser.swift */
 "%@ – vom Drucker erkannt" = "%@ – vom Drucker erkannt";
-"Benutzerdefiniert …" = "Benutzerdefiniert …";
 "Vom Drucker übernehmen" = "Vom Drucker übernehmen";
 "Liest die im Drucker eingestellte Etikettengröße erneut und übernimmt sie." = "Liest die im Drucker eingestellte Etikettengröße erneut und übernimmt sie.";
 "Vom Drucker erkannt" = "Vom Drucker erkannt";
@@ -2852,7 +2926,6 @@
 /* MARK: Features/Tools/ToolsCalibrationWizard.swift */
 "Start" = "Start";
 "Einlegen" = "Einlegen";
-"%@ · %@" = "%@ · %@";
 "Kalibrier-Assistent" = "Kalibrier-Assistent";
 "Der Drucker misst Etikettenlänge sowie Lücken oder Markierungen und stellt seine Sensoren darauf ein. Nötig nach jedem Rollenwechsel und bei Vorschubproblemen." = "Der Drucker misst Etikettenlänge sowie Lücken oder Markierungen und stellt seine Sensoren darauf ein. Nötig nach jedem Rollenwechsel und bei Vorschubproblemen.";
 "Dauert etwa eine Minute und verbraucht einige Etiketten." = "Dauert etwa eine Minute und verbraucht einige Etiketten.";
@@ -3085,12 +3158,32 @@
 "Dateien & Schriften" = "Dateien & Schriften";
 "Sicherung & Wartung" = "Sicherung & Wartung";
 
+/* MARK: Model/PrinterSession+PrintJob.swift */
+"Nachdruck %d von %d (Farbbandende)" = "Nachdruck %d von %d (Farbbandende)";
+"Nachdruck %d von %d (Etikettenende)" = "Nachdruck %d von %d (Etikettenende)";
+"Papier leer" = "Papier leer";
+"Drucker pausiert" = "Drucker pausiert";
+"Etikett entnehmen" = "Etikett entnehmen";
+"Druckkopf zu heiß" = "Druckkopf zu heiß";
+"Papier leer – neue Etikettenrolle einlegen. Der Druck geht danach automatisch weiter." = "Papier leer – neue Etikettenrolle einlegen. Der Druck geht danach automatisch weiter.";
+"Farbband leer – neues Farbband einlegen. Der Druck geht danach automatisch weiter." = "Farbband leer – neues Farbband einlegen. Der Druck geht danach automatisch weiter.";
+"Druckkopf offen – Druckkopf schließen. Der Druck geht danach automatisch weiter." = "Druckkopf offen – Druckkopf schließen. Der Druck geht danach automatisch weiter.";
+"Drucker pausiert – zum Fortsetzen die Pause-Taste am Drucker drücken." = "Drucker pausiert – zum Fortsetzen die Pause-Taste am Drucker drücken.";
+"Etikett entnehmen – der Druck geht danach automatisch weiter." = "Etikett entnehmen – der Druck geht danach automatisch weiter.";
+"Druckkopf zu heiß – der Drucker kühlt ab und druckt danach automatisch weiter." = "Druckkopf zu heiß – der Drucker kühlt ab und druckt danach automatisch weiter.";
+"Nach einem Verbindungsabbruch nicht prüfbar: bis zu %d Etiketten fehlen möglicherweise – bitte nachzählen." = "Nach einem Verbindungsabbruch nicht prüfbar: bis zu %d Etiketten fehlen möglicherweise – bitte nachzählen.";
+"%@ (%d von %d Etiketten gedruckt)" = "%@ (%d von %d Etiketten gedruckt)";
+"Der Drucker hat den Auftrag nicht angenommen." = "Der Drucker hat den Auftrag nicht angenommen.";
+"Druckauftrag läuft" = "Druckauftrag läuft";
+"Bitte nachzählen" = "Bitte nachzählen";
+"Druck abgebrochen" = "Druck abgebrochen";
+"%@: Druck angehalten" = "%@: Druck angehalten";
+
 /* MARK: Model/PrinterSession.swift */
 "Etikett wird gedruckt …" = "Etikett wird gedruckt …";
 "Bild wird gedruckt …" = "Bild wird gedruckt …";
 "Daten werden gesendet …" = "Daten werden gesendet …";
 "Erneut drucken nicht möglich" = "Erneut drucken nicht möglich";
-"RFID-Kodieraufträge werden nicht wiederholt – jede EPC darf nur einmal geschrieben werden." = "RFID-Kodieraufträge werden nicht wiederholt – jede EPC darf nur einmal geschrieben werden.";
 "Für diesen Auftrag wurden keine Druckdaten gespeichert." = "Für diesen Auftrag wurden keine Druckdaten gespeichert.";
 "Auftrag wird erneut gesendet …" = "Auftrag wird erneut gesendet …";
 "Erneut gedruckt" = "Erneut gedruckt";
@@ -3352,7 +3445,6 @@
 "Abdeckung öffnen, eine neue Etikettenrolle einlegen und das Material unter den Führungen bis über die Abreißkante ziehen. Abdeckung schließen und die Vorschubtaste (FEED) drücken; bei anderem Material anschließend kalibrieren." = "Abdeckung öffnen, eine neue Etikettenrolle einlegen und das Material unter den Führungen bis über die Abreißkante ziehen. Abdeckung schließen und die Vorschubtaste (FEED) drücken; bei anderem Material anschließend kalibrieren.";
 "Druckkopf öffnen, die leere Farbbandrolle entnehmen und eine neue Rolle mit der beschichteten Seite zum Etikett einlegen; den Anfang an der Aufwickelspindel befestigen. Druckkopf schließen. Für Druck ohne Farbband in den Einstellungen „Thermodirekt“ wählen." = "Druckkopf öffnen, die leere Farbbandrolle entnehmen und eine neue Rolle mit der beschichteten Seite zum Etikett einlegen; den Anfang an der Aufwickelspindel befestigen. Druckkopf schließen. Für Druck ohne Farbband in den Einstellungen „Thermodirekt“ wählen.";
 "Druckkopf bzw. Abdeckung schließen und hörbar einrasten lassen. Dabei prüfen, dass Etiketten und Farbband glatt unter dem Druckkopf liegen." = "Druckkopf bzw. Abdeckung schließen und hörbar einrasten lassen. Dabei prüfen, dass Etiketten und Farbband glatt unter dem Druckkopf liegen.";
-"Drucker pausiert" = "Drucker pausiert";
 "Die Pause-Taste am Drucker drücken oder in LabelWerk „Fortsetzen“ wählen. Wartende Aufträge werden danach automatisch gedruckt." = "Die Pause-Taste am Drucker drücken oder in LabelWerk „Fortsetzen“ wählen. Wartende Aufträge werden danach automatisch gedruckt.";
 "Schneidwerk blockiert" = "Schneidwerk blockiert";
 "Drucker ausschalten, das Schneidwerk auf eingeklemmtes Material prüfen und Reste vorsichtig entfernen, ohne die Klinge zu berühren. Klebereste mit Isopropanol entfernen und den Drucker wieder einschalten." = "Drucker ausschalten, das Schneidwerk auf eingeklemmtes Material prüfen und Reste vorsichtig entfernen, ohne die Klinge zu berühren. Klebereste mit Isopropanol entfernen und den Drucker wieder einschalten.";
@@ -3368,7 +3460,6 @@
 "Der Drucker nimmt vorübergehend keine Daten an. Warten, bis laufende Aufträge gedruckt sind, oder „Aufträge abbrechen“ wählen und große Grafiken komprimiert (Z64) senden." = "Der Drucker nimmt vorübergehend keine Daten an. Warten, bis laufende Aufträge gedruckt sind, oder „Aufträge abbrechen“ wählen und große Grafiken komprimiert (Z64) senden.";
 "Druckkopf zu kalt" = "Druckkopf zu kalt";
 "Der Drucker ist kälter als seine Betriebstemperatur. In eine wärmere Umgebung (über 5 °C) bringen und vor dem Drucken einige Minuten akklimatisieren lassen." = "Der Drucker ist kälter als seine Betriebstemperatur. In eine wärmere Umgebung (über 5 °C) bringen und vor dem Drucken einige Minuten akklimatisieren lassen.";
-"Druckkopf zu heiß" = "Druckkopf zu heiß";
 "Die Druckkopftemperatur liegt über dem Betriebsbereich. Drucker abkühlen lassen, die Schwärzung (Darkness) reduzieren und für ausreichende Belüftung sorgen." = "Die Druckkopftemperatur liegt über dem Betriebsbereich. Drucker abkühlen lassen, die Schwärzung (Darkness) reduzieren und für ausreichende Belüftung sorgen.";
 "Konfiguration verloren" = "Konfiguration verloren";
 "Der Drucker hat seine gespeicherte Konfiguration verloren und Standardwerte geladen. Einstellungen in LabelWerk prüfen, erneut übertragen und mit „Einstellungen speichern“ dauerhaft sichern." = "Der Drucker hat seine gespeicherte Konfiguration verloren und Standardwerte geladen. Einstellungen in LabelWerk prüfen, erneut übertragen und mit „Einstellungen speichern“ dauerhaft sichern.";
@@ -3379,7 +3470,6 @@
 "Der Druckkopf hat das Ende seiner Lebensdauer erreicht. Einen zu Modell und Auflösung passenden Ersatzdruckkopf einbauen und danach den Druckkopfzähler zurücksetzen." = "Der Druckkopf hat das Ende seiner Lebensdauer erreicht. Einen zu Modell und Auflösung passenden Ersatzdruckkopf einbauen und danach den Druckkopfzähler zurücksetzen.";
 "Etiketten fast leer" = "Etiketten fast leer";
 "Eine neue Etikettenrolle bereitlegen und nach dem aktuellen Auftrag einlegen." = "Eine neue Etikettenrolle bereitlegen und nach dem aktuellen Auftrag einlegen.";
-"Etikett entnehmen" = "Etikett entnehmen";
 "Im Spendemodus wartet ein Etikett an der Spendekante. Etikett abnehmen – der nächste Druck startet danach automatisch." = "Im Spendemodus wartet ein Etikett an der Spendekante. Etikett abnehmen – der nächste Druck startet danach automatisch.";
 "Papiervorschubfehler" = "Papiervorschubfehler";
 "Papierweg auf Stau oder schräg eingelegtes Material prüfen, Material neu einlegen, die Führungen an die Etikettenbreite anpassen und anschließend kalibrieren." = "Papierweg auf Stau oder schräg eingelegtes Material prüfen, Material neu einlegen, die Führungen an die Etikettenbreite anpassen und anschließend kalibrieren.";

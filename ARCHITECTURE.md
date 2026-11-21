@@ -1095,6 +1095,55 @@ erneut, `^JZN` verliert es (`spoiledLabels`). Eine Pause lässt das laufende Exe
 `printLog` hat je gedrucktem Exemplar einen Eintrag (`^FD`-Inhalt bzw. Prüfsumme), `~JA` und Neustart
 verwerfen alle wartenden Formate; ein Neustart (`restartDevice`, `~JR`) leert auch das RAM-Laufwerk `R:`.
 
+### Nachdruck nach Papier- oder Farbbandende und Druckjournal
+
+„Danach zusätzlich nachdrucken“ (`PrintSettings.reprintAfterError`, `Int`, Standard 1, 0 = keins, höchstens
+99, wirkt nur mit `resumeAfterError`): Am Rollenende sind die letzten Etiketten oft unbrauchbar
+(Klebestreifen, dünnes Farbband). Meldet der Drucker „Papier leer“ oder „Farbband leer“ – auch ein
+Medienfehler, der von selbst verschwindet (Klebestelle mitten in der Rolle) –, merken sich App
+(`PacedJobSender`) und CUPS-Backend (§10) die letzten `N` **vor** dem Fehler fertigen Etiketten. Nach dem
+Beheben druckt der Drucker zuerst das unterbrochene Etikett erneut (`^JZY`, gehört nicht zu den `N`), dann
+folgen die Nachdrucke in Auftragsreihenfolge (je Format mit `^PQ` = Anzahl), dann der Rest des Auftrags;
+endet die Rolle genau mit dem letzten Etikett, kommen die Nachdrucke danach. Nie nach einem Abbruch, nie
+nach „Druckkopf offen“ oder einer Pause allein, nur einmal je Fehler (auch über einen Neustart des
+Druckers hinweg). Fortlaufende Felder (`^SN`/`^SF`) drucken dabei den Startwert ihres Formats. Beide Seiten
+folgen denselben Regeln: Auslöser sind die Merker Papier/Farbband im Status, nicht der vorrangige
+Wartegrund (Kopf offen **und** Papier leer zugleich ⇒ Nachdruck); nachgedruckt wird, sobald der Drucker
+für das nächste Format bereit ist (auch wenn der Sensor das Rollenende erst nach dem fertigen Format
+meldet); nach dem letzten Format sind zwei störungsfreie Statusmeldungen nötig; überlappende Bereiche
+zweier Fehler werden zusammengefasst; Formate, die nur die Uhr stellen (`^XA^ST…^XZ`), gehen nicht mit.
+
+* **App:** `PacedJobOptions.reprintAfterError` (0…99), `PacedJobPlan.lastLabels(_:of:)` und
+  `reprintSegments(forLabels:)`; Ereignisse `reprintSuggested(labels:completed:cause:)` (während des ganzen
+  Fehlers, auch bei geöffnetem Kopf – der Hinweis `PrintJobBanner` zeigt Vorschaubilder,
+  `PacedJobReprintChoice` übernimmt eine andere Auswahl; `cause` für „(Etikettenende)“/„(Farbbandende)“),
+  `reprinting(index:total:)`, `reprinted(labels:)`.
+* **Warteschlangen:** Warteschlangen-Standard `lwReprintAfterError-default=N` (bei 1 nicht gesetzt,
+  `QueueDeviceURI.reprintOption`/`reprintArguments`), den cupsd jedem Auftrag in `argv[5]` mitgibt – wie
+  `lwResumeOnError` (§10 „Warteschlangen“). Er steht nicht in der Geräte-URI: Die Umstellung
+  `socket://` ↔ `labelwerk://` verwirft deren Optionen.
+
+**Druckjournal** (`PrintJournal`, LabelWerkKit; Grundlage von „Nachdrucken“ ⌥⌘L und „Letztes Etikett
+nochmal“ ⇧⌘L): Jeder fertige ZPL-Auftrag (auch abgebrochene und fehlgeschlagene) landet als Ordner
+
+    <journal>/<warteschlange>/<UTC yyyyMMdd-HHmmss>-<auftrag>/job.zpl     Kopf + alle Formate wie gesendet
+    <journal>/<warteschlange>/<UTC yyyyMMdd-HHmmss>-<auftrag>/meta.json   Beschreibung (Format-Offsets, ^PQ, Status …)
+
+– vom Backend in `/Users/Shared/LabelWerk/Journal` (Test: `LW_JOURNAL_DIR`, leer = kein Journal;
+`lwb_journal.c`), von der App für eigene Aufträge in `~/Library/Application Support/LabelWerk/Journal`
+(`PrintJournal.record`). Einträge entstehen unter `.<name>.tmp` und werden umbenannt (Leser übergehen
+Punkt-Ordner). Aufbewahrung je Warteschlange: die neuesten 30 Aufträge und höchstens 50 MB (der neueste
+bleibt immer); Aufträge über 20 MB werden nicht aufgenommen. **Datenschutz:** Das Journal enthält die
+gedruckten Etikettendaten (Adressen, Namen …) und ist für alle Benutzer des Macs lesbar (Ordner 0755,
+Dateien 0644 – die App liest es als beliebiger Benutzer); die Deinstallation entfernt es nur mit
+`--purge-user-data`. Schreiben darf ins System-Journal nur `_lp` (das Backend); die App übergeht dort
+zusätzlich Links, Ordner fremder Besitzer (nicht root, `_lp` oder sie selbst) und Einträge, deren `queue`
+nicht zum Ordner passt (`lwb_journal_safe_name` ↔ `PrintJournal.systemDirectoryComponent`). `meta.json`
+enthält außerdem `copies`: `job.zpl` enthält nur die erste Kopie, `printed` zählt über alle. Nachdrucke
+(nach Papierende wie aus dem Journal) lassen Formate, die nur die Uhr stellen (`^XA^ST…^XZ`), weg; aus
+dem Journal entfallen im Kopf auch `~JA`, `~JC` und `~JR` – mit „RTC aktualisieren“ stellt ein frisches
+`^ST` die Uhr.
+
 ## 7c. lwctl (CLI)
 
 `lwctl <befehl> [optionen]`, globale Option `--printer <uri>` mit `tcp://host[:port]`, `usb://vid:pid[/serial]`,
@@ -1849,6 +1898,30 @@ es `argv[4]` Kopien.
    wartenden Auftrag), Ende mit 0.
 9. **Downloads** (`~DG ~DY ~DB ~DS ~DT ~DU ~DN`) und Binärdaten außerhalb von `^GFB` (Bytes < 0x09 bzw.
    0x0E…0x1F, z. B. Firmware): ab dort am Stück – nie eine `~HS`-Abfrage mitten in den Daten.
+10. **Nachdruck** nach Papier- oder Farbbandende (§7b „Nachdruck …“, nur getaktet): Zahl aus der
+    Auftragsoption `lwReprintAfterError=N` – so kommt der Warteschlangen-Standard
+    `lwReprintAfterError-default` an, Name ohne Groß-/Kleinschreibung (`cupsGetOption`), `Custom.N`,
+    `none`/`off`/`false`/`no`/`keins` = 0, über 99 begrenzt (`lwb_parse_reprint_count`) –, ersatzweise aus
+    der URI-Option `?reprint=N` (nur für Tests und von Hand angelegte Warteschlangen; App und `lwctl`
+    schreiben sie nicht); ohne bzw. mit ungültigem Wert 1. Das Backend hält dafür die Formate der letzten
+    `N` Etiketten (`lwb_reprint_slices`), meldet `INFO: Nachdruck 1 von 2 (Etikettenende)` und am Ende
+    `Alle 50 Etiketten gedruckt, dazu 2 Nachdruck(e) nach Etiketten- bzw. Farbbandende.`
+11. **Druckjournal** (`lwb_journal.c`, §7b): nach dem Auftrag `job.zpl` (Rohdaten wie empfangen, höchstens
+    20 MB) und `meta.json` nach `/Users/Shared/LabelWerk/Journal/<PRINTER>/…` (`LW_JOURNAL_DIR`; unter Linux
+    ohne Angabe kein Journal); danach Aufräumen auf 30 Aufträge/50 MB. Ordner entstehen mit 0755, Dateien
+    mit 0644 (unabhängig von der umask), vorhandene Ordner bleiben unverändert. Der Ordner der
+    Warteschlange muss ein echter Ordner (kein Link) des Backend-Benutzers sein (`lstat`, `st_uid ==
+    geteuid()`), sonst schreibt das Backend nichts (DEBUG „Journalordner gehört nicht dem Backend“) und
+    räumt dort auch nichts auf. Den Ordner `Journal` legt das **postinstall** an: Besitzer **`_lp`
+    0755**, denn das Backend läuft als `_lp` und nur es schreibt dort (die App schreibt ihr eigenes
+    Journal); ein früheres 1777 wird korrigiert, Einträge, die nicht `_lp` gehören, werden entfernt.
+    `/Users/Shared/LabelWerk` (root:wheel 0755) nur, wenn es kein Link und kein fremder Ordner ist
+    (`/Users/Shared` ist für alle beschreibbar). **Sandbox:** cupsd führt Backends unter macOS in einem
+    eigenen Sandbox-Profil aus (`Sandboxing strict`, Standard), das Schreiben nur an wenigen Orten erlaubt;
+    `/Users/Shared` ist nach unserem Stand darunter, aber auf echter Hardware noch nicht für jede
+    macOS-Version bestätigt. Schlägt das Schreiben fehl (Sandbox, Rechte, voller Datenträger), meldet das
+    Backend nur `DEBUG: Druckjournal nicht geschrieben: …` – der Druck läuft unverändert, nur
+    „Nachdrucken“ kennt den Auftrag dann nicht (Aufträge aus LabelWerk selbst stehen im Journal der App).
 
 Zeiten für Tests: `LW_BACKEND_POLL_MS`, `LW_BACKEND_ERROR_POLL_MS`, `LW_BACKEND_REPLY_TIMEOUT_MS`,
 `LW_BACKEND_STALL_MS` (30 s ohne Antwort → Verbindung neu), `LW_BACKEND_RECONNECT_MS`/`_MAX_MS`/`_LIMIT`,
@@ -1880,13 +1953,19 @@ CUPS-Option, kein Befehl) und das Backend installiert ist; sonst `socket://host:
 (LabelWerkCore, unter Linux getestet): `networkURI`, `target(for:resume:)` stellt nur `socket://` ↔
 `labelwerk://` um (Pfad/Optionen der socket-URI entfallen), `arguments(…)` liefert dazu den
 Warteschlangen-Standard `lwResumeOnError-default=False` bei „aus“ (bzw. `-R lwResumeOnError-default` bei
-„an“). `CUPSService.apply` gleicht Geräte-URI und Markierung mit ab (auch ohne andere Abweichung),
+„an“) und `lwReprintAfterError-default=N` für „Danach zusätzlich nachdrucken“
+(`PrintSettings.reprintAfterError`; bei 1 nicht gesetzt bzw. `-R`, aktueller Wert laut `lpoptions`,
+unabhängig von „Fortsetzen“, damit die Wahl beim Wiedereinschalten gilt). `CUPSService.apply` gleicht
+Geräte-URI und beide Markierungen mit ab (auch ohne andere Abweichung),
 `adoptQueue`/`ensureLabelTypeQueue`/`installQueue` setzen sie beim Anlegen; `QueueSyncService` gleicht
 nach jeder Änderung, beim Start und nach einer Treiberinstallation aus der App
-(`CUPSService.driverDidChangeNotification`) ab. `lwctl install`: `--no-resume`/`--resume` (ohne Angabe:
-an bzw. die Wahl der vorhandenen Warteschlange). Das **postinstall** des Pakets stellt bei einem Update
+(`CUPSService.driverDidChangeNotification`) ab – nur LabelWerk-Warteschlangen (PPD mit `*lwModel`).
+`lwctl install`: `--no-resume`/`--resume` (ohne Angabe: an bzw. die Wahl der vorhandenen Warteschlange),
+`--reprint N` (0…99; ohne Angabe 1 bzw. der Wert der vorhandenen Warteschlange). Das **postinstall** des Pakets stellt bei einem Update
 LabelWerk-Warteschlangen (PPD mit `*lwModel`) mit `socket://` auf `labelwerk://` um – außer mit
-`lwResumeOnError=False`; die Deinstallation entfernt das Backend. `socket://` und `labelwerk://` mit
+`lwResumeOnError=False` (Warteschlangen-Standards wie `lwReprintAfterError` überstehen `lpadmin -P`) –
+und legt das Druckjournal an; die Deinstallation entfernt das Backend, das Journal nur mit
+`--purge-user-data`. `socket://` und `labelwerk://` mit
 gleichem Host und Port gelten überall als dasselbe Gerät (`QueueAdoption.rawSchemes`, Netzwerksuche,
 Assistent, `lwctl install`). USB-Warteschlangen behalten `usb://` – das Backend spricht nur den
 Rohdatenport; dort gilt weiter das Verhalten des CUPS-Backends `usb` (Fortsetzen nur bei Druck aus der App).

@@ -29,6 +29,9 @@ struct PrintJobProgress: Identifiable, Equatable {
     var reprintSelection: Set<Int> = []
     /// Nachdruck läuft: Etikett `index` von `total`.
     var reprinting: ReprintStep?
+    /// Auslöser des letzten Nachdruck-Vorschlags (Papier- oder Farbbandende) – für den Text des
+    /// Nachdrucks.
+    var reprintCause: PacedJobWaitReason = .mediaOut
     /// Bisher nachgedruckte Etiketten (zählen nicht zu ``printed``).
     var reprinted = 0
 
@@ -37,14 +40,21 @@ struct PrintJobProgress: Identifiable, Equatable {
         var total: Int
     }
 
-    /// Die Auswahl der Nachdrucke anzeigen (Papier oder Farbband leer, mindestens ein Etikett fertig).
+    /// Die Auswahl der Nachdrucke anzeigen: während des ganzen Fehlers, der einen Nachdruck ausgelöst
+    /// hat (Papier oder Farbband leer, mindestens ein Etikett fertig) – auch solange zum Einlegen der
+    /// Druckkopf offen ist (dann meldet der Drucker „Druckkopf offen“ als Wartegrund). Endet mit
+    /// `.resumed` bzw. `.cancelled` (``reprintCompleted`` = 0).
     var offersReprintChoice: Bool {
-        waiting?.triggersReprint == true && reprintCompleted > 0 && !isCancelling
+        waiting != nil && reprintCompleted > 0 && !isCancelling
     }
 
-    /// „Nachdruck 1 von 2 (Etikettenende)“.
+    /// „Nachdruck 1 von 2 (Etikettenende)“ bzw. „(Farbbandende)“.
     var reprintText: String? {
-        reprinting.map { tr("Nachdruck %d von %d (Etikettenende)", $0.index, $0.total) }
+        reprinting.map {
+            reprintCause == .ribbonOut
+                ? tr("Nachdruck %d von %d (Farbbandende)", $0.index, $0.total)
+                : tr("Nachdruck %d von %d (Etikettenende)", $0.index, $0.total)
+        }
     }
 
     /// Gerade gedrucktes Etikett (1-basiert).
@@ -386,9 +396,10 @@ extension PrinterSession {
             job.printed = printed
             if total > 0 { job.total = total }
             job.waiting = nil
-        case .reprintSuggested(let labels, let completed):
+        case .reprintSuggested(let labels, let completed, let cause):
             job.reprintCompleted = completed
             job.reprintSelection = Set(labels)
+            job.reprintCause = cause
         case .reprinting(let index, let total):
             job.reprinting = PrintJobProgress.ReprintStep(index: index, total: total)
         case .reprinted(let labels):

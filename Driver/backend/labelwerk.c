@@ -37,8 +37,10 @@
  *      ~JX, dann geht das Format erneut hinaus; liegt es vollständig im Drucker, nicht.
  *   7. Downloads (~DG, ~DY …) und Binärdaten: ab dort am Stück, ohne ~HS dazwischen.
  *   8. Abbrechen (SIGTERM): ~JA leert den Druckerpuffer, dann Ende.
- *   9. Nachdruck nach Etiketten- bzw. Farbbandende (URI-Option reprint=N, Auftragsoption
- *      lwReprintAfterError=N, ohne Angabe 1, 0 = keiner): Meldet der Drucker „Papier leer“ oder
+ *   9. Nachdruck nach Etiketten- bzw. Farbbandende (Auftragsoption lwReprintAfterError=N – so kommt
+ *      der Warteschlangen-Standard lwReprintAfterError-default=N an, den App und lwctl setzen –,
+ *      ersatzweise URI-Option reprint=N; ohne bzw. mit ungültiger Angabe 1, 0 = keiner, höchstens 99):
+ *      Meldet der Drucker „Papier leer“ oder
  *      „Farbband leer“ (auch ein Fehler, der von selbst verschwindet, etwa ein Klebestreifen),
  *      merkt sich das Backend die letzten N vor dem Fehler fertig gedruckten Etiketten – das
  *      unterbrochene wiederholt der Drucker wegen ^JZY ohnehin. Ist der Fehler behoben und das offene
@@ -961,6 +963,20 @@ static void note_reprint(job *j, const lwb_host_status *status, int kind)
         if (j->pending[k].anchor == completed)
             return;   /* derselbe Stand ist schon vorgemerkt */
     }
+    if (j->pending_count > 0) {
+        /* Überlappt oder berührt den zuletzt vorgemerkten Bereich (zwei Fehler im selben ^PQ-Format):
+         * zusammenfassen, damit kein Etikett doppelt nachgedruckt wird (wie die App: Menge statt Liste). */
+        reprint_request *last = &j->pending[j->pending_count - 1];
+        long last_first = last->anchor - last->count;
+        if (completed - count <= last->anchor && completed > last->anchor) {
+            long first = last_first < completed - count ? last_first : completed - count;
+            last->anchor = completed;
+            last->count = completed - first;
+            message("DEBUG", "%s nach %ld Etikett(en) – Nachdruck auf die letzten %ld erweitert.",
+                    kind == REPRINT_RIBBON ? "Farbband leer" : "Papier leer", completed, last->count);
+            return;
+        }
+    }
     if (j->pending_count == REPRINT_QUEUE) {
         message("DEBUG", "Zu viele Fehler hintereinander – ältester Nachdruck entfällt.");
         memmove(j->pending, j->pending + 1, (REPRINT_QUEUE - 1) * sizeof(*j->pending));
@@ -1712,8 +1728,9 @@ int main(int argc, char *argv[])
                 settings.language != LW_LANGUAGE_ZPL ? lw_language_name(settings.language)
                                                      : (stream_requested ? "mode=stream" : "lwResumeOnError=False"));
     }
-    /* Nachdruck nach Etiketten-/Farbbandende: URI-Option reprint=N (ohne: 1), Auftragsoption
-     * lwReprintAfterError=N hat Vorrang. */
+    /* Nachdruck nach Etiketten-/Farbbandende: Auftragsoption lwReprintAfterError=N (darin auch der
+     * Warteschlangen-Standard lwReprintAfterError-default, den cupsd jedem Auftrag mitgibt; Name ohne
+     * Groß-/Kleinschreibung) hat Vorrang vor der URI-Option reprint=N; ohne beides bzw. ungültig 1. */
     j.reprint_setting = LWB_REPRINT_DEFAULT;
     char reprint_text[32];
     if (lwb_uri_option(options, "reprint", reprint_text, sizeof(reprint_text)) &&

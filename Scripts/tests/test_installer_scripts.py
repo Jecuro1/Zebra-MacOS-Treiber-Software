@@ -178,6 +178,15 @@ def write_config(directory: Path, **values: str) -> Path:
     return path
 
 
+def lp_ids() -> tuple[int, int]:
+    """uid/gid von _lp (wie postinstall: ohne Benutzer _lp – Linux-Tests – 26:26)."""
+    try:
+        entry = pwd.getpwnam("_lp")
+        return entry.pw_uid, entry.pw_gid
+    except KeyError:
+        return 26, 26
+
+
 def mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
@@ -670,6 +679,39 @@ class UninstallTests(unittest.TestCase):
         result = run([str(SCRIPTS / "uninstall.sh"), "--root", str(self.root / "fehlt"), "--yes"])
         self.assertEqual(result.returncode, 64)
 
+    def test_print_journal_only_with_purge_user_data(self):
+        # Das Druckjournal der Warteschlangen enthält gedruckte Etiketten aller Benutzer: ohne
+        # --purge-user-data bleibt es, damit verschwindet es (und der leere Ordner darüber).
+        journal = self.root / "Users" / "Shared" / "LabelWerk" / "Journal"
+        entry = journal / "Versand" / "20261121-101500-7"
+        entry.mkdir(parents=True)
+        (entry / "job.zpl").write_text("^XA^XZ", encoding="utf-8")
+        other = self.root / "Users" / "Shared" / "Fremd"
+        other.mkdir()
+        result = self.uninstall("--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((entry / "job.zpl").exists())
+        dry = self.uninstall("--dry-run", "--purge-user-data")
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        self.assertIn(str(journal), dry.stdout)
+        self.assertTrue(journal.exists())
+        result = self.uninstall("--yes", "--purge-user-data")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(journal.exists())
+        self.assertFalse((self.root / "Users" / "Shared" / "LabelWerk").exists())
+        self.assertTrue(other.exists())
+
+    def test_print_journal_behind_link_is_not_removed(self):
+        target = self.root / "anderswo"
+        (target / "Journal").mkdir(parents=True)
+        shared = self.root / "Users" / "Shared"
+        shared.mkdir(parents=True)
+        (shared / "LabelWerk").symlink_to(target)
+        result = self.uninstall("--yes", "--purge-user-data")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((target / "Journal").is_dir())
+        self.assertIn("kein Ordner von root", result.stderr)
+
     def purge_dry_run(self, tools: Path, user: str, home: str) -> subprocess.CompletedProcess:
         """``--purge-user-data --dry-run`` mit Attrappen aus ``tools`` vorn im PATH."""
         env = clean_env(SUDO_USER=user, HOME=home)
@@ -1057,6 +1099,79 @@ class PackageScriptTests(unittest.TestCase):
         self.assertEqual(mode(self.ppds / "LabelWerk-zd421t-203dpi.ppd.gz"), 0o644)
         self.assertEqual((self.driver / "Filter" / "rastertolabelwerk").stat().st_uid, 0)
         self.assertIn("nicht das Startvolume", result.stdout)
+
+    def make_driver(self):
+        (self.driver / "Filter").mkdir(parents=True)
+        (self.driver / "Filter" / "rastertolabelwerk").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    @unittest.skipUnless(IS_ROOT, "postinstall setzt Besitzer root:wheel (nur als root testbar)")
+    def test_postinstall_creates_print_journal(self):
+        # Druckjournal des Backends (§7b): /Users/Shared/LabelWerk 0755, Journal _lp 0755 (nur das
+        # Backend schreibt; kein anderer Benutzer kann Einträge unterschieben).
+        self.make_driver()
+        shared = self.volume / "Users" / "Shared"
+        shared.mkdir(parents=True)
+        os.chmod(shared, 0o1777)
+        script = render_package_script("driver", "postinstall", self.volume / "driver-postinstall")
+        result = run([str(script), "pkg", "/", str(self.volume)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        journal = shared / "LabelWerk" / "Journal"
+        self.assertEqual(mode(shared / "LabelWerk"), 0o755)
+        lp_uid, lp_gid = lp_ids()
+        self.assertEqual(mode(journal), 0o755)
+        self.assertEqual(journal.stat().st_uid, lp_uid)
+        self.assertEqual(journal.stat().st_gid, lp_gid)
+        self.assertIn("Druckjournal /Users/Shared/LabelWerk/Journal bereit", result.stdout)
+        # Update von 1777: Rechte korrigiert, Einträge des Backends (_lp) bleiben, von anderen
+        # Benutzern angelegte Ordner und Links werden entfernt.
+        os.chown(journal, 0, 0)
+        os.chmod(journal, 0o1777)
+        entry = journal / "Versand" / "20261121-101500-7"
+        entry.mkdir(parents=True)
+        (entry / "meta.json").write_text("{}", encoding="utf-8")
+        os.chown(journal / "Versand", lp_uid, lp_gid)
+        planted = journal / "x" / "20991231-000000-1"
+        planted.mkdir(parents=True)
+        os.chown(journal / "x", 4242, 4242)
+        victim = self.volume / "victim"
+        victim.mkdir()
+        (victim / "keep").write_text("bleibt", encoding="utf-8")
+        os.symlink(victim, journal / "link")
+        result = run([str(script), "pkg", "/", str(self.volume)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(mode(journal), 0o755)
+        self.assertEqual(journal.stat().st_uid, lp_uid)
+        self.assertTrue((entry / "meta.json").exists())
+        self.assertFalse((journal / "x").exists())
+        self.assertFalse(os.path.lexists(journal / "link"))
+        self.assertTrue((victim / "keep").exists())
+        self.assertIn("2 fremde Einträge entfernt", result.stdout)
+
+    @unittest.skipUnless(IS_ROOT, "postinstall setzt Besitzer root:wheel (nur als root testbar)")
+    def test_postinstall_journal_ignores_planted_link(self):
+        # /Users/Shared ist für alle beschreibbar: Ein vorab angelegter Link darf root nicht umlenken.
+        self.make_driver()
+        shared = self.volume / "Users" / "Shared"
+        shared.mkdir(parents=True)
+        elsewhere = self.volume / "anderswo"
+        elsewhere.mkdir()
+        os.chmod(elsewhere, 0o700)
+        (shared / "LabelWerk").symlink_to(elsewhere)
+        script = render_package_script("driver", "postinstall", self.volume / "driver-postinstall")
+        result = run([str(script), "pkg", "/", str(self.volume)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((elsewhere / "Journal").exists())
+        self.assertEqual(mode(elsewhere), 0o700)
+        self.assertIn("kein Ordner", result.stdout)
+        # Ordner eines Benutzers (nicht root): unverändert.
+        (shared / "LabelWerk").unlink()
+        own = shared / "LabelWerk"
+        own.mkdir()
+        os.chown(own, 4321, 4321)
+        result = run([str(script), "pkg", "/", str(self.volume)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((own / "Journal").exists())
+        self.assertIn("gehört nicht root", result.stdout)
 
     def test_postinstall_fails_without_filters(self):
         script = render_package_script("driver", "postinstall", self.volume / "driver-postinstall")

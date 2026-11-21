@@ -207,7 +207,7 @@ struct PrintJobReprintChooser: View {
             session.setReprintSelection(selection)
         } label: {
             VStack(spacing: 3) {
-                LabelThumbnailView(key: "job-\(job.id.uuidString)-\(number)",
+                LabelThumbnailView(key: "job-\(job.id.uuidString)-\(number)@\(dotsPerMM)x\(width)x\(height)",
                                    placeholderAspect: CGFloat(max(1, width)) / CGFloat(max(1, height))) {
                     plan?.labelData(number).flatMap {
                         LabelThumbnail.render($0, dotsPerMM: dotsPerMM, widthDots: width, heightDots: height, maxSide: 120)

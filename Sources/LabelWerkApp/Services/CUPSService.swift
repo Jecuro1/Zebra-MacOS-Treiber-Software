@@ -18,7 +18,8 @@ import LabelWerkKit
 /// Farbbandende weiter –, mit „Bei Papier- oder Farbbandende anhalten und fortsetzen“ aus
 /// (`PrintSettings.resumeAfterError`) bzw. ohne installiertes Backend `socket://host:port`
 /// (``QueueDeviceURI``). ``apply(_:to:force:allowAdminPrompt:deviceURI:)`` stellt vorhandene
-/// Warteschlangen um.
+/// Warteschlangen um. „Danach zusätzlich nachdrucken“ (`PrintSettings.reprintAfterError`) geht als
+/// Warteschlangen-Standard `lwReprintAfterError-default=N` mit (bei 1 nicht gesetzt).
 enum CUPSService {
     static let lpadmin = "/usr/sbin/lpadmin"
     static let lpinfo = "/usr/sbin/lpinfo"
@@ -242,12 +243,15 @@ enum CUPSService {
                     "-D", printer.name, "-o", "printer-is-shared=false"]
         if !printer.location.isEmpty { args += ["-L", printer.location] }
         args += plan.arguments
-        // Abgeschaltetes Fortsetzen merken (bzw. die Markierung entfernen; -R nur bei vorhandenen).
-        var currentResume: String?
-        if exists { currentResume = await queueState(name).options[QueueDeviceURI.resumeOption] }
-        args += QueueDeviceURI.arguments(currentURI: nil, currentOption: currentResume,
+        // Abgeschaltetes Fortsetzen und die Zahl der Nachdrucke merken (bzw. die Markierung entfernen;
+        // -R nur bei vorhandenen).
+        var currentOptions: [String: String] = [:]
+        if exists { currentOptions = await queueState(name).options }
+        args += QueueDeviceURI.arguments(currentURI: nil, currentOption: currentOptions[QueueDeviceURI.resumeOption],
                                          resumeAfterError: printer.settings.resumeAfterError,
-                                         backendInstalled: isBackendInstalled)
+                                         backendInstalled: isBackendInstalled,
+                                         currentReprintOption: currentOptions[QueueDeviceURI.reprintOption],
+                                         reprintAfterError: printer.settings.reprintAfterError)
         try await runLpadmin(args)
         // Die Warteschlange steht; abweichende Optionen gleicht der automatische Abgleich bzw.
         // „Druckeinstellungen“ erneut ab.
@@ -319,7 +323,9 @@ enum CUPSService {
         args += plan.arguments
         args += QueueDeviceURI.arguments(currentURI: nil, currentOption: before.options[QueueDeviceURI.resumeOption],
                                          resumeAfterError: configuration.settings.resumeAfterError,
-                                         backendInstalled: isBackendInstalled)
+                                         backendInstalled: isBackendInstalled,
+                                         currentReprintOption: before.options[QueueDeviceURI.reprintOption],
+                                         reprintAfterError: configuration.settings.reprintAfterError)
         try await runLpadmin(args, allowAdminPrompt: allowAdminPrompt)
 
         let after = await queueState(queue)
@@ -385,7 +391,9 @@ enum CUPSService {
             args += plan.arguments
             args += QueueDeviceURI.arguments(currentURI: nil, currentOption: nil,
                                              resumeAfterError: configuration.settings.resumeAfterError,
-                                             backendInstalled: isBackendInstalled)
+                                             backendInstalled: isBackendInstalled,
+                                             currentReprintOption: nil,
+                                             reprintAfterError: configuration.settings.reprintAfterError)
             try await runLpadmin(args, allowAdminPrompt: allowAdminPrompt)
             let after = await queueState(name)
             if after.isKnown {
@@ -579,7 +587,8 @@ enum CUPSService {
     /// (``installQueue(for:queueName:stock:)``) stellt eine Warteschlange auf LabelWerk um.
     ///
     /// Geräte-URI: `socket://` ↔ `labelwerk://` nach `PrintSettings.resumeAfterError` (und installiertem
-    /// Backend), dazu der Warteschlangen-Standard `lwResumeOnError` (``QueueDeviceURI/arguments(currentURI:currentOption:resumeAfterError:backendInstalled:desiredURI:)``);
+    /// Backend), dazu die Warteschlangen-Standards `lwResumeOnError` und `lwReprintAfterError`
+    /// (`PrintSettings.reprintAfterError`, ``QueueDeviceURI/arguments(currentURI:currentOption:resumeAfterError:backendInstalled:desiredURI:currentReprintOption:reprintAfterError:)``);
     /// `deviceURI` gibt eine feste Soll-URI vor (Etikettentypen: die des Druckers). USB- und andere URIs
     /// bleiben.
     ///
@@ -595,7 +604,8 @@ enum CUPSService {
         let deviceArguments = QueueDeviceURI.arguments(
             currentURI: state.deviceURI, currentOption: state.options[QueueDeviceURI.resumeOption],
             resumeAfterError: configuration.settings.resumeAfterError, backendInstalled: isBackendInstalled,
-            desiredURI: deviceURI)
+            desiredURI: deviceURI, currentReprintOption: state.options[QueueDeviceURI.reprintOption],
+            reprintAfterError: configuration.settings.reprintAfterError)
         let applyOptions = force || !difference.isEmpty
         guard applyOptions || !deviceArguments.isEmpty else {
             return QueueApplyOutcome(changed: false, replacedPPD: false, approximated: plan.approximated,

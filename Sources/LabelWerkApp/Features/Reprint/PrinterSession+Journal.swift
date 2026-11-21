@@ -64,7 +64,10 @@ extension PrinterSession {
                        style: .warning)
             return false
         }
-        guard let data = job.reprintData(labels: labels) else {
+        // Mit „RTC aktualisieren“ stellt ein frisches ^ST die Uhr (die ^ST-Formate des ursprünglichen
+        // Auftrags entfallen beim Nachdruck – sie stellten die Uhr zurück).
+        let clock: Date? = saved.settings.rtcUpdate != nil ? Date() : nil
+        guard let data = job.reprintData(labels: labels, clock: clock) else {
             app?.toast(tr("Nachdrucken nicht möglich"), message: tr("Keine Etiketten gewählt."), style: .warning)
             return false
         }

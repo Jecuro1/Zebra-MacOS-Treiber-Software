@@ -112,6 +112,15 @@ public enum PacedJobWaitReason: String, Sendable, Hashable, Codable, CaseIterabl
         self == .mediaOut || self == .ribbonOut
     }
 
+    /// Papier- bzw. Farbbandende in `status` – unabhängig davon, ob ein anderer Grund (z. B. ein offener
+    /// Druckkopf beim Einlegen) als ``reason(for:)`` vorgeht. Wie das CUPS-Backend: Papier- oder
+    /// Farbband-Merker gesetzt ⇒ Nachdruck, Kopf offen allein ⇒ keiner. `nil` = keins von beiden.
+    public static func reprintFault(in status: HostStatus) -> PacedJobWaitReason? {
+        if status.paperOut { return .mediaOut }
+        if status.ribbonOut && status.thermalTransferMode { return .ribbonOut }
+        return nil
+    }
+
     /// Grund aus `~HS`, der den Druck aufhält (`nil` = nichts hält ihn auf). Reihenfolge: Kopf offen,
     /// Papier leer, Farbband leer (nur Thermotransfer), Pause, Übertemperatur. Ein Etikett, das im
     /// Spendemodus auf Entnahme wartet, zählt nur, solange noch Etiketten ausstehen.
@@ -152,8 +161,9 @@ public enum PacedJobEvent: Sendable, Hashable {
     case uncertain(labels: Int)
     /// Papier oder Farbband leer: Nach dem Beheben werden diese zuletzt fertigen Etiketten (1-basiert,
     /// aufsteigend) zusätzlich nachgedruckt, sofern ``PacedJobReprintChoice`` nichts anderes wählt.
-    /// `completed`: bis zum Fehler fertige Etiketten (alle davon sind wählbar).
-    case reprintSuggested(labels: [Int], completed: Int)
+    /// `completed`: bis zum Fehler fertige Etiketten (alle davon sind wählbar); `cause`: ``PacedJobWaitReason/mediaOut``
+    /// oder ``PacedJobWaitReason/ribbonOut`` (für „Nachdruck 1 von 2 (Farbbandende)“).
+    case reprintSuggested(labels: [Int], completed: Int, cause: PacedJobWaitReason)
     /// Nachdruck läuft: Etikett `index` von `total` (z. B. „Nachdruck 1 von 2 (Etikettenende)“).
     case reprinting(index: Int, total: Int)
     /// Nachdruck fertig (`labels` Etiketten); danach geht der Auftrag weiter.
@@ -239,16 +249,19 @@ public final class PacedJobReprintChoice: @unchecked Sendable {
 /// 5. Abbruch (Task-Abbruch): `~JA` leert den Drucker, dann `CancellationError`.
 /// 6. Vor dem ersten Etikett (Drucker bereit) speichert `~DG` den Neustart-Merker `R:LWAPP.GRF`
 ///    (1 Byte im RAM, beim Aus- und Einschalten weg); `^HW` prüft einmal, ob der Drucker ihn meldet.
-/// 7. Papier/Farbband leer (``PacedJobWaitReason/triggersReprint``) mit
-///    ``PacedJobOptions/reprintAfterError`` > 0: Beim ersten solchen Status eines Fehlers (bis zum
-///    nächsten störungsfreien Status) ``PacedJobEvent/reprintSuggested(labels:completed:)`` mit den
-///    letzten `n` fertigen Etiketten; beim Beheben gilt die Auswahl aus ``PacedJobReprintChoice`` bzw.
-///    der Vorschlag. Sobald das Format im Drucker fertig ist (das unterbrochene Etikett druckt der
-///    Drucker selbst erneut), gehen diese Etiketten in Auftragsreihenfolge als ihre Formate mit Menge 1
-///    hinaus (``PacedJobPlan/reprintSegments(forLabels:)``, ``PacedJobEvent/reprinting(index:total:)``),
-///    danach der Rest des Auftrags. Endet die Rolle genau mit dem letzten Etikett, wartet der Sender wie
-///    sonst auf das Einlegen und druckt dann nach. Nie nach einem Abbruch, nie für einen offenen
-///    Druckkopf allein, je Fehler einmal.
+/// 7. Papier/Farbband leer (Merker im Status, ``PacedJobWaitReason/reprintFault(in:)`` – auch wenn
+///    zugleich der Druckkopf offen ist) mit ``PacedJobOptions/reprintAfterError`` > 0: Beim ersten
+///    solchen Status eines Fehlers (bis zum nächsten störungsfreien Status)
+///    ``PacedJobEvent/reprintSuggested(labels:completed:cause:)`` mit den letzten `n` fertigen
+///    Etiketten; beim Beheben gilt die Auswahl aus ``PacedJobReprintChoice`` bzw. der Vorschlag. Sobald
+///    der Drucker für das nächste Format bereit ist (das unterbrochene Etikett druckt er wegen `^JZY`
+///    selbst erneut), gehen diese Etiketten in Auftragsreihenfolge als ihre druckenden Formate mit
+///    Menge 1 hinaus (``PacedJobPlan/reprintSegments(forLabels:)``,
+///    ``PacedJobEvent/reprinting(index:total:)``), danach der Rest des Auftrags – auch wenn der Sensor
+///    das Papierende erst nach dem fertigen Format meldet. Nach dem letzten Format wartet der Sender
+///    auf eine zweite störungsfreie Statusmeldung: Endet die Rolle genau mit dem letzten Etikett,
+///    wartet er wie sonst auf das Einlegen und druckt dann nach. Nie nach einem Abbruch, nie für einen
+///    offenen Druckkopf allein, je Fehler einmal.
 /// 8. Verbindungsabbruch: neu verbinden (mit wachsendem Abstand). Meldet der Drucker danach Formate
 ///    oder Restetiketten, hat er seinen Puffer behalten: weiter warten. Ist er leer, entscheidet der
 ///    Merker (sobald der Drucker bereit ist): vorhanden → er hat inzwischen fertig gedruckt, nichts
@@ -276,9 +289,9 @@ public struct PacedJobSender: Sendable {
     ///   - onEvent: Fortschritt und Wartegründe (beliebiger Thread).
     /// - Throws: `CancellationError` nach einem Abbruch (`~JA` ist dann gesendet), Verbindungsfehler
     ///   nach erfolglosen Wiederverbindungsversuchen.
-    @discardableResult
     ///   - reprintChoice: Auswahl der nachzudruckenden Etiketten während eines Fehlers (`nil` = immer
     ///     ``PacedJobOptions/reprintAfterError``).
+    @discardableResult
     public func send(_ data: Data, characters: ControlCharacters? = nil, cancelPrefixLength: Int? = nil,
                      delayMilliseconds: Int = 0, reprintChoice: PacedJobReprintChoice? = nil,
                      onEvent: @escaping @Sendable (PacedJobEvent) -> Void = { _ in }) async throws -> PacedJobResult {
@@ -410,10 +423,26 @@ private final class PacedJobRun {
             }
             report(0)
             for segment in plan.segments {
-                try await printSegment(segment) { [unowned self] in self.report(self.completed + $0) }
+                // Nachdrucke „sobald der Drucker für das nächste Format bereit ist“ (wie das Backend):
+                // auch ein Papierende, das der Sensor erst nach dem fertigen Format meldet, wird so vor
+                // dem nächsten Etikett nachgedruckt.
+                repeat {
+                    try await awaitIdleBeforeSending()
+                } while try await printPendingReprints()
+                try await printSegment(segment, checkIdle: false) { [unowned self] in self.report(self.completed + $0) }
                 completed += segment.quantity
                 report(completed)
-                try await printPendingReprints()
+            }
+            if options.reprintAfterError > 0 || reprintChoice != nil {
+                // Endet die Rolle mit dem letzten Etikett, meldet mancher Drucker „Papier leer“ erst
+                // eine Abfrage später: zwei störungsfreie Statusmeldungen im Abstand `pollInterval`
+                // abwarten (die erste lieferte das letzte Format), dann ggf. nachdrucken.
+                repeat {
+                    try await Task.sleep(for: options.pollInterval)
+                    try await awaitIdleBeforeSending()
+                } while try await printPendingReprints()
+            } else {
+                _ = try await printPendingReprints()
             }
             if !plan.epilogue.isEmpty {
                 let epilogue = plan.epilogue
@@ -439,8 +468,12 @@ private final class PacedJobRun {
     /// Druckt die nach einem behobenen Fehler gewählten Etiketten erneut (in Auftragsreihenfolge, je
     /// Etikett sein Format mit Menge 1). Tritt währenddessen ein neuer Fehler auf, folgt dessen Auswahl
     /// danach.
-    private func printPendingReprints() async throws {
+    /// - Returns: `true`, wenn etwas nachgedruckt (bzw. eine Auswahl abgearbeitet) wurde.
+    @discardableResult
+    private func printPendingReprints() async throws -> Bool {
+        var didWork = false
         while !pendingReprint.isEmpty {
+            didWork = true
             let labels = pendingReprint
             pendingReprint = []
             let segments = plan.reprintSegments(forLabels: labels)
@@ -456,6 +489,7 @@ private final class PacedJobRun {
             reprinted += count
             onEvent(.reprinted(labels: count))
         }
+        return didWork
     }
 
     /// Meldet „Nachdruck k von n“ für das Etikett nach `finished` fertigen Nachdrucken.
@@ -466,14 +500,16 @@ private final class PacedJobRun {
         onEvent(.reprinting(index: index, total: count))
     }
 
-    /// Ein Status mit Wartegrund: Beginnt damit ein Papier-/Farbbandfehler, den Nachdruck vorschlagen.
+    /// Ein Status mit Papier-/Farbbandende (``PacedJobWaitReason/reprintFault(in:)``): Beginnt damit ein
+    /// solcher Fehler, den Nachdruck vorschlagen.
     private func noteFault(_ reason: PacedJobWaitReason) {
         guard reason.triggersReprint, reprintEpisode == nil else { return }
         guard options.reprintAfterError > 0 || reprintChoice != nil else { return }
         let done = min(total, max(reported, completed))
         reprintEpisode = done
         reprintChoice?.select(nil)
-        onEvent(.reprintSuggested(labels: PacedJobPlan.lastLabels(options.reprintAfterError, of: done), completed: done))
+        onEvent(.reprintSuggested(labels: PacedJobPlan.lastLabels(options.reprintAfterError, of: done), completed: done,
+                                  cause: reason))
     }
 
     /// Störungsfreier Status: Ein Papier-/Farbbandfehler ist behoben – Auswahl übernehmen.
@@ -498,9 +534,13 @@ private final class PacedJobRun {
 
     /// Wartet auf einen leeren, bereiten Drucker, sendet das Segment und wartet, bis es gedruckt ist.
     /// `progress` erhält die fertigen Exemplare dieses Segments (für Fortschritt bzw. Nachdruck).
-    private func printSegment(_ segment: PacedJobPlan.Segment, progress: @escaping (Int) -> Void) async throws {
+    /// `checkIdle == false`: Der Aufrufer hat gerade einen leeren, bereiten Drucker festgestellt.
+    private func printSegment(_ segment: PacedJobPlan.Segment, checkIdle: Bool = true,
+                              progress: @escaping (Int) -> Void) async throws {
         // Erst senden, wenn der Drucker nichts anderes mehr druckt (auch keinen fremden Auftrag).
-        try await awaitIdleBeforeSending()
+        if checkIdle {
+            try await awaitIdleBeforeSending()
+        }
         try await armIfNeeded()
         var pending: PacedJobPlan.Segment? = segment
         var inPrinter = segment
@@ -677,9 +717,13 @@ private final class PacedJobRun {
                     ? max(0, segment.quantity - min(segment.quantity, status.labelsRemainingInBatch)) : 0
                 progress?(alreadyPrinted + printedHere)
             }
+            if let fault = PacedJobWaitReason.reprintFault(in: status) {
+                // Aus den Merkern, nicht aus dem vorrangigen Grund: Kopf offen und Papier leer
+                // zugleich (Rolle wird gerade gewechselt) löst den Nachdruck ebenfalls aus.
+                noteFault(fault)
+            }
             if let reason = PacedJobWaitReason.reason(for: status) {
                 if reason.isFault { faultSeen = true }
-                noteFault(reason)
                 if reason == .paused, faultSeen, options.resumeAfterRecovery {
                     // Fehler behoben, der Drucker steht aber noch pausiert: fortsetzen.
                     faultSeen = false

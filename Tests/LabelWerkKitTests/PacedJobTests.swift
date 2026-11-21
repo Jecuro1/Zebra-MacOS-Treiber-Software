@@ -646,7 +646,7 @@ struct PacedJobReprintTests {
         #expect(result.printed == 8)
         #expect(result.reprinted == 1)
         #expect(await printer.printLog == ["L1", "L2", "L3", "L4", "L3", "L5", "L6", "L7", "L8"])
-        #expect(log.reprintEvents == [.reprintSuggested(labels: [3], completed: 3), .reprinting(index: 1, total: 1),
+        #expect(log.reprintEvents == [.reprintSuggested(labels: [3], completed: 3, cause: .mediaOut), .reprinting(index: 1, total: 1),
                                       .reprinted(labels: 1)])
         // Der Fortschritt des Auftrags zählt Nachdrucke nicht mit.
         #expect(log.progress == Array(0...8))
@@ -738,7 +738,7 @@ struct PacedJobReprintTests {
                 try await PacedJobSender(client: client, options: options(reprint: 1))
                     .send(Paced.job(labels: 5), reprintChoice: choice, onEvent: log.append)
             }
-            #expect(await Paced.waitUntil { log.contains { $0 == .reprintSuggested(labels: [3], completed: 3) } })
+            #expect(await Paced.waitUntil { log.contains { $0 == .reprintSuggested(labels: [3], completed: 3, cause: .mediaOut) } })
             choice.select(selection)
             await printer.setMediaOut(false)
             let result = try await job.value
@@ -780,5 +780,162 @@ struct PacedJobReprintTests {
         try await Task.sleep(for: .milliseconds(80))
         #expect(await printer.printLog == ["L1", "L2"])
         #expect(!log.contains { if case .reprinting = $0 { return true } else { return false } })
+    }
+}
+
+// MARK: - Nachdruck: Sensor verzögert, Kopf offen + Papier leer, Uhr
+
+/// Löst „Papier leer“ aus, sobald nach `afterLog` gedruckten Etiketten bei leerem Drucker die `nth`-te
+/// `~HS`-Abfrage gesendet wird – der Sensor meldet das Rollenende erst nach dem fertigen Etikett.
+private actor SensorDelayConnection: PrinterConnection {
+    nonisolated let descriptor: ConnectionDescriptor
+    let printer: VirtualPrinter
+    let afterLog: Int
+    let nth: Int
+    private var seen = 0
+    private(set) var fired = false
+
+    init(printer: VirtualPrinter, afterLog: Int, nth: Int) {
+        self.printer = printer
+        self.descriptor = printer.descriptor
+        self.afterLog = afterLog
+        self.nth = nth
+    }
+
+    var isOpen: Bool { true }
+    func open() async throws { try await printer.open() }
+    func close() async {}
+
+    func write(_ data: Data) async throws {
+        if !fired, String(decoding: data, as: UTF8.self).contains("~HS"), await printer.printLog.count == afterLog,
+           await !printer.isPrintingOrQueued {
+            seen += 1
+            if seen == nth {
+                fired = true
+                await printer.setMediaOut(true)
+                let printer = self.printer
+                Task {
+                    try? await Task.sleep(for: .milliseconds(80))
+                    await printer.setMediaOut(false)
+                }
+            }
+        }
+        try await printer.write(data)
+    }
+
+    func read(timeout: Duration) async throws -> Data { try await printer.read(timeout: timeout) }
+}
+
+@Suite("PacedJobSender – Nachdruck wie das CUPS-Backend")
+struct PacedJobReprintParityTests {
+
+    private func options(reprint: Int) -> PacedJobOptions {
+        var options = Paced.options
+        options.reprintAfterError = reprint
+        return options
+    }
+
+    @Test("Papier leer erst nach dem fertigen Format gemeldet: Nachdruck vor dem nächsten Etikett")
+    func delayedSensorReprintsBeforeNextLabel() async throws {
+        let printer = try await KitTestSupport.makePrinter()
+        await printer.setPrintTime(.milliseconds(8))
+        await printer.setReprintAfterError(false)
+        let connection = SensorDelayConnection(printer: printer, afterLog: 2, nth: 2)
+        let client = await KitTestSupport.makeClient(connection)
+        let result = try await PacedJobSender(client: client, options: options(reprint: 1))
+            .send(Paced.job(labels: 4), onEvent: { _ in })
+        #expect(await connection.fired)
+        #expect(result.reprinted == 1)
+        #expect(await printer.printLog == ["L1", "L2", "L2", "L3", "L4"])
+    }
+
+    @Test("Rolle endet mit dem letzten Etikett, Sensor meldet es eine Abfrage später: trotzdem nachdrucken")
+    func delayedSensorAtEnd() async throws {
+        let printer = try await KitTestSupport.makePrinter()
+        await printer.setPrintTime(.milliseconds(8))
+        await printer.setReprintAfterError(false)
+        let connection = SensorDelayConnection(printer: printer, afterLog: 3, nth: 2)
+        let client = await KitTestSupport.makeClient(connection)
+        let log = EventLog()
+        let result = try await PacedJobSender(client: client, options: options(reprint: 1))
+            .send(Paced.job(labels: 3), onEvent: log.append)
+        #expect(await connection.fired)
+        #expect(result.reprinted == 1)
+        #expect(await printer.printLog == ["L1", "L2", "L3", "L3"])
+        #expect(log.events.last == .finished(printed: 3, total: 3))
+    }
+
+    @Test("Kopf offen und Papier leer zugleich: Nachdruck (Merker zählen, nicht der vorrangige Grund)")
+    func headOpenWithMediaOut() async throws {
+        let printer = try await KitTestSupport.makePrinter()
+        await printer.setPrintTime(.milliseconds(30))
+        await printer.setReprintAfterError(false)
+        let client = await KitTestSupport.makeClient(printer)
+        let log = EventLog()
+        let job = Task {
+            try await PacedJobSender(client: client, options: options(reprint: 1))
+                .send(Paced.job(labels: 5), onEvent: log.append)
+        }
+        #expect(await Paced.waitUntil { (log.progress.last ?? 0) >= 2 })
+        await printer.setHeadOpen(true)
+        await printer.setMediaOut(true)
+        #expect(await Paced.waitUntil { log.waitReasons.contains(.headOpen) })
+        await printer.setMediaOut(false)
+        await printer.setHeadOpen(false)
+        let result = try await job.value
+        #expect(result.reprinted == 1)
+        #expect(log.reprintEvents.contains {
+            if case .reprintSuggested(_, _, let cause) = $0 { return cause == .mediaOut } else { return false }
+        })
+        #expect(await printer.printLog.count == 6)
+    }
+
+    @Test("Merker: Papier/Farbband (Thermotransfer) ⇒ Nachdruck, Kopf offen allein ⇒ keiner")
+    func reprintFaultFlags() throws {
+        var status = HostStatus()
+        #expect(PacedJobWaitReason.reprintFault(in: status) == nil)
+        status.headOpen = true
+        #expect(PacedJobWaitReason.reprintFault(in: status) == nil)
+        status.paperOut = true
+        #expect(PacedJobWaitReason.reason(for: status) == .headOpen)
+        #expect(PacedJobWaitReason.reprintFault(in: status) == .mediaOut)
+        status.paperOut = false
+        status.ribbonOut = true
+        status.thermalTransferMode = false
+        #expect(PacedJobWaitReason.reprintFault(in: status) == nil)
+        status.thermalTransferMode = true
+        #expect(PacedJobWaitReason.reprintFault(in: status) == .ribbonOut)
+    }
+
+    @Test("Nachdruck ohne veraltete Uhrzeit (^ST) und ohne Kalibrieren (~JC)")
+    func reprintWithoutStaleClock() throws {
+        let zpl = "~JA\n~SD15\n~JC\n^XA^ST11,13,2026,10,00,00,M^XZ\n^XA^FO10,10^FDL1^FS^PQ2^XZ\n"
+            + "^XA^ST11,13,2026,10,00,01,M^XZ\n^XA^FO10,10^FDL2^FS^XZ\n"
+        let plan = PacedJobPlan.split(Data(zpl.utf8))
+        let segments = plan.reprintSegments(forLabels: [2, 3])
+        let texts = segments.map { String(decoding: $0.data, as: UTF8.self) }
+        #expect(texts == ["^XA^FO10,10^FDL1^FS^PQ1^XZ", "\n^XA^FO10,10^FDL2^FS^XZ"])
+        // ^PQ-Bereich nach dem Entfernen weiterhin richtig.
+        let regrouped = PacedJobPlan.split(Data(("^XA^ST11,13,2026,10,00,00,M^XZ\n^XA^FDX^FS^PQ5^XZ").utf8))
+            .reprintSegments(forLabels: [2, 3, 4])
+        #expect(regrouped.map { String(decoding: $0.data, as: UTF8.self) } == ["^XA^FDX^FS^PQ3^XZ"])
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lwjournal-st-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entry = try #require(try PrintJournal.record(Data(zpl.utf8), queue: "Q", jobID: "1", title: "t", user: "u",
+                                                         printerURI: "x", printed: 3, status: .completed, in: root))
+        let job = try entry.load()
+        let data = String(decoding: try #require(job.reprintData(labels: [3])), as: UTF8.self)
+        #expect(!data.contains("^ST"))
+        #expect(!data.contains("~JC"))
+        #expect(!data.contains("~JA"))
+        #expect(data.contains("~SD15"))
+        #expect(data.contains("^FDL2^FS"))
+        // Mit „RTC aktualisieren“: frische Uhrzeit vorab.
+        let utc = TimeZone(identifier: "UTC")!
+        let fresh = String(decoding: try #require(job.reprintData(labels: [3], clock: Date(timeIntervalSince1970: 0),
+                                                                   timeZone: utc)), as: UTF8.self)
+        #expect(fresh.contains("^XA^ST01,01,1970,00,00,00,M^XZ\n"))
+        #expect(fresh.components(separatedBy: "^ST").count == 2)
     }
 }

@@ -12,6 +12,7 @@ struct LwctlInstallTests {
     private struct Plan: Decodable {
         var printer: String
         var deviceURI: String
+        var reprintAfterError: Int?
         var queue: String
         var description: String
         var location: String?
@@ -903,5 +904,68 @@ struct LwctlInstallTests {
         let both = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--resume", "--no-resume",
                                             "--ppd-dir", ppds.path, "--dry-run"], environment: environment)
         #expect(both.status != 0)
+    }
+
+    @Test("--reprint setzt lwReprintAfterError-default (1 = entfernen); ohne Angabe bleibt der Wert der Warteschlange")
+    func reprintAfterErrorQueueDefault() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ppds = try ppdDirectory(["LabelWerk-zd421t-203dpi.ppd.gz"])
+        defer { try? FileManager.default.removeItem(at: ppds) }
+        let backend = directory.appendingPathComponent("labelwerk")
+        try Data("#!/bin/sh\n".utf8).write(to: backend)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: backend.path)
+        var (environment, _) = try stubCUPS(in: directory, queues: [
+            StubQueue(name: "Drei", uri: "labelwerk://192.0.2.31:9100", makeAndModel: "Zebra ZD421t (203 dpi) - LabelWerk",
+                      info: "Drei", ppd: labelWerkQueuePPD, options: "lwReprintAfterError=3"),
+        ])
+        environment["LWCTL_CUPS_BACKEND"] = backend.path
+        func plan(_ extra: [String], printer: String = offlinePrinter) async throws -> Plan {
+            let result = try await CLIRunner.run(["install", "-p", printer, "-m", "zd421t", "--ppd-dir", ppds.path]
+                                                 + extra + ["--dry-run", "--json"], environment: environment)
+            #expect(result.status == 0, "\(result.errors)")
+            return try decodePlan(result)
+        }
+        func line(_ plan: Plan) -> String { plan.commands.first?.joined(separator: " ") ?? "" }
+
+        // Neu ohne Angabe: Standard 1, nichts gesetzt.
+        let fresh = try await plan([])
+        #expect(fresh.reprintAfterError == 1)
+        #expect(!line(fresh).contains("lwReprintAfterError"))
+        // Neu mit --reprint 2 bzw. 0: gesetzt (kein -R bei neuen Warteschlangen).
+        let two = try await plan(["--reprint", "2"])
+        #expect(two.reprintAfterError == 2)
+        #expect(two.commands.first.map { Array($0.suffix(2)) } == ["-o", "lwReprintAfterError-default=2"])
+        let none = try await plan(["--reprint", "0"])
+        #expect(line(none).hasSuffix("-o lwReprintAfterError-default=0"))
+        let one = try await plan(["--reprint", "1"])
+        #expect(!line(one).contains("lwReprintAfterError"))
+
+        // Vorhandene Warteschlange mit 3: bleibt ohne Angabe (kein -o/-R), --reprint 1 entfernt, gleicher Wert: nichts.
+        let kept = try await plan(["--name", "Drei"], printer: "tcp://192.0.2.31")
+        #expect(kept.existing)
+        #expect(kept.reprintAfterError == 3)
+        #expect(!line(kept).contains("lwReprintAfterError"))
+        let reset = try await plan(["--name", "Drei", "--reprint", "1"], printer: "tcp://192.0.2.31")
+        #expect(reset.commands.first.map { Array($0.suffix(2)) } == ["-R", "lwReprintAfterError-default"])
+        let same = try await plan(["--name", "Drei", "--reprint", "3"], printer: "tcp://192.0.2.31")
+        #expect(!line(same).contains("lwReprintAfterError"))
+        let five = try await plan(["--name", "Drei", "--reprint", "5"], printer: "tcp://192.0.2.31")
+        #expect(line(five).hasSuffix("-o lwReprintAfterError-default=5"))
+
+        // Mit --no-resume: gespeichert, aber mit Hinweis.
+        let off = try await plan(["--no-resume", "--reprint", "2"])
+        #expect(line(off).contains("lwReprintAfterError-default=2"))
+        #expect(off.warnings.contains { $0.contains("--reprint") })
+
+        // Ungültig: Bereich 0…99, ganze Zahl.
+        for value in ["100", "-1", "zwei"] {
+            let bad = try await CLIRunner.run(["install", "-p", offlinePrinter, "-m", "zd421t", "--ppd-dir", ppds.path,
+                                               "--reprint", value, "--dry-run"], environment: environment)
+            #expect(bad.status == 2, "\(value): \(bad.errors)")
+        }
+        let help = try await CLIRunner.run(["help", "install"])
+        #expect(help.output.contains("--reprint <0-99>"))
+        #expect(help.output.contains("/Users/Shared/LabelWerk/Journal"))
     }
 }

@@ -11,6 +11,16 @@
 #     dann als unprivilegierten Benutzer _lp (0700 hieße root – nicht nötig, es öffnet nur eine
 #     TCP-Verbindung zum Drucker).
 #  2. Quarantäne-Attribute entfernen.
+#  2b. Druckjournal /Users/Shared/LabelWerk/Journal anlegen (ARCHITECTURE.md §7b „Druckjournal“):
+#     Das Backend legt darin je Warteschlange die letzten Aufträge für „Nachdrucken“ ab. Es läuft
+#     als _lp: Der Ordner gehört deshalb _lp (0755) – nur das Backend schreibt dort, kein anderer
+#     Benutzer kann Einträge unterschieben (die App druckt sie auf Wunsch erneut). Ein früheres
+#     1777 wird korrigiert; was dann nicht _lp gehört (von anderen Benutzern angelegt), wird
+#     entfernt. Das Backend legt darunter Ordner 0755 und Dateien 0644 an, die App liest sie als
+#     beliebiger Benutzer. /Users/Shared/LabelWerk (root:wheel 0755) wird nur angefasst, wenn es ein echter
+#     Ordner von root ist – /Users/Shared ist für alle beschreibbar, ein dort vorab angelegter Link
+#     darf root nicht umlenken. Fehler hier brechen die Installation nie ab (ohne Journal druckt
+#     das Backend trotzdem, es protokolliert das nur).
 #  3. Nur auf dem Startvolume: cupsd neu starten, damit Filter und PPDs sofort bekannt sind, und
 #     vorhandene LabelWerk-Warteschlangen auf die neuen PPDs aktualisieren. „lpadmin -P“ übernimmt
 #     die Standardwerte der neuen PPD; die bisher gewählten Standardoptionen der Warteschlange
@@ -90,6 +100,67 @@ if command -v xattr >/dev/null 2>&1; then
         xattr -d com.apple.quarantine "${BACKEND}" 2>/dev/null || true
     fi
 fi
+
+# --- 2b. Druckjournal ------------------------------------------------------------------------
+# Gehört der Pfad root (uid 0)? find statt stat: gleiche Aufrufform unter macOS und Linux (Tests).
+owned_by_root() {
+    [[ -n "$(find "$1" -maxdepth 0 -user 0 2>/dev/null)" ]]
+}
+
+prepare_journal() {
+    local shared="${TARGET}/Users/Shared"
+    local base="${shared}/LabelWerk"
+    local journal="${base}/Journal"
+    if [[ ! -d "${shared}" || -L "${shared}" ]]; then
+        log "Kein Ordner ${shared} – Druckjournal nicht angelegt."
+        return 0
+    fi
+    if [[ -L "${base}" ]] || [[ -e "${base}" && ! -d "${base}" ]]; then
+        log "${base} ist kein Ordner – Druckjournal nicht angelegt."
+        return 0
+    fi
+    if [[ ! -d "${base}" ]] && ! mkdir -m 755 "${base}" 2>/dev/null; then
+        log "${base} konnte nicht angelegt werden – Druckjournal nicht angelegt."
+        return 0
+    fi
+    if ! owned_by_root "${base}"; then
+        log "${base} gehört nicht root – Druckjournal unverändert."
+        return 0
+    fi
+    chmod 755 "${base}" 2>/dev/null || true
+    if [[ -L "${journal}" ]] || [[ -e "${journal}" && ! -d "${journal}" ]]; then
+        log "${journal} ist kein Ordner – Druckjournal nicht angelegt."
+        return 0
+    fi
+    if [[ ! -d "${journal}" ]] && ! mkdir "${journal}" 2>/dev/null; then
+        log "${journal} konnte nicht angelegt werden."
+        return 0
+    fi
+    # Besitzer _lp (darunter läuft das Backend; unter macOS uid/gid 26).
+    local lp_uid lp_gid
+    lp_uid="$(id -u _lp 2>/dev/null || true)"
+    lp_gid="$(id -g _lp 2>/dev/null || true)"
+    [[ "${lp_uid}" =~ ^[0-9]+$ ]] || lp_uid=26
+    [[ "${lp_gid}" =~ ^[0-9]+$ ]] || lp_gid=26
+    if ! chown -h "${lp_uid}:${lp_gid}" "${journal}" 2>/dev/null || ! chmod 755 "${journal}" 2>/dev/null; then
+        log "Rechte von ${journal} konnten nicht gesetzt werden."
+        return 0
+    fi
+    # Erst jetzt (niemand außer _lp kann mehr anlegen oder umbenennen): Einträge, die nicht vom
+    # Backend stammen (früher 1777 – von anderen Benutzern angelegte Ordner oder Links), entfernen.
+    # find folgt keinen Links, rm -rf auch nicht.
+    local foreign
+    foreign="$(find "${journal}" -mindepth 1 -maxdepth 1 ! -user "${lp_uid}" 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "${foreign}" != "0" ]]; then
+        find "${journal}" -mindepth 1 -maxdepth 1 ! -user "${lp_uid}" -exec rm -rf {} + 2>/dev/null || true
+        log "Druckjournal: ${foreign} fremde Einträge entfernt."
+    fi
+    # Einträge des Backends (Besitzer _lp) bleiben, wie sie sind.
+    log "Druckjournal ${journal#"${TARGET}"} bereit (_lp, 0755)."
+    return 0
+}
+
+prepare_journal || true
 
 # --- 3. CUPS ---------------------------------------------------------------------------------
 if [[ -n "${TARGET}" ]]; then

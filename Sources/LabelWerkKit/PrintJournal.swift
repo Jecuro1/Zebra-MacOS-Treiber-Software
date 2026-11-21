@@ -1,5 +1,10 @@
 import Foundation
 import LabelWerkCore
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 // MARK: - Druckjournal („Nachdrucken“)
 //
@@ -13,9 +18,14 @@ import LabelWerkCore
 // `meta.json`: {"version":1,"queue","jobId","title","user","date" (ISO 8601),"printerURI",
 // "labels":[{"index":1,"offset":N,"length":N,"quantity":N}],"prologueLength":N,"printed":N,
 // "status":"completed|cancelled|failed"} – `offset`/`length` adressieren das Format in `job.zpl`,
-// `quantity` ist seine `^PQ`-Menge; optional `"reprinted"` (Nachdrucke nach Papier-/Farbbandende). Die
+// `quantity` ist seine `^PQ`-Menge; optional `"reprinted"` (Nachdrucke nach Papier-/Farbbandende) und
+// `"copies"` (Kopien des Auftrags; `job.zpl` enthält nur die erste, `printed` zählt über alle). Die
 // App schreibt zusätzlich `"printerID"` (UUID des Druckers). Ordner mit Punkt am Anfang (unfertige
-// Einträge des Backends) werden übergangen.
+// Einträge des Backends) werden übergangen. Den Ordnernamen der Warteschlange bildet das Backend mit
+// `lwb_journal_safe_name` (``PrintJournal/systemDirectoryComponent(forQueue:)``), die App strenger
+// (``PrintJournal/directoryComponent(forQueue:)``). Im System-Journal zählen nur Ordner und Einträge,
+// die keine symbolischen Links sind und root, `_lp` oder dem eigenen Benutzer gehören, und nur
+// Einträge, deren `queue` zum Ordner passt.
 // Aufbewahrung: je Warteschlange die neuesten 30 Aufträge und höchstens 50 MB; Aufträge über 20 MB
 // werden nicht aufgenommen (ARCHITECTURE.md §7b „Druckjournal“).
 
@@ -67,16 +77,21 @@ public struct PrintJournalEntry: Sendable, Hashable, Identifiable {
     public var printerID: UUID?
     public var formats: [Format]
     public var prologueLength: Int
-    /// Gedruckte Etiketten (bei Abbruch/Fehler weniger als ``totalLabels``).
+    /// Gedruckte Etiketten über alle Kopien (bei Abbruch/Fehler weniger als ``totalPrintedLabels``).
     public var printed: Int
+    /// Kopien des Auftrags (mindestens 1; `job.zpl` enthält nur die erste).
+    public var copies: Int = 1
     /// Nachdrucke nach Papier-/Farbbandende (zählen nicht zu ``printed``).
     public var reprinted: Int
     public var status: Status
 
     public var id: String { directory.standardizedFileURL.path }
 
-    /// Etiketten des Auftrags (Summe der Mengen).
+    /// Etiketten des Auftrags (Summe der Mengen, eine Kopie).
     public var totalLabels: Int { formats.reduce(0) { $0 + max(1, $1.quantity) } }
+
+    /// Etiketten aller Kopien (``totalLabels`` × ``copies``) – die Bezugsgröße von ``printed``.
+    public var totalPrintedLabels: Int { totalLabels * max(1, copies) }
 
     /// Lädt `job.zpl` und zerlegt den Auftrag für Vorschau und Nachdruck.
     public func load() throws -> PrintJournalJob {
@@ -99,8 +114,18 @@ public struct PrintJournalJob: Sendable {
         self.plan = Self.plan(for: entry, data: data)
     }
 
-    /// Etiketten (Summe der Mengen).
+    /// Etiketten (Summe der Mengen, eine Kopie).
     public var totalLabels: Int { plan.totalLabels }
+
+    /// Zuletzt tatsächlich gedrucktes Etikett (1-basiert, in `job.zpl`): bei mehreren Kopien zählt
+    /// ``PrintJournalEntry/printed`` über alle, das Etikett liegt dann in der letzten begonnenen Kopie.
+    /// Ohne Angabe (0) das letzte des Auftrags; `nil` ohne Etiketten.
+    public var lastPrintedLabel: Int? {
+        let total = totalLabels
+        guard total > 0 else { return nil }
+        guard entry.printed > 0 else { return total }
+        return (entry.printed - 1) % total + 1
+    }
 
     /// Ein Etikett (1-basiert) zum Anzeigen: Kopf + sein Format mit Menge 1.
     public func labelData(_ number: Int) -> Data? { plan.labelData(number) }
@@ -117,13 +142,23 @@ public struct PrintJournalJob: Sendable {
     }
 
     /// Auftrag zum Nachdrucken der Etiketten `labels` (1-basiert): Kopf ohne führende „Aufträge
-    /// abbrechen“-Zeile (`~JA` würde einen laufenden Auftrag löschen) und die Formate mit passender
-    /// Menge (``PacedJobPlan/reprintSegments(forLabels:)``). `nil`, wenn nichts Gültiges gewählt ist.
-    public func reprintData(labels: [Int]) -> Data? {
+    /// abbrechen“-Zeile (`~JA` würde einen laufenden Auftrag löschen), ohne Kalibrieren/Neustart
+    /// (`~JC`, `~JR`) und ohne Formate, die die Uhr auf die Zeit des ursprünglichen Drucks stellen
+    /// (`^ST`); dann die Formate mit passender Menge (``PacedJobPlan/reprintSegments(forLabels:)``).
+    /// Mit `clock` stellt ein frisches `^XA^ST…^XZ` (Ortszeit in `timeZone`) vorab die Uhr – für Drucker,
+    /// deren Einstellung „RTC aktualisieren“ gesetzt ist. `nil`, wenn nichts Gültiges gewählt ist.
+    public func reprintData(labels: [Int], clock: Date? = nil, timeZone: TimeZone = .current) -> Data? {
         let segments = plan.reprintSegments(forLabels: labels)
         guard !segments.isEmpty else { return nil }
         var head = plan.prologue
         if let cancel = PrinterClient.cancelPrefixLength(of: head) { head = head.dropFirst(cancel) }
+        head = PacedJobPlan.removingStaleCommands(from: Data(head), characters: plan.characters, calibration: true).data
+        if let clock {
+            let format = ZPL.startFormat().rendered(with: plan.characters)
+                + ZPL.setRealTimeClock(clock, timeZone: timeZone).rendered(with: plan.characters)
+                + ZPL.endFormat().rendered(with: plan.characters) + "\n"
+            head += Data(format.utf8)
+        }
         return segments.reduce(Data(head)) { $0 + $1.data }
     }
 
@@ -187,24 +222,55 @@ public enum PrintJournal {
 
     /// Alle Aufträge unter `root` (alle Warteschlangen), neueste zuerst. Unlesbare Einträge werden
     /// übergangen.
+    /// Im System-Journal (``PrintJournalEntry/Source/system``, für alle Benutzer lesbar) zählen nur
+    /// Ordner, die keine symbolischen Links sind und einem vertrauenswürdigen Benutzer gehören
+    /// (``isTrustedSystemItem(_:)``), und nur Einträge, deren `queue` zum Ordner passt – so kann kein
+    /// anderer Benutzer einen Auftrag unter fremdem Warteschlangennamen unterschieben.
     public static func entries(in root: URL, source: PrintJournalEntry.Source, queue: String? = nil) -> [PrintJournalEntry] {
         let fm = FileManager.default
         let queueDirs: [URL]
         if let queue {
-            queueDirs = [root.appendingPathComponent(directoryComponent(forQueue: queue), isDirectory: true)]
+            let component = source == .system ? systemDirectoryComponent(forQueue: queue) : directoryComponent(forQueue: queue)
+            queueDirs = [root.appendingPathComponent(component, isDirectory: true)]
         } else {
             queueDirs = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey],
                                                      options: [.skipsHiddenFiles])) ?? []
         }
         var result: [PrintJournalEntry] = []
         for queueDir in queueDirs {
+            if source == .system, !isTrustedSystemItem(queueDir) { continue }
             let jobs = (try? fm.contentsOfDirectory(at: queueDir, includingPropertiesForKeys: [.isDirectoryKey],
                                                     options: [.skipsHiddenFiles])) ?? []
             for job in jobs {
-                if let entry = entry(at: job, source: source) { result.append(entry) }
+                if source == .system, !isTrustedSystemItem(job) { continue }
+                guard let entry = entry(at: job, source: source) else { continue }
+                if source == .system, systemDirectoryComponent(forQueue: entry.queue) != queueDir.lastPathComponent {
+                    continue
+                }
+                result.append(entry)
             }
         }
         return sorted(result)
+    }
+
+    /// Benutzer, deren Ordner im System-Journal zählen: root, `_lp` (unter ihm schreibt das
+    /// CUPS-Backend) und der eigene Benutzer (Tests, `LW_JOURNAL_DIR`).
+    static let trustedSystemOwners: Set<Int> = {
+        var owners: Set<Int> = [0, Int(geteuid())]
+        if let entry = getpwnam("_lp") {
+            owners.insert(Int(entry.pointee.pw_uid))
+        } else {
+            owners.insert(26)   // _lp unter macOS
+        }
+        return owners
+    }()
+
+    /// Kein symbolischer Link, ein Ordner, und sein Besitzer ist vertrauenswürdig (``trustedSystemOwners``).
+    static func isTrustedSystemItem(_ url: URL) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              (attributes[.type] as? FileAttributeType) == .typeDirectory,
+              let owner = (attributes[.ownerAccountID] as? NSNumber)?.intValue else { return false }
+        return trustedSystemOwners.contains(owner)
     }
 
     /// Aufträge mehrerer Journale (z. B. System und App), neueste zuerst.
@@ -220,7 +286,8 @@ public enum PrintJournal {
                                  title: meta.title, user: meta.user, date: meta.date, printerURI: meta.printerURI,
                                  printerID: meta.printerID.flatMap(UUID.init(uuidString:)),
                                  formats: meta.labels, prologueLength: meta.prologueLength,
-                                 printed: meta.printed, reprinted: meta.reprinted, status: meta.status)
+                                 printed: meta.printed, copies: max(1, meta.copies), reprinted: meta.reprinted,
+                                 status: meta.status)
     }
 
     private static func sorted(_ entries: [PrintJournalEntry]) -> [PrintJournalEntry] {
@@ -259,7 +326,8 @@ public enum PrintJournal {
         try fm.createDirectory(at: directory, withIntermediateDirectories: false)
         let meta = Meta(version: 1, queue: queue, jobId: jobID, title: title, user: user, date: date,
                         printerURI: printerURI, labels: formats, prologueLength: plan.prologue.count,
-                        printed: printed, reprinted: reprinted, status: status, printerID: printerID?.uuidString)
+                        printed: printed, reprinted: reprinted, copies: 1, status: status,
+                        printerID: printerID?.uuidString)
         do {
             try job.write(to: directory.appendingPathComponent(jobFileName), options: .atomic)
             let encoder = JSONEncoder()
@@ -305,8 +373,21 @@ public enum PrintJournal {
         return stamp + "-" + directoryComponent(forQueue: jobID)
     }
 
-    /// Dateisystemtauglicher Name einer Warteschlange bzw. Auftragsnummer (Buchstaben, Ziffern, `-_.`;
-    /// alles andere wird `_`).
+    /// Ordnername einer Warteschlange im System-Journal – genau wie `lwb_journal_safe_name` im
+    /// CUPS-Backend: je Byte werden Steuerzeichen (< 0x20, 0x7F), `/`, `\\` und ein Punkt am Anfang zu
+    /// `_`; Leerzeichen und UTF-8 bleiben; höchstens 255 Bytes; leer → „unbekannt“.
+    public static func systemDirectoryComponent(forQueue queue: String) -> String {
+        var bytes: [UInt8] = []
+        for byte in queue.utf8.prefix(255) {
+            let bad = byte < 0x20 || byte == 0x7F || byte == UInt8(ascii: "/") || byte == UInt8(ascii: "\\")
+                || (bytes.isEmpty && byte == UInt8(ascii: "."))
+            bytes.append(bad ? UInt8(ascii: "_") : byte)
+        }
+        return bytes.isEmpty ? "unbekannt" : String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// Dateisystemtauglicher Name einer Warteschlange bzw. Auftragsnummer im Journal der App
+    /// (Buchstaben, Ziffern, `-_.`; alles andere wird `_`).
     public static func directoryComponent(forQueue queue: String) -> String {
         let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
         var name = String(queue.map { allowed.contains($0) ? $0 : "_" })
@@ -334,11 +415,12 @@ public enum PrintJournal {
         var prologueLength: Int
         var printed: Int
         var reprinted: Int
+        var copies: Int
         var status: PrintJournalEntry.Status
         var printerID: String?
 
         init(version: Int, queue: String, jobId: String, title: String, user: String, date: Date, printerURI: String,
-             labels: [PrintJournalEntry.Format], prologueLength: Int, printed: Int, reprinted: Int,
+             labels: [PrintJournalEntry.Format], prologueLength: Int, printed: Int, reprinted: Int, copies: Int,
              status: PrintJournalEntry.Status, printerID: String?) {
             self.version = version
             self.queue = queue
@@ -351,12 +433,13 @@ public enum PrintJournal {
             self.prologueLength = prologueLength
             self.printed = printed
             self.reprinted = reprinted
+            self.copies = copies
             self.status = status
             self.printerID = printerID
         }
 
         private enum CodingKeys: String, CodingKey {
-            case version, queue, jobId, title, user, date, printerURI, labels, prologueLength, printed, reprinted, status, printerID
+            case version, queue, jobId, title, user, date, printerURI, labels, prologueLength, printed, reprinted, copies, status, printerID
         }
 
         init(from decoder: Decoder) throws {
@@ -380,6 +463,7 @@ public enum PrintJournal {
             prologueLength = (try? c.decodeIfPresent(Int.self, forKey: .prologueLength)) ?? 0
             printed = (try? c.decodeIfPresent(Int.self, forKey: .printed)) ?? 0
             reprinted = (try? c.decodeIfPresent(Int.self, forKey: .reprinted)) ?? 0
+            copies = max(1, (try? c.decodeIfPresent(Int.self, forKey: .copies)) ?? 1)
             status = (try? c.decodeIfPresent(PrintJournalEntry.Status.self, forKey: .status)) ?? .completed
             printerID = (try? c.decodeIfPresent(String.self, forKey: .printerID)) ?? nil
         }
@@ -397,6 +481,7 @@ public enum PrintJournal {
             try c.encode(prologueLength, forKey: .prologueLength)
             try c.encode(printed, forKey: .printed)
             try c.encode(reprinted, forKey: .reprinted)
+            try c.encode(copies, forKey: .copies)
             try c.encode(status, forKey: .status)
             try c.encodeIfPresent(printerID, forKey: .printerID)
         }

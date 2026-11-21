@@ -111,8 +111,9 @@ public struct PrintSettings: Codable, Hashable, Sendable {
     /// Klebestelle) druckt der Treiber die zuletzt vor dem Fehler fertigen `n` Etiketten zusätzlich
     /// erneut, bevor der Auftrag weitergeht – am Rollenende sind sie oft unbrauchbar. Das unterbrochene
     /// Etikett gehört nicht dazu (das druckt der Drucker wegen `^JZY` selbst erneut). Wirkt nur mit
-    /// ``resumeAfterError``; für die Warteschlange als `reprint=N` in der Geräte-URI `labelwerk://`
-    /// (ARCHITECTURE.md §7b).
+    /// ``resumeAfterError``; für die Warteschlange als Warteschlangen-Standard
+    /// `lwReprintAfterError-default=N` (bei 1 nicht gesetzt, ``QueueDeviceURI/reprintOption``), den cupsd
+    /// jedem Auftrag mitgibt (ARCHITECTURE.md §7b, §10).
     public var reprintAfterError: Int
 
     public init(

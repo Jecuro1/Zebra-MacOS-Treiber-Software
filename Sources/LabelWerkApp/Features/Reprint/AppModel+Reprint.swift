@@ -16,10 +16,12 @@ extension AppModel {
     }
 
     /// „Letztes Etikett nochmal“: druckt das letzte gedruckte Etikett des neuesten Auftrags im
-    /// Druckjournal erneut – für `printer` bzw. ohne Angabe für den gewählten Drucker; ist keiner gewählt,
-    /// den Drucker des neuesten Auftrags überhaupt.
-    func reprintLastLabel(on printer: PrinterSession? = nil) {
-        Task { await performReprintLastLabel(on: printer ?? selectedSession) }
+    /// Druckjournal erneut – für `printer` bzw. ohne Angabe (mit `useSelection`) für den im Hauptfenster
+    /// gewählten Drucker; ist keiner gewählt oder `useSelection == false` (Menüleiste, deren Menü den
+    /// gewählten Drucker nicht zeigt), auf dem Drucker des neuesten Auftrags überhaupt.
+    func reprintLastLabel(on printer: PrinterSession? = nil, useSelection: Bool = true) {
+        let scope = printer ?? (useSelection ? selectedSession : nil)
+        Task { await performReprintLastLabel(on: scope) }
     }
 
     private func performReprintLastLabel(on printer: PrinterSession?) async {
@@ -41,16 +43,15 @@ extension AppModel {
                   style: .warning)
             return
         }
-        guard let job = await PrintJournalStore.shared.job(for: match.entry), job.totalLabels > 0 else {
+        guard let job = await PrintJournalStore.shared.job(for: match.entry), let last = job.lastPrintedLabel else {
             toast(tr("Nachdrucken nicht möglich"), message: tr("Die Druckdaten dieses Auftrags fehlen."), style: .warning)
             return
         }
         // Letztes tatsächlich gedrucktes Etikett (bei einem abgebrochenen Auftrag nicht das letzte des
-        // Auftrags).
-        let printed = match.entry.printed > 0 ? match.entry.printed : job.totalLabels
-        let last = min(job.totalLabels, max(1, printed))
+        // Auftrags; bei mehreren Kopien in der letzten begonnenen Kopie).
         toast(tr("Letztes Etikett nochmal"),
-              message: tr("„%@“, Etikett %d – auf „%@“", match.entry.displayTitle, last, match.session.displayName),
+              message: tr("Etikett %d aus „%@“ wird auf „%@“ gedruckt.", last, match.entry.displayTitle,
+                          match.session.displayName),
               style: .info)
         await match.session.reprintFromJournal(job, labels: [last])
     }

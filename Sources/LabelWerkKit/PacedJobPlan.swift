@@ -46,6 +46,21 @@ public struct PacedJobPlan: Sendable, Hashable {
             let newRange = range.lowerBound..<(range.lowerBound + String(quantity).utf8.count)
             return Segment(data: Data(bytes), quantity: quantity, quantityRange: newRange)
         }
+
+        /// Für einen Nachdruck: ohne die nicht druckenden Formate, die die Echtzeituhr stellen
+        /// (`^XA^ST…^XZ`, von `JobEncoder` vor Etiketten geschrieben) – sonst stellte jeder Nachdruck die
+        /// Uhr auf die Zeit des ursprünglichen Drucks zurück. Downloads und andere Formate davor bleiben
+        /// (ein `^XF`-Format braucht sein `^DF`, `^XG` seine Grafik).
+        public func withoutClockFormats(characters: ControlCharacters) -> Segment {
+            let (stripped, removed) = PacedJobPlan.removingStaleCommands(from: data, characters: characters,
+                                                                         calibration: false)
+            guard !removed.isEmpty else { return self }
+            let range = quantityRange.map { range -> Range<Int> in
+                let shift = removed.filter { $0.upperBound <= range.lowerBound }.reduce(0) { $0 + $1.count }
+                return (range.lowerBound - shift)..<(range.upperBound - shift)
+            }
+            return Segment(data: stripped, quantity: quantity, quantityRange: range)
+        }
     }
 
     public var prologue: Data
@@ -89,14 +104,15 @@ public struct PacedJobPlan: Sendable, Hashable {
     /// Formate zum Nachdrucken der Etiketten `numbers` (1-basiert; doppelte und ungültige werden
     /// verworfen) in Auftragsreihenfolge: je Etikett sein Format mit Menge 1; aufeinanderfolgende
     /// Etiketten desselben `^PQ`-Formats werden zu einem Format mit der passenden Menge zusammengefasst.
-    /// Serialisierte Felder (`^SN`/`^SF`) beginnen dabei wieder mit dem Startwert des Formats.
+    /// Serialisierte Felder (`^SN`/`^SF`) beginnen dabei wieder mit dem Startwert des Formats. Formate,
+    /// die nur die Uhr stellen (`^ST`), entfallen (``Segment/withoutClockFormats(characters:)``).
     public func reprintSegments(forLabels numbers: [Int]) -> [Segment] {
         let sorted = Set(numbers).sorted()
         var result: [Segment] = []
         var current: (segment: Int, count: Int, lastCopy: Int)?
         func flush() {
             guard let group = current else { return }
-            result.append(segments[group.segment].withQuantity(group.count))
+            result.append(segments[group.segment].withQuantity(group.count).withoutClockFormats(characters: characters))
             current = nil
         }
         for number in sorted {
@@ -117,6 +133,64 @@ public struct PacedJobPlan: Sendable, Hashable {
     public func labelData(_ number: Int) -> Data? {
         guard let place = location(ofLabel: number) else { return nil }
         return prologue + segments[place.segment].withQuantity(1).data
+    }
+
+    /// Entfernt aus `data` nicht druckende Formate mit `^ST` (Uhr stellen) und – mit `calibration` –
+    /// die Steuerbefehle `~JC` (Kalibrieren) und `~JR` (Neustart) außerhalb von Formaten, jeweils samt
+    /// folgendem Zeilenende. Liefert die neuen Daten und die entfernten Byte-Bereiche (in `data`).
+    public static func removingStaleCommands(from data: Data, characters: ControlCharacters,
+                                             calibration: Bool) -> (data: Data, removed: [Range<Int>]) {
+        let chars = characters.clamped()
+        let bytes = [UInt8](data)
+        let fp = chars.formatPrefix
+        let cp = chars.controlPrefix
+        func lineEnd(_ start: Int) -> Int {
+            var end = start
+            if end < bytes.count, bytes[end] == 0x0D { end += 1 }
+            if end < bytes.count, bytes[end] == 0x0A { end += 1 }
+            return end
+        }
+        var removed: [Range<Int>] = []
+        var index = 0
+        scan: while index < bytes.count {
+            let byte = bytes[index]
+            if byte == cp {
+                if let end = binaryDownloadEnd(bytes, at: index, delimiter: chars.delimiter) {
+                    index = end
+                    continue
+                }
+                if calibration, matches(bytes, index + 1, "JC") || matches(bytes, index + 1, "JR") {
+                    let end = lineEnd(index + 3)
+                    removed.append(index..<end)
+                    index = end
+                    continue
+                }
+                index += 1
+                continue
+            }
+            guard byte == fp, matches(bytes, index + 1, "XA") else {
+                index += 1
+                continue
+            }
+            guard let format = scanFormat(bytes, from: index, characters: chars) else { break scan }
+            if !format.prints && format.setsClock {
+                let end = lineEnd(format.end)
+                removed.append(index..<end)
+                index = end
+            } else {
+                index = format.end
+            }
+        }
+        guard !removed.isEmpty else { return (data, []) }
+        var result = [UInt8]()
+        result.reserveCapacity(bytes.count)
+        var cursor = 0
+        for range in removed {
+            result.append(contentsOf: bytes[cursor..<range.lowerBound])
+            cursor = range.upperBound
+        }
+        result.append(contentsOf: bytes[cursor...])
+        return (Data(result), removed)
     }
 
     // MARK: - Zerlegen
@@ -203,6 +277,8 @@ public struct PacedJobPlan: Sendable, Hashable {
         var prints: Bool
         var quantity: Int
         var quantityRange: Range<Int>?
+        /// Enthält `^ST` (Echtzeituhr stellen).
+        var setsClock = false
     }
 
     /// Befehle, die ein Etikett drucken lassen.
@@ -216,6 +292,7 @@ public struct PacedJobPlan: Sendable, Hashable {
         var storesFormat = false
         var quantity = 1
         var quantityRange: Range<Int>?
+        var setsClock = false
         var inFieldData = false
         while index < bytes.count {
             guard bytes[index] == fp, index + 2 < bytes.count else {
@@ -225,7 +302,7 @@ public struct PacedJobPlan: Sendable, Hashable {
             let name = String(decoding: [upper(bytes[index + 1]), upper(bytes[index + 2])], as: UTF8.self)
             if name == "XZ" {
                 return ScannedFormat(end: index + 3, prints: prints && !storesFormat, quantity: quantity,
-                                     quantityRange: quantityRange)
+                                     quantityRange: quantityRange, setsClock: setsClock)
             }
             if inFieldData && name != "FS" {
                 // Innerhalb von ^FD … ^FS beendet nur ^FS (bzw. ^XZ) das Feld – andere Präfixe sind
@@ -238,6 +315,8 @@ public struct PacedJobPlan: Sendable, Hashable {
             switch name {
             case "DF":
                 storesFormat = true
+            case "ST":
+                setsClock = true
             case "FD", "FV":
                 inFieldData = true
             case "PQ":

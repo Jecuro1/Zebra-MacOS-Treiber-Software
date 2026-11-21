@@ -7,7 +7,8 @@
 # /usr/libexec/cups/backend/labelwerk), die App, den
 # lwctl-Link, den PDF-Dienst „Mit LabelWerk drucken“ und die Paketbelege. Druckerwarteschlangen,
 # die LabelWerk-PPDs verwenden, werden nur mit --remove-queues entfernt (sonst wird gewarnt, dass
-# sie danach nicht mehr drucken).
+# sie danach nicht mehr drucken). Das Druckjournal der Warteschlangen (/Users/Shared/LabelWerk/Journal,
+# vom Backend geschrieben, enthält die gedruckten Etikettendaten) bleibt ohne --purge-user-data stehen.
 #
 # Eigenständig lauffähig (keine weiteren Projektdateien nötig) und kompatibel mit der Bash 3.2
 # von macOS. Wird vom Treiberpaket als /Library/Printers/LabelWerk/uninstall.sh installiert:
@@ -31,6 +32,9 @@ UPDATE_KEYCHAIN_SERVICE="com.labelwerk.app.update"
 # eine Datei mit der Kennzeile der App.
 PDF_SERVICE_NAME="Mit LabelWerk drucken"
 PDF_SERVICE_MARKER="# LabelWerk-PDF-Dienst"
+
+# Druckjournal des Backends (ARCHITECTURE.md §7b „Druckjournal“), vom postinstall angelegt.
+SHARED_JOURNAL_DISPLAY="/Users/Shared/LabelWerk/Journal"
 
 ORIGINAL_ARGS="$*"
 REMOVE_QUEUES=0
@@ -73,7 +77,8 @@ Optionen:
   --purge-user-data   zusätzlich Einstellungen und Daten des aufrufenden Benutzers löschen
                       (~/Library/Application Support/${APP_NAME}, Einstellungen, Caches,
                       Update-Protokoll ~/Library/Logs/${APP_NAME} und die Zugriffstoken für
-                      Updates im Schlüsselbund)
+                      Updates im Schlüsselbund) sowie das Druckjournal der Warteschlangen
+                      ${SHARED_JOURNAL_DISPLAY} (gedruckte Etiketten aller Benutzer)
   -y, --yes           ohne Rückfrage ausführen
   -n, --dry-run       nur anzeigen, was entfernt würde
   --no-restart        CUPS danach nicht neu starten
@@ -246,6 +251,23 @@ if [[ "${PURGE_USER_DATA}" == "1" ]]; then
     done
 fi
 
+# Druckjournal der Warteschlangen (nur mit --purge-user-data): /Users/Shared ist für alle beschreibbar,
+# deshalb nur, wenn /Users/Shared/LabelWerk ein echter Ordner von root ist (kein Link, den ein
+# Benutzer angelegt haben könnte – rm -rf liefe sonst als root an einem fremden Ziel). Der leere
+# Ordner LabelWerk darüber wird danach mit rmdir entfernt.
+SHARED_BASE="${ROOT}/Users/Shared/LabelWerk"
+SHARED_JOURNAL="${SHARED_BASE}/Journal"
+REMOVE_SHARED_BASE=0
+if [[ "${PURGE_USER_DATA}" == "1" ]] && [[ -e "${SHARED_JOURNAL}" || -L "${SHARED_JOURNAL}" ]]; then
+    if [[ -d "${SHARED_BASE}" && ! -L "${SHARED_BASE}" ]] \
+        && [[ -n "$(find "${SHARED_BASE}" -maxdepth 0 -user 0 2>/dev/null)" || -n "${ROOT}" ]]; then
+        USER_TARGETS+=("${SHARED_JOURNAL}")
+        REMOVE_SHARED_BASE=1
+    else
+        warn "${SHARED_BASE} ist kein Ordner von root – das Druckjournal darin bleibt unverändert."
+    fi
+fi
+
 # Führt einen Befehl als TARGET_USER in seiner Anmeldesitzung aus (Schlüsselbund) – wie das
 # postinstall: „launchctl asuser“ wechselt in die Sitzung, „sudo -H -u“ zur Kennung. Ohne
 # Administratorrechte nur für den eigenen Benutzer. Rückgabewert 1, wenn das nicht geht.
@@ -375,6 +397,14 @@ if [[ ${#USER_TARGETS[@]} -gt 0 ]]; then
     for target in "${USER_TARGETS[@]}"; do
         run rm -rf "${target}"
     done
+    if [[ "${REMOVE_SHARED_BASE}" == "1" ]]; then
+        # Nur, wenn er danach leer ist.
+        if [[ "${DRY_RUN}" == "1" ]]; then
+            run rmdir "${SHARED_BASE}"
+        else
+            rmdir "${SHARED_BASE}" 2>/dev/null || true
+        fi
+    fi
 fi
 if [[ ${#TARGETS[@]} -gt 0 || ${#USER_TARGETS[@]} -gt 0 ]] && [[ "${DRY_RUN}" != "1" ]]; then
     ok "$(( ${#TARGETS[@]} + ${#USER_TARGETS[@]} )) Einträge entfernt"

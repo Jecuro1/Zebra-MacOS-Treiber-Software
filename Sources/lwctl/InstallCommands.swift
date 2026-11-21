@@ -42,6 +42,11 @@ enum InstallCommands {
         /// „Bei Papier- oder Farbbandende anhalten und fortsetzen“ (`--resume`/`--no-resume`; ohne Angabe
         /// an, bei einer vorhandenen Warteschlange wie bisher). Wirkt nur mit installiertem Backend.
         var resumeAfterError: Bool
+        /// „Danach zusätzlich nachdrucken“ (`--reprint N`, 0…99): Nach Papier- oder Farbbandende druckt
+        /// das Backend die letzten N fertigen Etiketten erneut (Warteschlangen-Standard
+        /// `lwReprintAfterError-default`, bei 1 nicht gesetzt). Ohne Angabe 1 bzw. der Wert einer
+        /// vorhandenen Warteschlange. Wirkt nur mit `resumeAfterError` und installiertem Backend.
+        var reprintAfterError: Int
         var queue: String
         var description: String
         var location: String?
@@ -201,6 +206,7 @@ enum InstallCommands {
             throw CLIError.usage("--resume und --no-resume schließen sich aus.")
         }
         let resumeFlag: Bool? = arguments.has("no-resume") ? false : (arguments.has("resume") ? true : nil)
+        let reprintFlag = try arguments.int("reprint", in: 0...PrintSettings.maxReprintAfterError)
 
         // 3. Modell, Auflösung und Sprache vom Drucker erkennen (--model auto).
         var identity: PrinterIdentity?
@@ -394,6 +400,14 @@ enum InstallCommands {
                  + "ohne Fortsetzen nach Papier- oder Farbbandende.")
         }
         deviceURI = QueueDeviceURI.networkURI(host: host, port: port, resume: resumeAfterError && backendInstalled)
+        // Nachdruck nach Papier- oder Farbbandende (lwReprintAfterError-default): Ohne --reprint bleibt der
+        // Wert einer vorhandenen Warteschlange (Warteschlangen-Standards übersteht „lpadmin -P“).
+        let reprintOption = existing?.options[QueueDeviceURI.reprintOption]
+        let reprintAfterError = reprintFlag ?? QueueDeviceURI.reprintCount(optionValue: reprintOption)
+        if let reprintFlag, reprintFlag > 0, !(resumeAfterError && backendInstalled) {
+            warn("--reprint wirkt nur mit labelwerk:// (Fortsetzen nach Papier- oder Farbbandende) – "
+                 + "die Zahl wird gespeichert, gilt aber erst mit --resume und installiertem Backend.")
+        }
 
         // 7. Befehle.
         let lpadmin = ToolRunner.locate("lpadmin", fallbacks: lpadminFallbacks)
@@ -421,6 +435,11 @@ enum InstallCommands {
         } else if existing != nil, resumeOption != nil {
             queueArguments += ["-R", "\(QueueDeviceURI.resumeOption)-default"]
         }
+        if let reprintFlag {
+            // -R wirkt nur auf vorhandene Warteschlangen (bei neuen ist nichts gesetzt).
+            queueArguments += QueueDeviceURI.reprintArguments(currentOption: existing != nil ? reprintOption : nil,
+                                                              reprintAfterError: reprintFlag)
+        }
         var commands: [[String]] = [[lpadmin] + queueArguments]
         if setDefault { commands.append([lpadmin, "-d", queue]) }
         var temporaryTestPage: String?
@@ -438,7 +457,7 @@ enum InstallCommands {
 
         var plan = InstallPlan(
             printer: descriptor.uriString, deviceURI: deviceURI, resumeAfterError: resumeAfterError,
-            queue: queue, description: description,
+            reprintAfterError: reprintAfterError, queue: queue, description: description,
             location: (location?.isEmpty ?? true) ? nil : location, existing: existing != nil, reused: reused,
             keptSettings: keptSettings, detected: autoDetect,
             detectedProduct: identity?.model, serialNumber: identity?.serialNumber,
@@ -478,6 +497,10 @@ enum InstallCommands {
                               + (patchedPPD != nil ? ", als benannte Seitengröße ergänzt" : "") + origin + ")")
             }
             Console.field("Geräte-URI", deviceURI)
+            if resumeAfterError, backendInstalled {
+                Console.field("Nachdruck", reprintAfterError == 0 ? "keiner nach Papier- oder Farbbandende"
+                              : "\(reprintAfterError) Etikett(en) nach Papier- oder Farbbandende")
+            }
             Console.field("Beibehalten", keptSettings.isEmpty ? nil
                           : "\(keptSettings.count) Einstellungen der bisherigen Warteschlange (-o im Befehl unten)")
             Console.out()

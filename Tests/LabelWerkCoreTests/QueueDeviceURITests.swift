@@ -69,6 +69,60 @@ struct QueueDeviceURITests {
                 == ["-v", "usb://Zebra/ZD421"])
     }
 
+    @Test func reprintQueueDefault() {
+        func args(_ option: String?, _ count: Int) -> [String] {
+            QueueDeviceURI.reprintArguments(currentOption: option, reprintAfterError: count)
+        }
+        // Standard 1: nichts setzen, einen früheren Wert entfernen.
+        #expect(args(nil, 1) == [])
+        #expect(args("3", 1) == ["-R", "lwReprintAfterError-default"])
+        #expect(args("1", 1) == ["-R", "lwReprintAfterError-default"])
+        // Andere Werte: setzen, wenn sie nicht schon genau so gesetzt sind.
+        #expect(args(nil, 0) == ["-o", "lwReprintAfterError-default=0"])
+        #expect(args(nil, 3) == ["-o", "lwReprintAfterError-default=3"])
+        #expect(args("3", 3) == [])
+        #expect(args(" 3 ", 3) == [])
+        #expect(args("2", 3) == ["-o", "lwReprintAfterError-default=3"])
+        #expect(args("0", 0) == [])
+        // Begrenzt auf 0…99.
+        #expect(args(nil, 250) == ["-o", "lwReprintAfterError-default=99"])
+        #expect(args(nil, -4) == ["-o", "lwReprintAfterError-default=0"])
+        #expect(args("99", 120) == [])
+
+        // Zusammen mit Geräte-URI und lwResumeOnError (Reihenfolge: -v, Fortsetzen, Nachdruck).
+        #expect(QueueDeviceURI.arguments(currentURI: "socket://10.0.0.5:9100", currentOption: nil, resumeAfterError: true,
+                                         backendInstalled: true, currentReprintOption: nil, reprintAfterError: 2)
+                == ["-v", "labelwerk://10.0.0.5:9100", "-o", "lwReprintAfterError-default=2"])
+        #expect(QueueDeviceURI.arguments(currentURI: "labelwerk://10.0.0.5:9100", currentOption: nil, resumeAfterError: true,
+                                         backendInstalled: true, currentReprintOption: "2", reprintAfterError: 2) == [])
+        #expect(QueueDeviceURI.arguments(currentURI: "labelwerk://10.0.0.5:9100", currentOption: "False",
+                                         resumeAfterError: true, backendInstalled: true,
+                                         currentReprintOption: "0", reprintAfterError: 1)
+                == ["-R", "lwResumeOnError-default", "-R", "lwReprintAfterError-default"])
+        // Fortsetzen aus: die Zahl bleibt trotzdem in der Warteschlange (gilt beim Wiedereinschalten).
+        #expect(QueueDeviceURI.arguments(currentURI: "socket://10.0.0.5:9100", currentOption: "False",
+                                         resumeAfterError: false, backendInstalled: true,
+                                         currentReprintOption: nil, reprintAfterError: 3)
+                == ["-o", "lwReprintAfterError-default=3"])
+        // Ohne Angabe (ältere Aufrufer): Standard 1, nichts zu tun.
+        #expect(QueueDeviceURI.arguments(currentURI: "labelwerk://10.0.0.5:9100", currentOption: nil,
+                                         resumeAfterError: true, backendInstalled: true) == [])
+        #expect(QueueDeviceURI.reprintOption == "lwReprintAfterError")
+    }
+
+    /// Wie das Backend den Wert liest (`lwb_parse_reprint_count`): ungültig oder fehlend = 1.
+    @Test func reprintOptionValues() {
+        let cases: [(String?, Int)] = [
+            (nil, 1), ("", 1), ("  ", 1), ("viele", 1), ("-2", 1), ("2x", 1), ("+", 1),
+            ("0", 0), ("1", 1), (" 7 ", 7), ("+3", 3), ("007", 7), ("99", 99), ("100", 99), ("123456789012345", 99),
+            ("Custom.12", 12), ("custom.0", 0),
+            ("none", 0), ("Off", 0), ("FALSE", 0), ("no", 0), ("Keins", 0),
+        ]
+        for (value, expected) in cases {
+            #expect(QueueDeviceURI.reprintCount(optionValue: value) == expected, "\(String(describing: value))")
+        }
+    }
+
     @Test func resumeOptionValues() {
         for value in ["False", "false", "NO", "off", "0", " false "] {
             #expect(QueueDeviceURI.isResumeDisabled(optionValue: value), "\(value)")
